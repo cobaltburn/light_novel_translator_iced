@@ -1,53 +1,72 @@
-use crate::{state::translator::Translator, view::View};
+use crate::state::{
+    doc_model::DocAction, server_state::ServerAction, translation_model::TransAction,
+    translator::Translator,
+};
+use crate::view::View;
 use epub::doc::EpubDoc;
 use iced::Task;
 use std::io::Cursor;
+use std::path::PathBuf;
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum Message {
-    OpenFile,
-    SetFile(Option<(String, EpubDoc<Cursor<Vec<u8>>>)>),
-    IncPage,
-    DecPage,
+    DocAction(DocAction),
+    ServerAction(ServerAction),
+    TranslationAction(TransAction),
+    OpenEpub,
+    SetEpub((String, EpubDoc<Cursor<Vec<u8>>>)),
+    SaveTranslation,
+    OpenContext,
     SelectPage(usize),
     SetView(View),
-    SelectModel(String),
-    SetModels(Vec<String>),
-    Connect(Option<String>),
-    SetTranslationPage(usize),
-    UpdateTranslation(String, usize),
-    BeginTranslation,
     Translate(usize),
-    Abort,
+    ToggleSideBar,
     None,
 }
 
 impl Translator {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::OpenFile => Task::perform(open_file(), Message::SetFile),
-            Message::SetFile(doc) => self.set_file(doc),
-            Message::SelectPage(page) => self.select_page(page),
-            Message::IncPage => self.doc_model.inc_page(),
-            Message::DecPage => self.doc_model.dec_page(),
-            Message::SetView(view) => self.set_view(view),
-            Message::SelectModel(model) => self.server_state.set_current_model(model),
-            Message::SetModels(models) => self.server_state.set_models(models),
-            Message::Connect(url) => self.server_state.connect_server(url),
-            Message::SetTranslationPage(page) => self.translation_model.set_current_page(page),
-            Message::BeginTranslation => self.translation_model.begin_translation(),
-            Message::Translate(page) => self.execute_translation(page),
-            Message::UpdateTranslation(text, page) => {
-                self.translation_model.update_content(text, page)
+            Message::DocAction(action) => self.doc_model.perform(action),
+            Message::ServerAction(action) => self.server_state.perform(action),
+            Message::TranslationAction(action) => self.translation_model.perform(action),
+            Message::OpenEpub => {
+                Task::future(open_epub()).and_then(|doc| Task::done(Message::SetEpub(doc)))
             }
-            Message::Abort => self.translation_model.abort_tranlation(),
+            Message::SaveTranslation => Task::future(pick_save_folder())
+                .and_then(|path| Task::done(TransAction::SavePages(path).into())),
+            Message::OpenContext => Task::future(open_context())
+                .and_then(|context| Task::done(TransAction::SetContext(context).into())),
+            Message::SetEpub(doc) => self.set_file(doc),
+            Message::SelectPage(page) => self.select_page(page),
+            Message::SetView(view) => self.set_view(view),
+            Message::Translate(page) => self.execute_translation(page),
+            Message::ToggleSideBar => self.toggle_side_bar_collapse(),
             Message::None => Task::none(),
         }
     }
 }
 
-async fn open_file() -> Option<(String, EpubDoc<Cursor<Vec<u8>>>)> {
+impl From<TransAction> for Message {
+    fn from(action: TransAction) -> Self {
+        Message::TranslationAction(action)
+    }
+}
+
+impl From<ServerAction> for Message {
+    fn from(action: ServerAction) -> Self {
+        Message::ServerAction(action)
+    }
+}
+
+impl From<DocAction> for Message {
+    fn from(action: DocAction) -> Self {
+        Message::DocAction(action)
+    }
+}
+
+async fn open_epub() -> Option<(String, EpubDoc<Cursor<Vec<u8>>>)> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("select epub")
         .add_filter("epub", &["epub"])
@@ -57,4 +76,23 @@ async fn open_file() -> Option<(String, EpubDoc<Cursor<Vec<u8>>>)> {
     let epub = EpubDoc::from_reader(Cursor::new(buf)).ok()?;
     let file_name = handle.file_name();
     Some((file_name, epub))
+}
+
+async fn pick_save_folder() -> Option<PathBuf> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("save translation")
+        .pick_folder()
+        .await?;
+    Some(handle.path().to_path_buf())
+}
+
+async fn open_context() -> Option<String> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("select context")
+        .add_filter("files", &["txt", "md", "xml"])
+        .pick_file()
+        .await?;
+    let buf = handle.read().await;
+    let context = String::from_utf8(buf).ok()?;
+    Some(context)
 }

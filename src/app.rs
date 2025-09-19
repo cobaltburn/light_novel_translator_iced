@@ -1,6 +1,11 @@
+use crate::components::side_bar::side_bar_container;
 use crate::message::Message;
 use crate::state::translator::Translator;
 use crate::view::View;
+use crate::view::context_view::context_view;
+use crate::view::doc_view::doc_view;
+use crate::view::format_view::format_view;
+use crate::view::translation_view::traslation_view;
 use iced::alignment::{Horizontal, Vertical};
 use iced::widget::{Space, column, container, row};
 use iced::{Element, Font, Length, Theme};
@@ -19,12 +24,13 @@ pub fn app() -> iced::Result {
 impl Translator {
     pub fn view(&'_ self) -> Element<'_, Message> {
         container(row![
-            Self::side_bar(&self),
+            side_bar_container(self),
             column![
                 Space::with_height(Length::Fixed(10.0)),
                 Self::view_select(&self)
             ]
             .padding(10)
+            .width(Length::Fill)
             .align_x(Horizontal::Center),
         ])
         .width(Length::Fill)
@@ -36,8 +42,10 @@ impl Translator {
 
     pub fn view_select(&'_ self) -> Element<'_, Message> {
         match self.view {
-            View::Doc => Self::doc_screen(&self),
-            View::Translation => Self::traslation_screen(&self),
+            View::Doc => doc_view(self),
+            View::Translation => traslation_view(self),
+            View::Context => context_view(self),
+            View::Format => format_view(self),
         }
         .width(Length::Fill)
         .height(Length::Fill)

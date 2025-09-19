@@ -21,7 +21,9 @@ pub fn partition_text(text: &str) -> Vec<String> {
             msg = String::new();
         }
     }
-    messages.push(msg);
+    if !msg.is_empty() {
+        messages.push(msg);
+    }
 
     messages
 }

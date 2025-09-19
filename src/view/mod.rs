@@ -1,46 +1,43 @@
 use crate::{message::Message, state::translator::Translator};
 use iced::{
-    Border, Color, Element, Font, Length, Padding,
+    Border, Color, Font, Length, Padding,
     alignment::{Horizontal, Vertical},
-    widget::{button, container, scrollable, text},
+    widget::{Container, button, container, lazy, scrollable, text},
 };
 
-pub mod doc_screen;
-pub mod translation_screen;
+pub mod context_view;
+pub mod doc_view;
+pub mod format_view;
+pub mod translation_view;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum View {
     #[default]
     Doc,
     Translation,
+    Context,
+    Format,
 }
 
 pub const NOTO_SANS: Font = Font::with_name("Noto Sans CJK JP");
 
-impl Translator {
-    pub fn file_select_button(&'_ self) -> Element<'_, Message> {
-        container(
-            button(text("select").center())
-                .on_press(Message::OpenFile)
-                .padding(5),
-        )
-        .align_x(Horizontal::Center)
-        .padding(Padding::new(0.0).bottom(10))
-        .into()
-    }
+pub fn epub_select_button(_: &Translator) -> Container<'_, Message> {
+    container(button(text("epub").center()).on_press(Message::OpenEpub)).align_x(Horizontal::Center)
+}
 
-    pub fn text_scrollable(content: &'_ str) -> Element<'_, Message> {
-        container(
-            scrollable(
-                text(content)
-                    .width(Length::Fill)
-                    .align_x(Horizontal::Left)
-                    .align_y(Vertical::Center)
-                    .font(NOTO_SANS),
-            )
-            .anchor_top()
-            .width(Length::Fill),
+pub fn text_scrollable(content: &'_ str) -> Container<'_, Message> {
+    let scroll = lazy(content, |content| {
+        scrollable(
+            text(String::from(*content))
+                .width(Length::Fill)
+                .align_x(Horizontal::Left)
+                .align_y(Vertical::Center)
+                .font(NOTO_SANS),
         )
+        .anchor_top()
+        .width(Length::Fill)
+    });
+    container(scroll)
         .style(|_| container::Style {
             border: Border {
                 color: Color::WHITE,
@@ -52,6 +49,4 @@ impl Translator {
         .height(Length::FillPortion(10))
         .width(Length::Fill)
         .padding(Padding::new(10.0).right(5))
-        .into()
-    }
 }

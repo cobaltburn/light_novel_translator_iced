@@ -7,10 +7,12 @@ edition = "2024"
 epub = "2.1.4"
 htmd = "0.2.2"
 iced = { version = "0.13.1", features = ["advanced", "debug", "lazy", "markdown", "svg", "tokio"] }
+iced_aw = "0.12.2"
 log = { version = "0.4.27" }
 ollama-rs = { version = "0.3.1", features = ["stream", "tokio", "tokio-stream"] }
 pulldown-cmark = "0.13.0"
 quick-xml = { version = "0.37.5", features = ["tokio"] }
+regex = "1.11.2"
 rfd = { version = "0.15.3", default-features = false, features = ["gtk3", "tokio"] }
 thiserror = "2.0.12"
 tokio = { version = "1.45.1", features = ["fs", "rt-multi-thread", "tokio-macros"] }
