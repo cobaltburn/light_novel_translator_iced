@@ -6,7 +6,7 @@ use crate::view::context_view::context_view;
 use crate::view::doc_view::doc_view;
 use crate::view::format_view::format_view;
 use crate::view::translation_view::traslation_view;
-use iced::alignment::{Horizontal, Vertical};
+use iced::alignment::Horizontal;
 use iced::widget::{Space, column, container, row};
 use iced::{Element, Font, Length, Theme};
 
@@ -33,10 +33,6 @@ impl Translator {
             .width(Length::Fill)
             .align_x(Horizontal::Center),
         ])
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .align_x(Horizontal::Center)
-        .align_y(Vertical::Center)
         .into()
     }
 

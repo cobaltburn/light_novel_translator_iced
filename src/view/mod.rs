@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::{message::Message, state::translator::Translator};
 use iced::{
     Border, Color, Font, Length, Padding,
@@ -17,6 +19,18 @@ pub enum View {
     Translation,
     Context,
     Format,
+}
+
+impl fmt::Display for View {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let view = match self {
+            View::Doc => "Document",
+            View::Translation => "Translation",
+            View::Context => "Context",
+            View::Format => "Format",
+        };
+        write!(f, "{}", view)
+    }
 }
 
 pub const NOTO_SANS: Font = Font::with_name("Noto Sans CJK JP");

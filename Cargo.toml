@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anthropic-ai-sdk = "0.2.26"
 epub = "2.1.4"
 htmd = "0.2.2"
 iced = { version = "0.13.1", features = ["advanced", "debug", "lazy", "markdown", "svg", "tokio"] }

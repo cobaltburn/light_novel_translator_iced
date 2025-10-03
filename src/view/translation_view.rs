@@ -59,32 +59,39 @@ pub fn model_pick_list(state: &'_ Translator) -> Element<'_, Message> {
 }
 
 pub fn translate_button(state: &Translator) -> Button<'_, Message> {
-    let (button_text, msg) = if state.translation_model.handles.is_empty() {
+    let (button_text, msg) = if state.server_state.handles.is_empty() {
         let page = state.translation_model.current_page;
         let connected = state.server_state.connected();
         let message = connected.then_some(page.map(|page| Message::Translate(page)));
         ("translate", message.flatten())
     } else {
-        ("cancel", Some(TransAction::Abort.into()))
+        ("cancel", Some(ServerAction::Abort.into()))
     };
 
     button(text(button_text).center()).on_press_maybe(msg)
 }
 
 pub fn translation_side_bar(state: &Translator) -> Container<'_, Message> {
-    container(scrollable(column(path_buttons(state)).width(250).spacing(10)).height(Length::Fill))
-        .height(Length::Fill)
-        .padding(Padding::new(10.0).left(0).right(5))
-        .style(|theme| {
-            transparent(theme).border(Border {
-                color: Color::WHITE,
-                width: 1.0,
-                radius: 8.into(),
-            })
+    container(
+        scrollable(
+            column(translation_path_buttons(state))
+                .width(250)
+                .spacing(10),
+        )
+        .height(Length::Fill),
+    )
+    .height(Length::Fill)
+    .padding(Padding::new(10.0).left(0).right(5))
+    .style(|theme| {
+        transparent(theme).border(Border {
+            color: Color::WHITE,
+            width: 1.0,
+            radius: 8.into(),
         })
+    })
 }
 
-pub fn path_buttons(state: &Translator) -> Vec<Element<'_, Message>> {
+pub fn translation_path_buttons(state: &Translator) -> Vec<Element<'_, Message>> {
     state
         .translation_model
         .pages
@@ -159,10 +166,9 @@ pub fn file_menu(state: &Translator) -> Item<'_, Message, Theme, Renderer> {
         Menu::new(vec![
             Item::new(epub_select(state)),
             Item::new(
-                button(text("save").center())
-                    .on_press(Message::SaveTranslation)
-                    .width(Length::Fill)
-                    .padding(5),
+                container(button(text("save").center()).on_press(Message::SaveTranslation))
+                    .padding(5)
+                    .align_left(Length::Fill),
             ),
         ])
         .spacing(10)
@@ -174,8 +180,16 @@ pub fn epub_select(state: &Translator) -> Row<'_, Message> {
     let path = state.doc_model.path.clone().unwrap_or_default();
     row![
         button(text("epub").center()).on_press(Message::OpenEpub),
-        container(text(path)).width(Length::Fill)
+        container(text(path))
+            .width(Length::Fill)
+            .padding(5)
+            .style(|theme| transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 0.5,
+                radius: 5.into(),
+            }))
     ]
+    .align_y(Vertical::Center)
     .padding(5)
     .spacing(10)
 }

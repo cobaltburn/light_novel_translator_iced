@@ -1,7 +1,6 @@
 use crate::{controller::xml::remove_think_tags, message::Message};
 use iced::{
     Task,
-    task::Handle,
     widget::text_editor::{self, Content},
 };
 use std::path::PathBuf;
@@ -12,7 +11,6 @@ use tokio::fs;
 pub struct TranslationModel {
     pub content: &'static str,
     pub context: text_editor::Content,
-    pub handles: Vec<Handle>,
     pub current_page: Option<usize>,
     pub pages: Vec<Page>,
     pub file_drop_down: bool,
@@ -32,12 +30,6 @@ impl TranslationModel {
 
     pub fn set_current_page(&mut self, page: usize) -> Task<Message> {
         self.current_page = Some(page);
-        Task::none()
-    }
-
-    pub fn abort_tranlation(&mut self) -> Task<Message> {
-        self.handles.iter().for_each(|handle| handle.abort());
-        self.handles.clear();
         Task::none()
     }
 
@@ -81,7 +73,7 @@ impl TranslationModel {
             .map(|(name, text)| {
                 let path = path.clone();
                 Task::future(async move {
-                    let file_path = path.join(name);
+                    let file_path = path.join(name).with_extension("md");
                     _ = fs::write(file_path, text.as_bytes())
                         .await
                         .inspect_err(|err| log::error!("{}", err));
@@ -96,7 +88,6 @@ impl TranslationModel {
             TransAction::SetContext(context) => self.set_context(context),
             TransAction::SetPage(page) => self.set_current_page(page),
             TransAction::UpdateContent(text, page) => self.update_content(text, page),
-            TransAction::Abort => self.abort_tranlation(),
             TransAction::PageComplete(page) => self.mark_complete(page),
             TransAction::SavePages(path) => self.save_pages(path),
         }
@@ -112,7 +103,6 @@ pub enum TransAction {
     UpdateContent(String, usize),
     PageComplete(usize),
     SavePages(PathBuf),
-    Abort,
 }
 
 #[non_exhaustive]

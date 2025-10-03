@@ -19,15 +19,19 @@ pub fn side_bar_container(state: &Translator) -> Container<'_, Message> {
 pub fn side_bar(state: &Translator) -> Container<'_, Message> {
     container(scrollable(column![
         side_bar_button(state).width(Length::Fill),
-        ghost_button(text("Text").center())
+        ghost_button(text(View::Doc.to_string()).center())
             .on_press(Message::SetView(View::Doc))
             .padding(10)
             .width(Length::Fill),
-        ghost_button(text("Translate").center())
+        ghost_button(text(View::Translation.to_string()).center())
             .on_press(Message::SetView(View::Translation))
             .padding(10)
             .width(Length::Fill),
-        ghost_button(text("Context").center())
+        ghost_button(text(View::Context.to_string()).center())
+            .on_press(Message::SetView(View::Context))
+            .padding(10)
+            .width(Length::Fill),
+        ghost_button(text(View::Format.to_string()).center())
             .on_press(Message::SetView(View::Context))
             .padding(10)
             .width(Length::Fill)
