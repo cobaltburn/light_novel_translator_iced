@@ -1,5 +1,7 @@
 use crate::controller::{error::Error, xml::part_tag};
 use htmd::HtmlToMarkdown;
+use pulldown_cmark::{Event, Options, Parser, Tag};
+use std::{collections::HashMap, path::PathBuf};
 
 pub fn convert_html(html: &str) -> Result<String, Error> {
     let converter = HtmlToMarkdown::builder()
@@ -38,4 +40,30 @@ pub fn join_partition(parts: Vec<String>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n\n")
+}
+
+// TODO think about this
+pub fn parse_anchors(markdown: &str) -> HashMap<String, String> {
+    let mut parser = Parser::new_ext(markdown, Options::all());
+    let mut links = HashMap::new();
+
+    while let Some(event) = parser.next() {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                if let Some(Event::Text(title)) = parser.next() {
+                    let path = to_name(&PathBuf::from(&*dest_url)).unwrap();
+                    let path = path.split("#").collect::<Vec<_>>();
+                    let path = path.first().unwrap().to_string();
+                    let title = title.to_string();
+                    links.insert(path, title);
+                }
+            }
+            _ => (),
+        }
+    }
+    links
+}
+
+fn to_name(path: &PathBuf) -> Option<String> {
+    Some(path.file_name()?.to_string_lossy().to_string())
 }

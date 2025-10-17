@@ -14,8 +14,7 @@ use crate::{
 };
 use epub::doc::EpubDoc;
 use iced::Task;
-use ollama_rs::generation::chat::ChatMessage;
-use std::{io::Cursor, ops::Not};
+use std::io::Cursor;
 
 #[non_exhaustive]
 #[derive(Default, Debug)]
@@ -40,16 +39,19 @@ impl Translator {
     }
 
     pub fn execute_translation(&mut self, page: usize) -> Task<Message> {
+        if !self.server_state.connected() {
+            return Task::done(Message::Error(String::from("Not connected to a server")));
+        }
         let Some(model) = self.server_state.current_model.clone() else {
-            return Task::none();
+            return Task::done(Message::Error(String::from("No model selected")));
+        };
+
+        let Some(epub) = self.epub.as_mut() else {
+            return Task::done(Message::Error(String::from("No epub selected")));
         };
 
         let Some(current_page) = self.translation_model.pages.get_mut(page) else {
             return Task::done(ServerAction::Abort.into());
-        };
-
-        let Some(epub) = self.epub.as_mut() else {
-            return Task::none();
         };
 
         current_page.content.clear();
@@ -73,35 +75,20 @@ impl Translator {
         let partitioned = partition_text(&markdown);
         let sections = partitioned.chunks(3).enumerate();
 
-        let context = self.translation_model.context.text();
-        let context = context.is_empty().not().then_some(context);
-
-        self.server_state.init_history(context);
-        let history = &self.server_state.history;
-
         let mut task = Task::none();
-        for (i, section) in sections {
+        for (i, sections) in sections {
             let server = self.server_state.server.clone();
             let tag = format!("\n\n<part>{}</part>\n\n", i + 1);
             let (tag_task, tag_handle) =
                 Task::done(TransAction::UpdateContent(tag, page).into()).abortable();
 
-            let (trans_task, handle) =
-                Task::future(server.translate(model.clone(), section.to_owned(), history.clone()))
-                    .and_then(move |stream| {
-                        Task::run(stream, move |response| match response {
-                            Ok(msg) => TransAction::UpdateContent(msg.message.content, page).into(),
-                            Err(_) => {
-                                log::error!("Failed to read stream");
-                                return ServerAction::Abort.into();
-                            }
-                        })
-                    })
-                    .abortable();
+            let (trans_task, handle) = server
+                .translate(model.clone(), sections.to_vec(), page)
+                .abortable();
 
-            task = task.chain(tag_task).chain(trans_task);
             self.server_state.handles.push(handle);
             self.server_state.handles.push(tag_handle);
+            task = task.chain(tag_task).chain(trans_task)
         }
 
         let (mark_task, mark_handle) =
@@ -114,18 +101,18 @@ impl Translator {
         task.chain(mark_task).chain(next_task)
     }
 
-    pub fn select_page(&mut self, page: usize) -> Task<Message> {
+    pub fn select_page(&mut self, page: usize) {
         if let Some(content) = self.get_page(page) {
             self.doc_model.current_page = Some(page);
             self.doc_model.content = content;
         }
-        Task::none()
     }
 
-    pub fn set_file(
-        &mut self,
-        (file_name, mut epub): (String, EpubDoc<Cursor<Vec<u8>>>),
-    ) -> Task<Message> {
+    pub fn set_epub(&mut self, (file_name, buffer): (String, Vec<u8>)) -> Task<Message> {
+        let mut epub = match EpubDoc::from_reader(Cursor::new(buffer)) {
+            Ok(epub) => epub,
+            Err(error) => return Task::done(Message::Error(format!("{:#?}", error))),
+        };
         self.doc_model.current_page = Some(0);
         self.doc_model.total_pages = epub.get_num_pages();
         self.doc_model.path = Some(file_name);
@@ -139,30 +126,11 @@ impl Translator {
         Task::done(Message::SelectPage(0))
     }
 
-    pub fn set_view(&mut self, view: View) -> Task<Message> {
+    pub fn set_view(&mut self, view: View) {
         self.view = view;
-        Task::none()
     }
 
-    pub fn toggle_side_bar_collapse(&mut self) -> Task<Message> {
+    pub fn toggle_side_bar_collapse(&mut self) {
         self.side_bar_collapsed = !self.side_bar_collapsed;
-        Task::none()
     }
-}
-
-pub fn generate_system_message(context: &Option<String>) -> ChatMessage {
-    let mut prompt = String::from(
-        r#"You are a highly skilled professional translator. You will be translating text from a Japanese book. You are a native speaker of English and Japanese. Translate the given text accurately, taking into account the context and specific instructions provided. If no additional instructions or context are provided, use your expertise to consider what the most appropriate context is and provide a natural translation that aligns with that context. When translating, strive to faithfully reflect the meaning and tone of the original text, pay attention to cultural nuances and differences in language usage, and ensure that the translation is grammatically correct and easy to read. For technical terms and proper nouns, either leave them in the original language or use appropriate translations as necessary. The translation should be complete. All the provide text should be translated. The translation should only contain the translated text. This should be a full translation of the given text. Do not summarize the text. Format the translated text into paragraphs with proper syntax. Match the paragraph structure of the original text. The text passed is in a markdown format the response should be in markdown. "#,
-    );
-
-    if let Some(context) = context {
-        let context = format!(
-            "Here is context about the story of the book, {}.\n",
-            context
-        );
-        prompt.push_str(&context);
-    }
-    prompt.push_str("Take a deep breath, calm down, and start translating.");
-
-    ChatMessage::system(prompt)
 }

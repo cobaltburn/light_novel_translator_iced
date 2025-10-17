@@ -37,5 +37,5 @@ pub fn context_view(state: &Translator) -> Container<'_, Message> {
 pub fn context_button_bar(_: &Translator) -> Row<'_, Message> {
     row![button(text("select").center()).on_press(Message::OpenContext)]
         .spacing(5)
-        .padding(Padding::new(0.0).bottom(15))
+        .padding(Padding::default().bottom(15))
 }

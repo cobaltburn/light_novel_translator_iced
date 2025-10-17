@@ -1,11 +1,9 @@
 use crate::components::side_bar::side_bar_container;
 use crate::message::Message;
 use crate::state::translator::Translator;
-use crate::view::View;
-use crate::view::context_view::context_view;
-use crate::view::doc_view::doc_view;
-use crate::view::format_view::format_view;
-use crate::view::translation_view::traslation_view;
+use crate::view::{
+    View, doc_view::doc_view, format_view::format_view, translation_view::traslation_view,
+};
 use iced::alignment::Horizontal;
 use iced::widget::{Space, column, container, row};
 use iced::{Element, Font, Length, Theme};
@@ -40,7 +38,6 @@ impl Translator {
         match self.view {
             View::Doc => doc_view(self),
             View::Translation => traslation_view(self),
-            View::Context => context_view(self),
             View::Format => format_view(self),
         }
         .width(Length::Fill)

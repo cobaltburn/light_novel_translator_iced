@@ -1,10 +1,7 @@
 use epub::doc::EpubDoc;
-use std::{
-    io::{Read, Seek},
-    path::PathBuf,
-};
+use std::{io::Cursor, path::PathBuf};
 
-pub fn get_ordered_path<R: Read + Seek>(doc: &mut EpubDoc<R>) -> Vec<PathBuf> {
+pub fn get_ordered_path(doc: &mut EpubDoc<Cursor<Vec<u8>>>) -> Vec<PathBuf> {
     (0..doc.get_num_pages())
         .into_iter()
         .map(|i| {

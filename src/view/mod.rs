@@ -1,13 +1,12 @@
-use std::fmt;
-
 use crate::{message::Message, state::translator::Translator};
+use iced::widget::button::{Status, primary};
 use iced::{
     Border, Color, Font, Length, Padding,
     alignment::{Horizontal, Vertical},
-    widget::{Container, button, container, lazy, scrollable, text},
+    widget::{Button, Container, button, container, lazy, scrollable, text},
 };
+use std::fmt;
 
-pub mod context_view;
 pub mod doc_view;
 pub mod format_view;
 pub mod translation_view;
@@ -17,7 +16,6 @@ pub enum View {
     #[default]
     Doc,
     Translation,
-    Context,
     Format,
 }
 
@@ -26,7 +24,6 @@ impl fmt::Display for View {
         let view = match self {
             View::Doc => "Document",
             View::Translation => "Translation",
-            View::Context => "Context",
             View::Format => "Format",
         };
         write!(f, "{}", view)
@@ -63,4 +60,11 @@ pub fn text_scrollable(content: &'_ str) -> Container<'_, Message> {
         .height(Length::FillPortion(10))
         .width(Length::Fill)
         .padding(Padding::new(10.0).right(5))
+}
+
+pub fn menu_button(button_text: &str) -> Button<'_, Message> {
+    button(text(button_text).center()).style(|theme, status| match status {
+        Status::Disabled => primary(theme, Status::Active),
+        _ => primary(theme, status),
+    })
 }
