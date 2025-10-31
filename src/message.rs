@@ -5,7 +5,8 @@ use crate::state::{
 };
 use crate::view::View;
 use iced::Task;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tokio::fs;
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -16,7 +17,7 @@ pub enum Message {
     FormatAction(FormatAction),
     OpenEpub,
     SetEpub((String, Vec<u8>)),
-    SaveTranslation,
+    SaveTranslation(String),
     SelectPage(usize),
     SetView(View),
     Translate(usize),
@@ -35,8 +36,12 @@ impl Translator {
             Message::OpenEpub => {
                 Task::future(open_epub()).and_then(|doc| Task::done(Message::SetEpub(doc)))
             }
-            Message::SaveTranslation => Task::future(pick_save_folder())
-                .and_then(|path| Task::done(TransAction::SavePages(path).into())),
+            Message::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
+                .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
+                .then(|path| match path {
+                    Ok(path) => Task::done(TransAction::SavePages(path).into()),
+                    Err(err) => Task::done(Message::Error(err.to_string())),
+                }),
             Message::SetEpub(doc) => self.set_epub(doc),
             Message::SelectPage(page) => self.select_page(page).into(),
             Message::SetView(view) => self.set_view(view).into(),
@@ -82,10 +87,12 @@ pub async fn open_epub() -> Option<(String, Vec<u8>)> {
     Some((handle.file_name(), buf))
 }
 
-pub async fn pick_save_folder() -> Option<PathBuf> {
+pub async fn pick_save_folder(file_name: String) -> Option<PathBuf> {
+    let file_name = Path::new(&file_name).file_stem()?.to_str()?;
     let handle = rfd::AsyncFileDialog::new()
         .set_title("save translation")
-        .pick_folder()
+        .set_file_name(file_name)
+        .save_file()
         .await?;
     Some(handle.path().to_path_buf())
 }

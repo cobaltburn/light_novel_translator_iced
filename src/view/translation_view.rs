@@ -183,13 +183,15 @@ pub fn claude_input(state: &Translator) -> Container<'_, Message> {
 }
 
 pub fn file_menu(state: &Translator) -> Item<'_, Message, Theme, Renderer> {
+    let path = state.doc_model.path.clone();
+    let save_message = path.map(|p| Message::SaveTranslation(p));
     Item::with_menu(
         menu_button("file"),
         Menu::new(vec![
             Item::new(epub_select(state)),
             Item::new(
                 button(text("save").center())
-                    .on_press(Message::SaveTranslation)
+                    .on_press_maybe(save_message)
                     .padding(5),
             ),
         ])
