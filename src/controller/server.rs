@@ -16,10 +16,12 @@ use rig::{
     },
     streaming::{StreamedAssistantContent, StreamingChat},
 };
+use std::time::Duration;
 use std::{
     ops::Not,
     sync::{Arc, Mutex},
 };
+use tokio::time;
 
 pub const MODELS: &[&str] = &[
     "claude-sonnet-4-5-20250929",
@@ -110,27 +112,30 @@ impl Server {
         let history = history.clone();
         let request = self.claude_stream(model, sections);
 
-        Task::future(async { request.await })
-            .then(|stream| Task::stream(stream))
-            .then(move |result| match result {
-                Ok(item) => match item {
-                    MultiTurnStreamItem::StreamItem(content) => match content {
-                        StreamedAssistantContent::Text(text) => Task::done(
-                            TransAction::UpdateContent(text.text().to_string(), page).into(),
-                        ),
-                        _ => Task::none(),
-                    },
-                    MultiTurnStreamItem::FinalResponse(response) => {
-                        let msg = ClaudeMessage::assistant(response.response());
-                        history.lock().unwrap().push(msg);
-                        log::debug!("{:#?}", response);
-                        Task::none()
+        Task::future(async {
+            time::sleep(Duration::from_secs(10)).await;
+            request.await
+        })
+        .then(|stream| Task::stream(stream))
+        .then(move |result| match result {
+            Ok(item) => match item {
+                MultiTurnStreamItem::StreamItem(content) => match content {
+                    StreamedAssistantContent::Text(text) => {
+                        Task::done(TransAction::UpdateContent(text.text().to_string(), page).into())
                     }
-                    _ => todo!(),
+                    _ => Task::none(),
                 },
-                Err(error) => Task::done(ServerAction::Abort.into())
-                    .chain(Task::done(Message::Error(format!("{:#?}", error)))),
-            })
+                MultiTurnStreamItem::FinalResponse(response) => {
+                    let msg = ClaudeMessage::assistant(response.response());
+                    history.lock().unwrap().push(msg);
+                    log::debug!("{:#?}", response);
+                    Task::none()
+                }
+                _ => todo!(),
+            },
+            Err(error) => Task::done(ServerAction::Abort.into())
+                .chain(Task::done(Message::Error(format!("{:#?}", error)))),
+        })
     }
 
     pub fn claude_stream(

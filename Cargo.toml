@@ -19,7 +19,7 @@ regex = "1.11.2"
 rfd = { version = "0.15.3", default-features = false, features = ["gtk3", "tokio"] }
 rig-core = "0.21.0"
 thiserror = "2.0.12"
-tokio = { version = "1.45.1", features = ["fs", "rt-multi-thread", "tokio-macros"] }
+tokio = { version = "1.45.1", features = ["fs", "rt-multi-thread", "time", "tokio-macros"] }
 tokio-stream = "0.1.17"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

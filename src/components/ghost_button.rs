@@ -1,7 +1,7 @@
 use crate::message::Message;
 use iced::widget::button::Status;
-use iced::widget::{Button, button};
-use iced::{Border, Color, Element, Renderer, Theme, advanced};
+use iced::widget::{button, Button};
+use iced::{advanced, Border, Color, Element, Renderer, Theme};
 
 pub fn ghost_button<'a>(
     content: impl Into<Element<'a, Message, Theme, Renderer>>,
