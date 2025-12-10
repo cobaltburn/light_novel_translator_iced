@@ -9,11 +9,13 @@ use crate::{
     },
     state::format_model::FormatPage,
 };
-use epub::{archive::EpubArchive, doc::EpubDoc};
+use epub::{
+    archive::EpubArchive,
+    doc::{EpubDoc, ResourceItem},
+};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};
 use quick_xml::escape::escape;
-use std::{collections::HashMap, io::Cursor, path::PathBuf};
-use tokio::fs;
+use std::{collections::HashMap, fs, io::Cursor, path::PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct DocBuilder {
@@ -22,12 +24,12 @@ pub struct DocBuilder {
 }
 
 impl DocBuilder {
-    pub async fn build(
+    pub fn build(
         mut self,
         toc: Option<PathBuf>,
         name: String,
         pages: Vec<BuilderPage>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<(Vec<u8>, String)> {
         let mut builder = EpubBuilder::new(ZipLibrary::new()?)?;
         builder
             .epub_version(EpubVersion::V30)
@@ -40,7 +42,7 @@ impl DocBuilder {
         let mut section_content = self.collect_contents(&pages)?;
 
         if let Some(toc) = toc {
-            let toc_markdown = fs::read_to_string(toc).await?;
+            let toc_markdown = fs::read_to_string(toc)?;
             let anchors = parse_anchors(&toc_markdown);
             section_content = add_titles(section_content, anchors);
         }
@@ -53,21 +55,19 @@ impl DocBuilder {
 
         builder.generate(&mut content)?;
 
-        save_epub(content, &name).await?;
-
-        Ok(())
+        Ok((content, name))
     }
 
     pub fn add_cover_image(&mut self, builder: &mut EpubBuilder<ZipLibrary>) -> anyhow::Result<()> {
         let Some(cover_id) = self.epub.get_cover_id() else {
             return Ok(());
         };
-        let (path, mime_type) = self.epub.resources.get(&cover_id).unwrap().clone();
+        let ResourceItem { path, mime, .. } = self.epub.resources.get(&cover_id).unwrap().clone();
         let content = self.epub.get_resource_by_path(&path).unwrap();
 
         let path = PathBuf::from("Images").join(path.file_name().unwrap());
 
-        builder.add_cover_image(path, &*content, mime_type)?;
+        builder.add_cover_image(path, &*content, mime)?;
 
         Ok(())
     }
@@ -76,23 +76,23 @@ impl DocBuilder {
         let image_folder = PathBuf::from("Images");
         let images = self.get_images();
 
-        for (path, mime_type) in images {
+        for ResourceItem { path, mime, .. } in images {
             let content = self.epub.get_resource_by_path(&path).unwrap();
             let file_name = path.file_name().unwrap();
             let path = image_folder.join(file_name);
-            builder.add_resource(path, &*content, mime_type)?;
+            builder.add_resource(path, &*content, mime)?;
         }
 
         Ok(())
     }
 
-    pub fn get_images(&self) -> Vec<(PathBuf, String)> {
+    pub fn get_images(&self) -> Vec<ResourceItem> {
         let cover = self.epub.get_cover_id().unwrap_or(String::from(""));
         self.epub
             .resources
             .iter()
             .filter_map(|(id, e)| {
-                if e.1.starts_with("image") && &cover != id {
+                if e.mime.starts_with("image") && &cover != id {
                     Some(e.to_owned())
                 } else {
                     None
@@ -219,18 +219,4 @@ impl From<FormatPage> for BuilderPage {
             content: content.text(),
         }
     }
-}
-
-pub async fn save_epub(content: Vec<u8>, file_name: &String) -> anyhow::Result<()> {
-    let handle = rfd::AsyncFileDialog::new()
-        .set_title("save epub")
-        .set_file_name(file_name)
-        .add_filter("epub", &["epub"])
-        .save_file()
-        .await;
-
-    if let Some(handle) = handle {
-        handle.write(&content).await?;
-    }
-    Ok(())
 }

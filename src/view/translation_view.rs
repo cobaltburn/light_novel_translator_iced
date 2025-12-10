@@ -5,11 +5,11 @@ use crate::state::{
     server_state::ServerAction, translation_model::TransAction, translator::Translator,
 };
 use crate::view::{menu_button, text_scrollable};
-use iced::alignment::{Horizontal, Vertical};
+use iced::alignment::Vertical;
 use iced::widget::container::transparent;
 use iced::widget::{
-    Button, Container, Row, Space, button, column, container, pick_list, row, scrollable, svg,
-    text, text_input,
+    Button, Column, Container, Row, Space, button, checkbox, column, container, pick_list, row,
+    scrollable, svg, text, text_input,
 };
 use iced::{Border, Color, Element, Length, Padding, Renderer, Theme, color};
 use iced_aw::menu::Item;
@@ -71,12 +71,7 @@ pub fn translate_button(state: &Translator) -> Button<'_, Message> {
 
 pub fn translation_side_bar(state: &Translator) -> Container<'_, Message> {
     container(
-        scrollable(
-            column(translation_path_buttons(state))
-                .width(250)
-                .spacing(10),
-        )
-        .height(Length::Fill),
+        scrollable(translation_path_buttons(state).width(250).spacing(10)).height(Length::Fill),
     )
     .height(Length::Fill)
     .padding(Padding::new(10.0).left(0).right(5))
@@ -89,22 +84,22 @@ pub fn translation_side_bar(state: &Translator) -> Container<'_, Message> {
     })
 }
 
-pub fn translation_path_buttons(state: &Translator) -> Vec<Element<'_, Message>> {
+pub fn translation_path_buttons(state: &Translator) -> Column<'_, Message> {
     state
         .translation_model
         .pages
         .iter()
         .enumerate()
         .map(|(i, page)| {
-            let name = page.path.file_stem().unwrap().to_str().unwrap();
+            let name = page.path.file_stem().unwrap().to_string_lossy();
             let mut button_text = text(name).width(Length::Fill);
             if state.translation_model.current_page.is_some_and(|p| p == i) {
                 button_text = button_text.color(color!(0x2ac3de))
             }
 
-            let button_content = row![button_text]
+            let button_content = row![text(format!("{}. ", i + 1)), button_text]
                 .push_maybe(page.complete.then_some(check_mark()))
-                .push(Space::with_width(10));
+                .padding(Padding::default().right(10));
 
             ghost_button(button_content)
                 .on_press(TransAction::SetPage(i).into())
@@ -121,83 +116,73 @@ pub fn check_mark<'a>() -> Container<'a, Message> {
 }
 
 pub fn server_menu(state: &Translator) -> Item<'_, Message, Theme, Renderer> {
-    let url = state.server_state.url.clone();
-    let key = state.server_state.api_key.clone();
     Item::with_menu(
         menu_button("server"),
         Menu::new(vec![
             Item::new(ollama_input(state)),
-            Item::new(
-                container(
-                    button(text("connect"))
-                        .on_press(ServerAction::Connect(Connection::Ollama(url)).into()),
-                )
-                .align_x(Horizontal::Center)
-                .padding(5),
-            ),
             Item::new(claude_input(state)),
-            Item::new(
-                container(
-                    button(text("connect"))
-                        .on_press(ServerAction::Connect(Connection::Claude(key)).into()),
-                )
-                .align_x(Horizontal::Center)
-                .padding(5),
-            ),
         ])
-        .width(400),
+        .width(500),
     )
 }
 
 pub fn ollama_input(state: &Translator) -> Container<'_, Message> {
     container(
         row![
-            container(text("Ollama:").center()),
-            text_input("http://localhost:11434", &state.server_state.url)
-                .style(|theme, status| {
-                    let mut style = text_input::default(theme, status);
-                    if state.server_state.invalid_url {
-                        style.value = Color::from_rgb(1.0, 0.0, 0.0);
-                    }
-                    style
-                })
-                .on_input(|url| ServerAction::EditUrl(url).into()),
+            text("Ollama").center(),
+            button("connect").on_press(ServerAction::Connect(Connection::Ollama).into()),
+            checkbox("Think", state.server_state.think)
+                .on_toggle(|x| ServerAction::ThinkingToggled(x).into()),
         ]
         .align_y(Vertical::Center)
         .spacing(5),
     )
-    .padding(5)
+    .align_left(Length::Fill)
+    .padding(10)
 }
 
 pub fn claude_input(state: &Translator) -> Container<'_, Message> {
+    let key = state.server_state.api_key.clone();
     container(
         row![
-            container(text("Claude:").center()),
+            text("Claude:").center(),
             text_input("api-key", &state.server_state.api_key)
                 .on_input(|key| ServerAction::EditApiKey(key).into()),
+            button("connect").on_press(ServerAction::Connect(Connection::Claude(key)).into()),
         ]
         .align_y(Vertical::Center)
         .spacing(5),
     )
-    .padding(5)
+    .align_left(Length::Fill)
+    .padding(10)
 }
 
 pub fn file_menu(state: &Translator) -> Item<'_, Message, Theme, Renderer> {
-    let path = state.doc_model.path.clone();
-    let save_message = path.map(|p| Message::SaveTranslation(p));
     Item::with_menu(
         menu_button("file"),
         Menu::new(vec![
             Item::new(epub_select(state)),
-            Item::new(
-                button(text("save").center())
-                    .on_press_maybe(save_message)
-                    .padding(5),
-            ),
+            Item::new(file_menu_buttons(state)),
         ])
         .spacing(10)
         .width(300),
     )
+}
+
+fn file_menu_buttons(state: &Translator) -> Element<'_, Message> {
+    let path = state.doc_model.path.clone();
+    let load_message = path.as_ref().map(|_| Message::LoadTranslation);
+    let save_message = path.map(|p| Message::SaveTranslation(p));
+    row![
+        button(text("save").center())
+            .on_press_maybe(save_message)
+            .padding(5),
+        button(text("load").center())
+            .on_press_maybe(load_message)
+            .padding(5)
+    ]
+    .spacing(10)
+    .into()
 }
 
 pub fn epub_select(state: &Translator) -> Row<'_, Message> {

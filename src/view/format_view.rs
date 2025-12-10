@@ -70,7 +70,7 @@ fn content_button(state: &Translator) -> Row<'_, Message> {
 
 fn toc_button(state: &Translator) -> Row<'_, Message> {
     let toc = if let Some(path) = &state.format_model.toc_path {
-        path.to_string_lossy()
+        path.file_name().unwrap_or_default().to_string_lossy()
     } else {
         "".into()
     };

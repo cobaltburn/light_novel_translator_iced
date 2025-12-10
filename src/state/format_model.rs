@@ -1,6 +1,6 @@
 use crate::{
     controller::builder::epub::{BuilderPage, DocBuilder},
-    message::{Message, open_epub},
+    message::{Message, display_error, open_epub},
 };
 use epub::{archive::EpubArchive, doc::EpubDoc};
 use iced::{
@@ -133,20 +133,25 @@ impl FormatModel {
             FormatAction::MarkSaved(page) => self.mark_saved(page),
             FormatAction::SetEpub(doc) => self.set_epub(doc),
             FormatAction::SetFolder(folder) => self.set_folder(folder),
-            FormatAction::Build => match self.get_build_content() {
-                Some((builder, toc, name, pages)) => {
-                    Task::perform(builder.build(toc, name, pages), |e| match e {
-                        Ok(_) => Message::None,
-                        Err(error) => Message::Error(format!("{:#?}", error)),
-                    })
-                    .discard()
-                }
-                None => Task::none(),
-            },
+            FormatAction::Build => Task::done(self.get_build_content())
+                .and_then(|(builder, toc, name, pages)| Task::done(builder.build(toc, name, pages)))
+                .then(|content| match content {
+                    Ok((content, name)) => Task::future(save_epub(content, name)),
+                    Err(error) => Task::done(Err(error)),
+                })
+                .then(|e| match e {
+                    Ok(_) => Task::none(),
+                    Err(error) => Task::future(display_error(error.to_string())),
+                })
+                .discard(),
         }
     }
 }
 
+/* .then(|res| match res {
+    Ok(_) => Task::none(),
+    Err(error) => Task::future(display_error(error.to_string())),
+}) */
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum FormatAction {
@@ -212,4 +217,18 @@ pub async fn select_format_folder() -> Option<(String, Vec<(PathBuf, String)>)> 
         pages.push((path, content));
     }
     Some((handle.file_name(), pages))
+}
+
+pub async fn save_epub<T: Into<String>>(content: Vec<u8>, file_name: T) -> anyhow::Result<()> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("save epub")
+        .set_file_name(file_name)
+        .add_filter("epub", &["epub"])
+        .save_file()
+        .await;
+
+    if let Some(handle) = handle {
+        handle.write(&content).await?;
+    }
+    Ok(())
 }

@@ -3,7 +3,7 @@ use crate::{
         doc::get_ordered_path,
         markdown::{convert_html, join_partition, partition_text},
     },
-    message::Message,
+    message::{Message, display_error},
     state::{
         doc_model::DocModel,
         format_model::FormatModel,
@@ -31,7 +31,7 @@ pub struct Translator {
 impl Translator {
     pub fn get_page(&mut self, page: usize) -> Option<String> {
         let epub = self.epub.as_mut()?;
-        epub.set_current_page(page);
+        epub.set_current_chapter(page);
         let html = epub.get_current_str()?.0;
         let markdown = convert_html(&html).unwrap();
         let parts = partition_text(&markdown);
@@ -40,14 +40,15 @@ impl Translator {
 
     pub fn execute_translation(&mut self, page: usize) -> Task<Message> {
         if !self.server_state.connected() {
-            return Task::done(Message::Error(String::from("Not connected to a server")));
+            return Task::future(display_error(String::from("Not connected to a server")))
+                .discard();
         }
         let Some(model) = self.server_state.current_model.clone() else {
-            return Task::done(Message::Error(String::from("No model selected")));
+            return Task::future(display_error(String::from("No model selected"))).discard();
         };
 
         let Some(epub) = self.epub.as_mut() else {
-            return Task::done(Message::Error(String::from("No epub selected")));
+            return Task::future(display_error(String::from("No epub selected"))).discard();
         };
 
         let Some(current_page) = self.translation_model.pages.get_mut(page) else {
@@ -55,14 +56,13 @@ impl Translator {
         };
 
         current_page.content.clear();
-        epub.set_current_page(page);
+        epub.set_current_chapter(page);
         let html = epub.get_current_str().expect("max page exceeded").0;
 
         let markdown = match convert_html(&html) {
             Ok(markdown) => markdown,
             Err(error) => {
-                log::error!("{}", error);
-                return Task::none();
+                return Task::future(display_error(error.to_string())).discard();
             }
         };
 
@@ -73,17 +73,17 @@ impl Translator {
         }
 
         let partitioned = partition_text(&markdown);
-        let sections = partitioned.chunks(3).enumerate();
+        let sections = partitioned.chunks(3).map(|x| x.to_vec());
 
         let mut task = Task::none();
-        for (i, sections) in sections {
+        for (i, sections) in sections.enumerate() {
             let server = self.server_state.server.clone();
             let tag = format!("\n\n<part>{}</part>\n\n", i + 1);
             let (tag_task, tag_handle) =
                 Task::done(TransAction::UpdateContent(tag, page).into()).abortable();
 
             let (trans_task, handle) = server
-                .translate(model.clone(), sections.to_vec(), page)
+                .translate(model.clone(), sections, page, self.server_state.think)
                 .abortable();
 
             self.server_state.handles.push(handle);
@@ -114,7 +114,7 @@ impl Translator {
             Err(error) => return Task::done(Message::Error(format!("{:#?}", error))),
         };
         self.doc_model.current_page = Some(0);
-        self.doc_model.total_pages = epub.get_num_pages();
+        self.doc_model.total_pages = epub.get_num_chapters();
         self.doc_model.path = Some(file_name);
 
         self.translation_model.current_page = Some(0);

@@ -1,6 +1,9 @@
-use crate::{controller::xml::remove_think_tags, message::Message};
+use crate::{
+    controller::xml::remove_think_tags,
+    message::{Message, display_error},
+};
 use iced::Task;
-use std::path::PathBuf;
+use std::{collections::HashMap, mem::swap, path::PathBuf};
 use tokio::fs;
 
 #[non_exhaustive]
@@ -51,12 +54,38 @@ impl TranslationModel {
                 let path = path.clone();
                 Task::future(async move {
                     let file_path = path.join(name).with_extension("md");
-                    _ = fs::write(file_path, text.as_bytes())
-                        .await
-                        .inspect_err(|err| log::error!("{}", err));
+                    fs::write(file_path, text.as_bytes()).await
+                })
+                .then(|r| match r {
+                    Ok(_) => Task::none(),
+                    Err(error) => Task::future(display_error(error.to_string())),
                 })
             });
         Task::batch(tasks).discard()
+    }
+
+    fn load_pages(&mut self, pages: Vec<(PathBuf, String)>) {
+        let mut pages: HashMap<String, String> = pages
+            .into_iter()
+            .filter_map(|(p, c)| {
+                let p = p.file_stem()?.to_string_lossy().into_owned();
+                Some((p, c))
+            })
+            .collect();
+
+        for page in self.pages.iter_mut() {
+            let file_name = page.path.file_stem().unwrap_or_default();
+            let file_name = file_name.to_string_lossy().into_owned();
+            if let Some(content) = pages.get_mut(&file_name) {
+                swap(&mut page.content, content);
+                page.complete = true;
+            }
+        }
+        let last = self.pages.iter().filter(|p| p.complete).last();
+        if let Some(path) = last.map(|p| p.path.clone()) {
+            let pages = self.pages.iter_mut().take_while(|p| p.path != path);
+            pages.for_each(|p| p.complete = true);
+        }
     }
 
     pub fn perform(&mut self, action: TransAction) -> Task<Message> {
@@ -65,6 +94,7 @@ impl TranslationModel {
             TransAction::UpdateContent(text, page) => self.update_content(text, page).into(),
             TransAction::PageComplete(page) => self.mark_complete(page).into(),
             TransAction::SavePages(path) => self.save_pages(path),
+            TransAction::LoadPages(pages) => self.load_pages(pages).into(),
         }
     }
 }
@@ -76,6 +106,7 @@ pub enum TransAction {
     UpdateContent(String, usize),
     PageComplete(usize),
     SavePages(PathBuf),
+    LoadPages(Vec<(PathBuf, String)>),
 }
 
 #[non_exhaustive]

@@ -18,12 +18,12 @@ pub enum Message {
     OpenEpub,
     SetEpub((String, Vec<u8>)),
     SaveTranslation(String),
+    LoadTranslation,
     SelectPage(usize),
     SetView(View),
     Translate(usize),
     ToggleSideBar,
     Error(String),
-    None,
 }
 
 impl Translator {
@@ -40,14 +40,15 @@ impl Translator {
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
                 .then(|path| match path {
                     Ok(path) => Task::done(TransAction::SavePages(path).into()),
-                    Err(err) => Task::done(Message::Error(err.to_string())),
+                    Err(err) => Task::future(display_error(err.to_string())).discard(),
                 }),
+            Message::LoadTranslation => Task::future(load_folder_markdown())
+                .and_then(|pages| Task::done(TransAction::LoadPages(pages).into())),
             Message::SetEpub(doc) => self.set_epub(doc),
             Message::SelectPage(page) => self.select_page(page).into(),
             Message::SetView(view) => self.set_view(view).into(),
             Message::Translate(page) => self.execute_translation(page),
             Message::ToggleSideBar => self.toggle_side_bar_collapse().into(),
-            Message::None => Task::none(),
             Message::Error(error) => Task::future(display_error(error)).discard(),
         }
     }
@@ -77,6 +78,24 @@ impl From<FormatAction> for Message {
     }
 }
 
+pub async fn load_folder_markdown() -> Option<Vec<(PathBuf, String)>> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("load folder")
+        .pick_folder()
+        .await?;
+    let mut dirs = fs::read_dir(handle.path()).await.ok()?;
+    let mut pages = Vec::new();
+    while let Ok(Some(entry)) = dirs.next_entry().await {
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|x| x == "md") {
+            let content = fs::read_to_string(&path).await.ok()?;
+            pages.push((path, content));
+        }
+    }
+
+    Some(pages)
+}
+
 pub async fn open_epub() -> Option<(String, Vec<u8>)> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("select epub")
@@ -97,18 +116,7 @@ pub async fn pick_save_folder(file_name: String) -> Option<PathBuf> {
     Some(handle.path().to_path_buf())
 }
 
-pub async fn open_context() -> Option<String> {
-    let handle = rfd::AsyncFileDialog::new()
-        .set_title("select context")
-        .add_filter("files", &["txt", "md", "xml"])
-        .pick_file()
-        .await?;
-    let buf = handle.read().await;
-    let context = String::from_utf8(buf).ok()?;
-    Some(context)
-}
-
-pub async fn display_error(error: String) {
+pub async fn display_error<T: Into<String>>(error: T) {
     _ = rfd::AsyncMessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
         .set_description(error)
