@@ -1,16 +1,20 @@
+use crate::error::{Error, Result};
 use crate::message::{Message, display_error};
+use crate::state::server_state::Settings;
 use crate::state::{server_state::ServerAction, translation_model::TransAction};
-use anyhow::anyhow;
 use genai::Client;
 use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage as ClaudeMessage, ChatRequest, ChatStream, ChatStreamEvent, StreamChunk,
 };
 use iced::Task;
+use ollama_rs::error::OllamaError;
+use ollama_rs::models::ModelOptions;
 use ollama_rs::{
     Ollama,
     generation::chat::{ChatMessage, ChatMessageResponseStream, request::ChatMessageRequest},
 };
+use std::iter;
 use std::time::Duration;
 use std::{
     ops::Not,
@@ -62,14 +66,16 @@ impl Server {
         }
     }
 
-    pub async fn get_models(self) -> anyhow::Result<Vec<String>> {
+    pub async fn get_models(self) -> Result<Vec<String>> {
         let model = match self {
             Server::Ollama { client, .. } => {
                 let models = client.list_local_models().await?;
                 models.into_iter().map(|model| model.name).collect()
             }
             Server::Claude { client, .. } => client.all_model_names(AdapterKind::Anthropic).await?,
-            Server::Disconnected => return Err(anyhow!("server not connected")),
+            Server::Disconnected => {
+                return Err(Error::ServerError("server not connected"));
+            }
         };
         Ok(model)
     }
@@ -79,12 +85,14 @@ impl Server {
         model: String,
         sections: Vec<String>,
         page: usize,
-        think: bool,
+        settings: Settings,
     ) -> Task<Message> {
         match self {
-            Server::Disconnected => Task::future(display_error("server disconnectd")).discard(),
-            Server::Ollama { .. } => self.ollama_translation(model, sections, page, think),
-            Server::Claude { .. } => self.claude_translation(model, sections, page),
+            Server::Disconnected => {
+                Task::future(display_error(Error::ServerError("server disconnectd"))).discard()
+            }
+            Server::Ollama { .. } => self.ollama_translation(model, sections, page, settings),
+            Server::Claude { .. } => self.claude_translation(model, sections, page, settings),
         }
     }
 
@@ -93,50 +101,46 @@ impl Server {
         model: String,
         sections: Vec<String>,
         page: usize,
+        Settings { pause, .. }: Settings,
     ) -> Task<Message> {
         let history = {
             let Server::Claude { history, .. } = &self else {
-                return Task::future(display_error("server not connected")).discard();
+                return Task::future(display_error(Error::ServerError("server not connected")))
+                    .discard();
             };
             history.clone()
         };
 
         let message = Arc::new(Mutex::new(String::with_capacity(4096)));
 
-        Task::future(async {
-            time::sleep(Duration::from_secs(10)).await;
-            self.claude_stream(model, sections).await
-        })
-        .then(|stream| match stream {
-            Ok(stream) => Task::stream(stream),
-            Err(error) => Task::future(display_error(error.to_string())).discard(),
-        })
-        .then(move |event| match event {
-            Ok(msg) => match msg {
-                ChatStreamEvent::Chunk(StreamChunk { content }) => {
-                    message.lock().unwrap().push_str(&content);
-                    Task::done(TransAction::UpdateContent(content, page).into())
-                }
-                ChatStreamEvent::End(_) => {
-                    let message = message.lock().unwrap().to_owned();
-                    let message = ClaudeMessage::assistant(message);
-                    history.lock().unwrap().push(message);
-                    Task::none()
-                }
-                _ => Task::none(),
-            },
-            Err(error) => Task::done(ServerAction::Abort.into())
-                .chain(Task::future(display_error(error.to_string())).discard()),
-        })
+        Task::future(self.claude_stream(model, sections))
+            .then(|stream| match stream {
+                Ok(stream) => Task::stream(stream),
+                Err(error) => Task::future(display_error(error)).discard(),
+            })
+            .then(move |event| match event {
+                Ok(msg) => match msg {
+                    ChatStreamEvent::Chunk(StreamChunk { content }) => {
+                        message.lock().unwrap().push_str(&content);
+                        Task::done(TransAction::UpdateContent(content, page).into())
+                    }
+                    ChatStreamEvent::End(_) => {
+                        let message = message.lock().unwrap().to_owned();
+                        let message = ClaudeMessage::assistant(message);
+                        history.lock().unwrap().push(message);
+                        Task::none()
+                    }
+                    _ => Task::none(),
+                },
+                Err(error) => Task::done(ServerAction::Abort.into())
+                    .chain(Task::future(display_error(error)).discard()),
+            })
+            .chain(Task::future(time::sleep(Duration::from_secs(pause))).discard())
     }
 
-    pub async fn claude_stream(
-        self,
-        model: String,
-        sections: Vec<String>,
-    ) -> anyhow::Result<ChatStream> {
+    pub async fn claude_stream(self, model: String, sections: Vec<String>) -> Result<ChatStream> {
         let Server::Claude { client, history } = self else {
-            return Err(anyhow!("server not connected"));
+            return Err(Error::ServerError("server not connected"));
         };
 
         let message = {
@@ -162,20 +166,25 @@ impl Server {
         model: String,
         sections: Vec<String>,
         page: usize,
-        think: bool,
+        Settings { think, pause }: Settings,
     ) -> Task<Message> {
-        Task::future(self.ollama_stream(model, sections, think))
-            .then(move |stream| match stream {
-                Ok(stream) => Task::stream(stream),
-                Err(error) => Task::future(display_error(error.to_string()))
-                    .discard()
-                    .chain(Task::done(Err(()))),
-            })
-            .then(move |response| match response {
-                Ok(msg) => Task::done(TransAction::UpdateContent(msg.message.content, page).into()),
-                Err(_) => Task::done(ServerAction::Abort.into())
-                    .chain(Task::future(display_error("Failed to read stream")).discard()),
-            })
+        let task = Task::future(self.ollama_stream(model, sections, think));
+
+        let task = task.then(move |stream| match stream {
+            Ok(stream) => Task::stream(stream),
+            Err(error) => Task::future(display_error(error))
+                .discard()
+                .chain(Task::done(Err(()))),
+        });
+
+        let task = task.then(move |response| match response {
+            Ok(msg) => Task::done(TransAction::UpdateContent(msg.message.content, page).into()),
+            Err(_) => Task::done(ServerAction::Abort.into()).chain(
+                Task::future(display_error(Error::ServerError("Failed to read stream"))).discard(),
+            ),
+        });
+
+        task.chain(Task::future(time::sleep(Duration::from_secs(pause))).discard())
     }
 
     pub async fn ollama_stream(
@@ -183,16 +192,33 @@ impl Server {
         model: String,
         section: Vec<String>,
         think: bool,
-    ) -> anyhow::Result<ChatMessageResponseStream> {
-        let Server::Ollama { client, history } = self else {
-            return Err(anyhow!("server not connected"));
+    ) -> Result<ChatMessageResponseStream> {
+        let Server::Ollama { client, .. } = self else {
+            return Err(Error::ServerError("server not connected"));
         };
 
-        let messages = section.into_iter().map(|c| ChatMessage::user(c)).collect();
-        let request = ChatMessageRequest::new(model.clone(), messages).think(think);
-        let stream: ChatMessageResponseStream = client
-            .send_chat_messages_with_history_stream(history, request)
-            .await?;
+        let _options = ModelOptions::default()
+            .num_ctx(32_768)
+            .repeat_last_n(32_768)
+            .num_predict(32_768);
+
+        let messages = section.into_iter().map(|m| ChatMessage::user(m));
+        let system = iter::once(ChatMessage::system(SYSTEM_PROMPT.to_string()));
+        let messages = system.chain(messages).collect();
+
+        let request = ChatMessageRequest::new(model.clone(), messages)
+            // .options(options)
+            .think(think);
+
+        let stream = loop {
+            match client.send_chat_messages_stream(request.clone()).await {
+                Ok(stream) => break stream,
+                Err(OllamaError::Other(error)) if error.contains("503") => {
+                    time::sleep(Duration::from_secs(10)).await
+                }
+                Err(error) => return Err(Error::OllamaError(error)),
+            }
+        };
 
         Ok(stream)
     }

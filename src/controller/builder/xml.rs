@@ -6,6 +6,8 @@ use quick_xml::{
 use regex::Regex;
 use std::{io::Cursor, os::unix::ffi::OsStrExt, path::PathBuf};
 
+use crate::error::Error;
+
 pub fn to_xml(markdown: &str) -> String {
     let mut html = String::new();
     let parser = Parser::new_ext(markdown, Options::all());
@@ -32,7 +34,7 @@ const XLINK: &str = "xlink:href";
 const IMG: &str = "img";
 const IMAGE: &str = "image";
 
-pub fn update_image_paths(xml: &str) -> anyhow::Result<String> {
+pub fn update_image_paths(xml: &str) -> Result<String, Error> {
     let image_folder = PathBuf::from("../Images");
     let mut reader = Reader::from_str(xml);
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
@@ -60,7 +62,7 @@ fn update_image(
     tag: BytesStart<'_>,
     image_folder: &PathBuf,
     attr: &str,
-) -> anyhow::Result<BytesStart<'static>> {
+) -> Result<BytesStart<'static>, Error> {
     let link = tag.try_get_attribute(attr)?;
     let tag = if let Some(link) = link {
         let path = PathBuf::from(str::from_utf8(&link.value)?);

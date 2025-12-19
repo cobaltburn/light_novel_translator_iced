@@ -9,22 +9,19 @@ use iced::widget::{Space, column, container, row};
 use iced::{Element, Font, Length, Theme};
 
 pub fn app() -> iced::Result {
-    iced::application(
-        "light novel translator",
-        Translator::update,
-        Translator::view,
-    )
-    .default_font(Font::DEFAULT)
-    .theme(|_| Theme::TokyoNightStorm)
-    .run()
+    iced::application(Translator::default, Translator::update, Translator::view)
+        .title("light novel translator")
+        .default_font(Font::DEFAULT)
+        .theme(Theme::TokyoNightStorm)
+        .run()
 }
 
 impl Translator {
-    pub fn view(&'_ self) -> Element<'_, Message> {
+    pub fn view(&self) -> Element<'_, Message> {
         container(row![
             side_bar_container(self),
             column![
-                Space::with_height(Length::Fixed(10.0)),
+                Space::new().height(Length::Fixed(10.0)),
                 Self::view_select(&self)
             ]
             .padding(10)
@@ -34,14 +31,11 @@ impl Translator {
         .into()
     }
 
-    pub fn view_select(&'_ self) -> Element<'_, Message> {
+    pub fn view_select(&self) -> Element<'_, Message> {
         match self.view {
-            View::Doc => doc_view(self),
-            View::Translation => traslation_view(self),
-            View::Format => format_view(self),
+            View::Doc => doc_view(self).map(Into::into),
+            View::Translation => traslation_view(self).map(Into::into),
+            View::Format => format_view(self).map(Into::into),
         }
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
     }
 }

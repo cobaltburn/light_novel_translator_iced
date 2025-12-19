@@ -1,24 +1,25 @@
 use crate::{
     controller::builder::epub::{BuilderPage, DocBuilder},
+    error::Result,
     message::{Message, display_error, open_epub},
 };
-use epub::{archive::EpubArchive, doc::EpubDoc};
+use epub::doc::EpubDoc;
+use epub_builder::{EpubBuilder, ZipLibrary};
 use iced::{
     Task,
     widget::text_editor::{self, Content},
 };
-use std::{ffi::OsStr, fs::read_dir, io::Cursor, path::PathBuf};
-use tokio::fs::{self, read_to_string};
+use std::{ffi::OsStr, fs::read_dir, io::Cursor, mem, path::PathBuf};
+use tokio::fs::read_to_string;
 
 #[non_exhaustive]
 #[derive(Default, Debug)]
 pub struct FormatModel {
     pub pages: Vec<FormatPage>,
     pub current_page: Option<usize>,
-    pub toc_path: Option<PathBuf>,
     pub source_folder: String,
     pub epub_name: String,
-    pub builder: Option<DocBuilder>,
+    pub epub: Option<EpubDoc<Cursor<Vec<u8>>>>,
 }
 
 impl FormatModel {
@@ -27,143 +28,86 @@ impl FormatModel {
         self.pages.get(page).map(|e| &e.content)
     }
 
-    fn set_current_page(&mut self, page: usize) -> Task<Message> {
+    fn set_current_page(&mut self, page: usize) {
         self.current_page = Some(page);
-        Task::none()
     }
 
-    fn set_pages(&mut self, pages: Vec<(PathBuf, String)>) -> Task<Message> {
+    fn set_pages(&mut self, folder: String, pages: Vec<(PathBuf, String)>) {
         self.pages = pages.into_iter().map(|e| FormatPage::from(e)).collect();
         self.current_page = Some(0);
-        Task::none()
+        self.source_folder = folder;
     }
 
-    fn edit_current_content(&mut self, action: text_editor::Action) -> Task<Message> {
+    fn edit_current_content(&mut self, action: text_editor::Action) {
         let Some(i) = self.current_page else {
-            return Task::none();
+            return;
         };
+
         if let Some(page) = self.pages.get_mut(i) {
             page.content.perform(action);
-            page.changed = true;
         };
-
-        Task::none()
     }
 
-    fn set_toc(&mut self, toc: PathBuf) -> Task<Message> {
-        self.toc_path = Some(toc);
-        Task::none()
-    }
-
-    fn set_folder(&mut self, folder: String) -> Task<Message> {
-        self.source_folder = folder;
-        Task::none()
-    }
-
-    fn set_epub(&mut self, (name, buffer): (String, Vec<u8>)) -> Task<Message> {
-        let epub = match EpubDoc::from_reader(Cursor::new(buffer.clone())) {
-            Ok(epub) => epub,
-            Err(error) => return Task::done(Message::Error(format!("{:#?}", error))),
-        };
-
-        let archive = match EpubArchive::from_reader(Cursor::new(buffer)) {
-            Ok(archive) => archive,
-            Err(error) => return Task::done(Message::Error(format!("{:#?}", error))),
-        };
+    fn set_epub(&mut self, (name, buffer): (String, Vec<u8>)) -> Result<()> {
+        let epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 
         self.epub_name = name;
-        self.builder = Some(DocBuilder { epub, archive });
-        Task::none()
+        self.epub = Some(epub);
+        Ok(())
     }
 
-    fn mark_saved(&mut self, page: usize) -> Task<Message> {
-        if let Some(page) = self.pages.get_mut(page) {
-            page.changed = false;
-        }
-        Task::none()
-    }
+    pub fn get_build_content(&mut self) -> Option<DocBuilder> {
+        let name = mem::take(&mut self.epub_name);
+        let epub = mem::take(&mut self.epub)?;
+        let pages = mem::take(&mut self.pages);
+        let pages = pages.into_iter().map(BuilderPage::from).collect();
+        let builder = EpubBuilder::new(ZipLibrary::new().ok()?).ok()?;
+        self.source_folder.clear();
 
-    pub fn save_files(&self) -> Task<Message> {
-        let tasks = self
-            .pages
-            .iter()
-            .enumerate()
-            .filter(|(_, page)| page.changed)
-            .map(|(i, page)| {
-                Task::future(fs::write(page.path.clone(), page.content.text()))
-                    .and_then(move |_| Task::done(FormatAction::MarkSaved(i).into()))
-            });
-        Task::batch(tasks)
-    }
-
-    pub fn get_build_content(
-        &self,
-    ) -> Option<(DocBuilder, Option<PathBuf>, String, Vec<BuilderPage>)> {
-        let doc_builder = self.builder.clone()?;
-        let toc = self.toc_path.clone();
-        let epub_name = self.epub_name.clone();
-        let pages = self
-            .pages
-            .iter()
-            .map(|FormatPage { path, content, .. }| BuilderPage {
-                path: path.clone(),
-                content: content.text(),
-            })
-            .collect::<Vec<BuilderPage>>();
-        Some((doc_builder, toc, epub_name, pages))
+        let doc_builder = DocBuilder {
+            epub,
+            name,
+            pages,
+            builder,
+        };
+        Some(doc_builder)
     }
 
     pub fn perform(&mut self, action: FormatAction) -> Task<Message> {
         match action {
             FormatAction::SelectEpub => Task::future(open_epub())
                 .and_then(|doc| Task::done(FormatAction::SetEpub(doc).into())),
-            FormatAction::SelectFolder => {
-                Task::future(select_format_folder()).and_then(|(folder, pages)| {
-                    Task::done(FormatAction::SetPages(pages).into())
-                        .chain(Task::done(FormatAction::SetFolder(folder).into()))
-                })
-            }
-            FormatAction::SelectToc => Task::future(select_toc_file())
-                .and_then(|path| Task::done(FormatAction::SetToc(path).into())),
-            FormatAction::SetPage(page) => self.set_current_page(page),
-            FormatAction::SetPages(pages) => self.set_pages(pages),
-            FormatAction::EditContent(action) => self.edit_current_content(action),
-            FormatAction::SaveFiles => self.save_files(),
-            FormatAction::SetToc(path) => self.set_toc(path),
-            FormatAction::MarkSaved(page) => self.mark_saved(page),
-            FormatAction::SetEpub(doc) => self.set_epub(doc),
-            FormatAction::SetFolder(folder) => self.set_folder(folder),
+            FormatAction::SelectFolder => Task::future(select_format_folder())
+                .and_then(|(f, p)| Task::done(FormatAction::SetPages(f, p).into())),
+            FormatAction::SetPage(page) => self.set_current_page(page).into(),
+            FormatAction::SetPages(folder, pages) => self.set_pages(folder, pages).into(),
+            FormatAction::EditContent(action) => self.edit_current_content(action).into(),
+            FormatAction::SetEpub(doc) => Task::done(self.set_epub(doc)).then(|r| match r {
+                Ok(_) => Task::none(),
+                Err(error) => Task::future(display_error(error)).discard(),
+            }),
             FormatAction::Build => Task::done(self.get_build_content())
-                .and_then(|(builder, toc, name, pages)| Task::done(builder.build(toc, name, pages)))
+                .and_then(|builder| Task::done(builder.build()))
                 .then(|content| match content {
                     Ok((content, name)) => Task::future(save_epub(content, name)),
                     Err(error) => Task::done(Err(error)),
                 })
                 .then(|e| match e {
                     Ok(_) => Task::none(),
-                    Err(error) => Task::future(display_error(error.to_string())),
+                    Err(error) => Task::future(display_error(error)),
                 })
                 .discard(),
         }
     }
 }
 
-/* .then(|res| match res {
-    Ok(_) => Task::none(),
-    Err(error) => Task::future(display_error(error.to_string())),
-}) */
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum FormatAction {
     SetPage(usize),
     SelectFolder,
-    SetFolder(String),
-    SetPages(Vec<(PathBuf, String)>),
-    SetToc(PathBuf),
-    MarkSaved(usize),
+    SetPages(String, Vec<(PathBuf, String)>),
     EditContent(text_editor::Action),
-    SaveFiles,
-    SelectToc,
     SelectEpub,
     SetEpub((String, Vec<u8>)),
     Build,
@@ -174,7 +118,6 @@ pub enum FormatAction {
 pub struct FormatPage {
     pub path: PathBuf,
     pub content: text_editor::Content,
-    pub changed: bool,
 }
 
 impl<S: AsRef<str>> From<(PathBuf, S)> for FormatPage {
@@ -182,17 +125,8 @@ impl<S: AsRef<str>> From<(PathBuf, S)> for FormatPage {
         FormatPage {
             path,
             content: Content::with_text(content.as_ref()),
-            changed: false,
         }
     }
-}
-
-async fn select_toc_file() -> Option<PathBuf> {
-    let handle = rfd::AsyncFileDialog::new()
-        .set_title("select table of contents")
-        .pick_file()
-        .await?;
-    Some(handle.path().to_path_buf())
 }
 
 pub async fn select_format_folder() -> Option<(String, Vec<(PathBuf, String)>)> {
@@ -219,7 +153,7 @@ pub async fn select_format_folder() -> Option<(String, Vec<(PathBuf, String)>)> 
     Some((handle.file_name(), pages))
 }
 
-pub async fn save_epub<T: Into<String>>(content: Vec<u8>, file_name: T) -> anyhow::Result<()> {
+pub async fn save_epub<T: Into<String>>(content: Vec<u8>, file_name: T) -> Result<()> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("save epub")
         .set_file_name(file_name)

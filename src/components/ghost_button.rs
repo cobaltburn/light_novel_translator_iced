@@ -1,11 +1,10 @@
-use crate::message::Message;
 use iced::widget::button::Status;
-use iced::widget::{button, Button};
-use iced::{advanced, Border, Color, Element, Renderer, Theme};
+use iced::widget::{Button, button};
+use iced::{Border, Color, Element, Renderer, Theme, advanced};
 
-pub fn ghost_button<'a>(
-    content: impl Into<Element<'a, Message, Theme, Renderer>>,
-) -> Button<'a, Message, Theme, Renderer>
+pub fn ghost_button<'a, T: 'a>(
+    content: impl Into<Element<'a, T, Theme, Renderer>>,
+) -> Button<'a, T, Theme, Renderer>
 where
     Theme: button::Catalog + 'a,
     Renderer: advanced::Renderer,

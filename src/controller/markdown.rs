@@ -1,9 +1,9 @@
-use crate::controller::{error::Error, xml::part_tag};
+use crate::{controller::xml::part_tag, error::Result};
 use htmd::HtmlToMarkdown;
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use std::{collections::HashMap, path::PathBuf};
 
-pub fn convert_html(html: &str) -> Result<String, Error> {
+pub fn convert_html(html: &str) -> Result<String> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(vec!["head", "img", "image"])
         .build();

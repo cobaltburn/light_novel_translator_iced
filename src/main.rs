@@ -5,6 +5,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 pub mod app;
 pub mod components;
 pub mod controller;
+pub mod error;
 pub mod message;
 pub mod state;
 pub mod view;

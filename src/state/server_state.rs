@@ -1,12 +1,11 @@
 use crate::{
     controller::server::{Connection, Server},
-    message::Message,
+    message::{Message, display_error},
 };
 use genai::{Client, resolver::AuthData};
 use iced::{Task, task::Handle};
 use ollama_rs::Ollama;
 
-#[non_exhaustive]
 #[derive(Default, Debug)]
 pub struct ServerState {
     pub server: Server,
@@ -14,7 +13,7 @@ pub struct ServerState {
     pub current_model: Option<String>,
     pub api_key: String,
     pub handles: Vec<Handle>,
-    pub think: bool,
+    pub settings: Settings,
 }
 
 impl ServerState {
@@ -33,18 +32,17 @@ impl ServerState {
             .with_auth_resolver_fn(|_| Ok(Some(AuthData::from_single(api_key))))
             .build();
         self.server = Server::claude(client);
-        Task::perform(self.server.clone().get_models(), |models| match models {
-            Ok(models) => ServerAction::SetModels(models).into(),
-            Err(error) => Message::Error(error.to_string()),
+        Task::future(self.server.clone().get_models()).then(|models| match models {
+            Ok(models) => Task::done(ServerAction::SetModels(models).into()),
+            Err(error) => Task::future(display_error(error)).discard(),
         })
     }
 
     pub fn connect_ollama(&mut self) -> Task<Message> {
         self.server = Server::ollama(Ollama::default());
-
-        Task::perform(self.server.clone().get_models(), |models| match models {
-            Ok(models) => ServerAction::SetModels(models).into(),
-            Err(error) => Message::Error(error.to_string()),
+        Task::future(self.server.clone().get_models()).then(|models| match models {
+            Ok(models) => Task::done(ServerAction::SetModels(models).into()),
+            Err(error) => Task::future(display_error(error)).discard(),
         })
     }
 
@@ -68,7 +66,11 @@ impl ServerState {
     }
 
     pub fn set_thinking(&mut self, toggled: bool) {
-        self.think = toggled
+        self.settings.think = toggled
+    }
+
+    pub fn set_pause(&mut self, pause: u64) {
+        self.settings.pause = pause;
     }
 
     pub fn perform(&mut self, action: ServerAction) -> Task<Message> {
@@ -78,19 +80,26 @@ impl ServerState {
             ServerAction::Connect(Connection::Ollama) => self.connect_ollama(),
             ServerAction::Connect(Connection::Claude(key)) => self.connect_claude(key),
             ServerAction::EditApiKey(key) => self.edit_api_key(key).into(),
-            ServerAction::ThinkingToggled(toggled) => self.set_thinking(toggled).into(),
+            ServerAction::ThinkToggled(toggled) => self.set_thinking(toggled).into(),
+            ServerAction::SetPause(pause) => self.set_pause(pause).into(),
             ServerAction::Abort => self.abort().into(),
         }
     }
 }
 
-#[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum ServerAction {
     SelectModel(String),
     SetModels(Vec<String>),
     Connect(Connection),
     EditApiKey(String),
-    ThinkingToggled(bool),
+    ThinkToggled(bool),
+    SetPause(u64),
     Abort,
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct Settings {
+    pub think: bool,
+    pub pause: u64,
 }
