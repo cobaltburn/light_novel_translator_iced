@@ -34,10 +34,4 @@ pub enum Error {
     EpubBuilderError(#[from] epub_builder::Error),
 }
 
-/* impl From<std::io::Error> for Error {
-    fn from(error: std::io::Error) -> Self {
-        Error::IOError(error.kind())
-    }
-} */
-
 pub type Result<T> = std::result::Result<T, Error>;

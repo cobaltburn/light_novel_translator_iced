@@ -1,43 +1,32 @@
-use crate::error::Error;
-use crate::state::format_model::FormatAction;
-use crate::state::{
-    doc_model::DocAction, server_state::ServerAction, translation_model::TransAction,
-    translator::Translator,
+use crate::actions::{
+    doc_action::DocAction, format_action::FormatAction, trans_action::TransAction,
 };
-use crate::view::View;
+use crate::{error::Error, state::translator::Translator, view::View};
 use iced::Task;
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum Message {
     DocAction(DocAction),
-    TranslationAction(TransAction),
+    TranslationAction(usize, TransAction),
     FormatAction(FormatAction),
     SetView(View),
     ToggleSideBar,
+    SelectTab(usize),
+    CloseTab(usize),
 }
 
 impl Translator {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::DocAction(action) => self.doc_model.perform(action),
-            Message::TranslationAction(action) => self.translation_model.perform(action),
+            Message::TranslationAction(tab, action) => self.translation_action(tab, action),
             Message::FormatAction(action) => self.format_model.perform(action),
             Message::SetView(view) => self.set_view(view).into(),
             Message::ToggleSideBar => self.toggle_side_bar_collapse().into(),
+            Message::SelectTab(tab) => self.set_tab(tab).into(),
+            Message::CloseTab(tab) => self.close_tab(tab).into(),
         }
-    }
-}
-
-impl From<TransAction> for Message {
-    fn from(action: TransAction) -> Self {
-        Message::TranslationAction(action)
-    }
-}
-
-impl From<ServerAction> for Message {
-    fn from(action: ServerAction) -> Self {
-        Message::TranslationAction(TransAction::ServerAction(action))
     }
 }
 

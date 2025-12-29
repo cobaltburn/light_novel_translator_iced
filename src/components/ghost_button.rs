@@ -1,8 +1,8 @@
 use iced::widget::button::Status;
 use iced::widget::{Button, button};
-use iced::{Border, Color, Element, Renderer, Theme, advanced};
+use iced::{Border, Element, Renderer, Theme, advanced};
 
-pub fn ghost_button<'a, T: 'a>(
+pub fn text_button<'a, T: 'a>(
     content: impl Into<Element<'a, T, Theme, Renderer>>,
 ) -> Button<'a, T, Theme, Renderer>
 where
@@ -11,18 +11,15 @@ where
 {
     button(content).style(|theme, status| match status {
         Status::Hovered => button::Style {
-            text_color: Color::WHITE,
             border: Border {
                 color: theme.palette().primary,
                 width: 1.0,
                 radius: 0.into(),
             },
-            ..Default::default()
+            ..button::text(theme, status)
         },
         _ => button::Style {
-            text_color: Color::WHITE,
-            background: None,
-            ..Default::default()
+            ..button::text(theme, status)
         },
     })
 }

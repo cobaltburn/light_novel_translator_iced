@@ -15,6 +15,7 @@ log = { version = "0.4.27" }
 ollama-rs = { version = "0.3.3", features = ["stream", "tokio", "tokio-stream"] }
 pulldown-cmark = "0.13.0"
 quick-xml = { version = "0.37.5", features = ["tokio"] }
+rayon = "1.11.0"
 regex = "1.11.2"
 reqwest = "0.12.26"
 rfd = { version = "0.15.3", default-features = false, features = ["tokio", "xdg-portal"] }

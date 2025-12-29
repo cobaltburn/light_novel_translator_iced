@@ -1,5 +1,5 @@
 use crate::{
-    components::ghost_button::ghost_button, message::Message, state::translator::Translator,
+    components::ghost_button::text_button, message::Message, state::translator::Translator,
     view::View,
 };
 use iced::alignment::Horizontal;
@@ -20,8 +20,8 @@ pub fn side_bar_container(state: &Translator) -> Container<'_, Message> {
 pub fn side_bar(state: &Translator) -> Container<'_, Message> {
     container(scrollable(column![
         side_bar_toggle(state).width(Length::Fill),
-        side_bar_button(View::Doc, &state.view),
         side_bar_button(View::Translation, &state.view),
+        side_bar_button(View::Doc, &state.view),
         side_bar_button(View::Format, &state.view),
     ]))
     .width(200)
@@ -41,12 +41,16 @@ pub fn side_bar_collapsed(state: &Translator) -> Container<'_, Message> {
 }
 
 pub fn side_bar_button(view: View, current_view: &View) -> Button<'static, Message> {
-    let mut button_text = text(view.to_string()).center();
-    if &view == current_view {
-        button_text = button_text.color(color!(0x2ac3de))
-    }
+    let current = &view == current_view;
+    let button_text = text(view.to_string()).center().style(move |theme| {
+        if current {
+            text::primary(theme)
+        } else {
+            text::base(theme)
+        }
+    });
 
-    ghost_button(button_text)
+    text_button(button_text)
         .on_press(Message::SetView(view))
         .padding(10)
         .width(Length::Fill)

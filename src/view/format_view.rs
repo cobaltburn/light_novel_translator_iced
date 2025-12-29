@@ -1,9 +1,7 @@
 use crate::{
-    components::ghost_button::ghost_button,
-    state::{
-        format_model::{FormatAction, FormatModel},
-        translator::Translator,
-    },
+    actions::format_action::FormatAction,
+    components::ghost_button::text_button,
+    state::{format_model::FormatModel, translator::Translator},
     view::menu_button,
 };
 use iced::{
@@ -24,7 +22,7 @@ pub fn format_view(Translator { format_model, .. }: &Translator) -> Element<'_, 
             row![format_side_bar(format_model), format_text(format_model)].spacing(10)
         ]
         .height(Length::FillPortion(9))
-        .padding(10),
+        .padding(20),
         vertical(),
     ])
     .width(Length::Fill)
@@ -140,7 +138,7 @@ fn format_path_buttons(model: &FormatModel) -> Vec<Element<'_, FormatAction>> {
                 button_text = button_text.color(color!(0x2ac3de))
             }
 
-            ghost_button(row![button_text, Space::new().width(10)])
+            text_button(row![button_text, Space::new().width(10)])
                 .on_press(FormatAction::SetPage(i))
                 .into()
         })

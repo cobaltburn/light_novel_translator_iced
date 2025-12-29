@@ -1,4 +1,5 @@
-use crate::state::doc_model::{DocAction, DocModel};
+use crate::actions::doc_action::DocAction;
+use crate::state::doc_model::DocModel;
 use crate::state::translator::Translator;
 use crate::view::text_scrollable;
 use iced::alignment::Horizontal;
@@ -18,6 +19,7 @@ pub fn doc_view(Translator { doc_model, .. }: &Translator) -> Element<'_, DocAct
     .align_top(Length::Fill)
     .width(Length::Fill)
     .height(Length::Fill)
+    .padding(10)
     .into()
 }
 

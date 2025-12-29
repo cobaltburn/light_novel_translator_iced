@@ -1,7 +1,7 @@
 use regex::Regex;
 
 pub fn part_tag(n: usize) -> String {
-    format!("<part>{}</part>", n)
+    format!("\n\n<part>{}</part>\n\n", n)
 }
 
 pub fn remove_think_tags(text: &str) -> String {

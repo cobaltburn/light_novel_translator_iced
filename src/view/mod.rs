@@ -4,7 +4,7 @@ use iced::{
     alignment::{Horizontal, Vertical},
     widget::{Button, Container, button, container, scrollable, text},
 };
-use std::fmt;
+use std::fmt::{self, Display};
 
 pub mod doc_view;
 pub mod format_view;
@@ -13,8 +13,8 @@ pub mod translation_view;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum View {
     #[default]
-    Doc,
     Translation,
+    Doc,
     Format,
 }
 
@@ -31,9 +31,9 @@ impl fmt::Display for View {
 
 pub const NOTO_SANS: Font = Font::with_name("Noto Sans CJK JP");
 
-pub fn text_scrollable<'a, T: 'a>(content: &'a str) -> Container<'a, T> {
+pub fn text_scrollable<'a, T: Display, E: 'a>(content: T) -> Container<'a, E> {
     let scroll = scrollable(
-        text(content)
+        text(content.to_string())
             .width(Length::Fill)
             .align_x(Horizontal::Left)
             .align_y(Vertical::Center)
@@ -50,7 +50,7 @@ pub fn text_scrollable<'a, T: 'a>(content: &'a str) -> Container<'a, T> {
             },
             ..Default::default()
         })
-        .height(Length::FillPortion(10))
+        .height(Length::Fill)
         .width(Length::Fill)
         .padding(Padding::new(10.0).right(5))
 }
