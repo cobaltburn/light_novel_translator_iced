@@ -1,3 +1,6 @@
+use std::cell::LazyCell;
+use std::path::PathBuf;
+
 use crate::components::side_bar::side_bar_container;
 use crate::message::Message;
 use crate::state::translator::Translator;
@@ -8,6 +11,17 @@ use iced::alignment::Horizontal;
 use iced::widget::{column, container, row};
 use iced::{Element, Length, Theme};
 use iced_aw::ICED_AW_FONT_BYTES;
+
+pub const ICONS: LazyCell<PathBuf> = LazyCell::new(|| {
+    let mut path = std::env::current_exe()
+        .expect("Failed to get executable path")
+        .parent()
+        .expect("Failed to get parent directory")
+        .to_path_buf();
+
+    path.push("icons");
+    path
+});
 
 pub fn app() -> iced::Result {
     iced::application(Translator::default, Translator::update, Translator::view)

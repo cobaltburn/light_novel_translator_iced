@@ -28,6 +28,7 @@ pub enum TransAction {
     },
     PageComplete(usize),
     SavePages(PathBuf),
+    SavePage(String, usize),
     OpenEpub,
     SetEpub((String, Vec<Page>)),
     Translate(usize),
@@ -54,6 +55,8 @@ impl TranslationModel {
             TransAction::TranslatePart(page, part) => self.translate_part(page, part),
             TransAction::SavePages(path) => self.save_pages(path),
             TransAction::SetEpub((file_name, buffer)) => self.set_epub(file_name, buffer).into(),
+            TransAction::SetMethod(method) => self.set_method(method).into(),
+            TransAction::SavePage(file_name, page) => self.save_page(file_name, page),
             TransAction::OpenEpub => Task::future(open_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .then(|doc| match doc {
@@ -66,7 +69,6 @@ impl TranslationModel {
                     Ok(path) => Task::done(TransAction::SavePages(path).into()),
                     Err(err) => Task::future(display_error(err)).discard(),
                 }),
-            TransAction::SetMethod(method) => self.set_method(method).into(),
         }
     }
 
@@ -89,6 +91,16 @@ impl TranslationModel {
     pub fn mark_complete(&mut self, page: usize) {
         if let Some(page) = self.pages.get_mut(page) {
             page.complete = true;
+        }
+    }
+
+    pub fn save_page(&mut self, file_name: String, page: usize) -> Task<TransAction> {
+        match self.pages.get(page) {
+            Some(page) => {
+                let content = page.text.join(" ");
+                Task::future(save_file(file_name, content)).discard()
+            }
+            None => Task::none(),
         }
     }
 
@@ -129,7 +141,13 @@ impl TranslationModel {
         };
 
         let Some(current_page) = self.pages.get_mut(page) else {
-            return Task::done(ServerAction::Abort.into());
+            let file_name = self.file_name.clone();
+            return Task::done(ServerAction::Abort.into()).chain(
+                Task::future(complete_dialog(file_name.clone())).then(move |x| match x {
+                    true => Task::done(TransAction::SaveTranslation(file_name.clone())),
+                    false => Task::none(),
+                }),
+            );
         };
 
         current_page.clear_content();
@@ -239,6 +257,19 @@ pub async fn pick_save_folder(file_name: String) -> Option<PathBuf> {
     Some(handle.path().to_path_buf())
 }
 
+pub async fn save_file(file_name: String, content: String) -> Result<()> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("save translation")
+        .set_file_name(file_name)
+        .save_file()
+        .await;
+
+    if let Some(handle) = handle {
+        handle.write(content.as_bytes()).await?
+    }
+    Ok(())
+}
+
 pub async fn get_pages(file_name: String, buffer: Vec<u8>) -> Result<(String, Vec<Page>)> {
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 
@@ -262,4 +293,20 @@ pub async fn get_pages(file_name: String, buffer: Vec<u8>) -> Result<(String, Ve
         .collect();
 
     Ok((file_name, pages?))
+}
+
+pub async fn complete_dialog(file_name: String) -> bool {
+    let file_name = Path::new(&file_name)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+
+    let dialog = rfd::AsyncMessageDialog::new()
+        .set_title("Translation Complete")
+        .set_description(format!("Save: {}", file_name))
+        .set_buttons(rfd::MessageButtons::YesNo)
+        .show()
+        .await;
+
+    matches!(dialog, rfd::MessageDialogResult::Yes)
 }

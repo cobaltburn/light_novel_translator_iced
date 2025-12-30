@@ -18,7 +18,8 @@ quick-xml = { version = "0.37.5", features = ["tokio"] }
 rayon = "1.11.0"
 regex = "1.11.2"
 reqwest = "0.12.26"
-rfd = { version = "0.15.3", default-features = false, features = ["tokio", "xdg-portal"] }
+rfd = { version = "0.16.0", default-features = false, features = ["tokio", "xdg-portal"] }
+# rfd = { version = "0.16.0", default-features = false, features = ["tokio", "gtk3"] }
 thiserror = "2.0.12"
 tokio = { version = "1.45.1", features = ["fs", "rt-multi-thread", "time", "tokio-macros"] }
 tokio-stream = "0.1.17"

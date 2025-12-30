@@ -63,4 +63,5 @@ fn add_handle(handles: &mut Vec<Handle>, task: Task<TransAction>) -> Task<TransA
 pub struct Settings {
     pub think: bool,
     pub pause: u64,
+    pub tempature: f32,
 }

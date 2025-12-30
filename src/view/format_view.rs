@@ -1,6 +1,6 @@
 use crate::{
     actions::format_action::FormatAction,
-    components::ghost_button::text_button,
+    components::text_button,
     state::{format_model::FormatModel, translator::Translator},
     view::menu_button,
 };

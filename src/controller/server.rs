@@ -170,7 +170,7 @@ impl Server {
         section: String,
         page: usize,
         part: usize,
-        Settings { think, pause }: Settings,
+        Settings { think, pause, .. }: Settings,
     ) -> Task<TransAction> {
         Task::future(self.ollama_stream(model, section, think))
             .then(move |stream| match stream {
@@ -207,6 +207,7 @@ impl Server {
             ChatMessage::system(SYSTEM_PROMPT.to_string()),
             ChatMessage::user(section),
         ];
+
         let request = ChatMessageRequest::new(model.clone(), messages).think(think);
 
         let stream = loop {

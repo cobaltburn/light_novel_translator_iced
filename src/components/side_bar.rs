@@ -1,9 +1,6 @@
-use crate::{
-    components::ghost_button::text_button, message::Message, state::translator::Translator,
-    view::View,
-};
+use crate::app::ICONS;
+use crate::{components::text_button, message::Message, state::translator::Translator, view::View};
 use iced::alignment::Horizontal;
-use iced::color;
 use iced::widget::{Button, Container, svg};
 use iced::{
     Border, Color, Length,
@@ -46,7 +43,7 @@ pub fn side_bar_button(view: View, current_view: &View) -> Button<'static, Messa
         if current {
             text::primary(theme)
         } else {
-            text::base(theme)
+            text::default(theme)
         }
     });
 
@@ -57,10 +54,9 @@ pub fn side_bar_button(view: View, current_view: &View) -> Button<'static, Messa
 }
 
 pub fn side_bar_toggle(state: &Translator) -> Button<'_, Message> {
-    let image_path = if state.side_bar_collapsed {
-        "./icons/chevron-right.svg"
-    } else {
-        "./icons/chevron-left.svg"
+    let image_path = match state.side_bar_collapsed {
+        true => &ICONS.join("chevron-right.svg"),
+        false => &ICONS.join("chevron-left.svg"),
     };
 
     button(

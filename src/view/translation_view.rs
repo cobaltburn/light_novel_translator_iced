@@ -1,5 +1,5 @@
 use crate::actions::{server_action::ServerAction, trans_action::TransAction};
-use crate::components::ghost_button::text_button;
+use crate::components::{context_menu_button, text_button};
 use crate::controller::server::Connection;
 use crate::message::Message;
 use crate::state::translation_model::Method;
@@ -14,7 +14,7 @@ use iced::widget::{
     Button, Column, Container, Row, button, checkbox, column, container, pick_list, radio, row,
     scrollable, svg, text, text_input,
 };
-use iced::{Border, Color, Element, Function, Length, Padding, Renderer, Theme, color};
+use iced::{Border, Color, Element, Function, Length, Padding, Renderer, Theme};
 use iced_aw::card::Status;
 use iced_aw::menu::Item;
 use iced_aw::style::tab_bar;
@@ -81,11 +81,11 @@ pub fn translation_tab(model: &TranslationModel) -> Element<'_, TransAction> {
     .into()
 }
 
-pub fn translation_menu_bar(state: &TranslationModel) -> Row<'_, TransAction> {
+pub fn translation_menu_bar(model: &TranslationModel) -> Row<'_, TransAction> {
     row![
-        MenuBar::new(vec![file_menu(state), server_menu(state),]).spacing(5),
-        translate_button(state),
-        model_pick_list(state),
+        MenuBar::new(vec![file_menu(model), server_menu(model),]).spacing(5),
+        translate_button(model),
+        model_pick_list(model),
     ]
     .width(Length::Fill)
     .spacing(5)
@@ -139,13 +139,14 @@ pub fn translation_path_buttons(model: &TranslationModel) -> Column<'_, TransAct
         .enumerate()
         .map(|(i, page)| {
             let name = page.path.file_stem().unwrap().to_string_lossy();
-            let button_text = text(format!("{}. {}", i + 1, name))
+            let button_text = text(format!("{}. {}", i + 1, &name))
+                .color(Color::WHITE)
                 .width(Length::Fill)
                 .style(move |theme| {
                     if model.current_page.is_some_and(|p| p == i) {
                         text::primary(theme)
                     } else {
-                        text::base(theme)
+                        text::default(theme)
                     }
                 });
 
@@ -157,27 +158,42 @@ pub fn translation_path_buttons(model: &TranslationModel) -> Column<'_, TransAct
             let connected = model.server_state.connected();
             let underlay = text_button(button_content).on_press(TransAction::SetPage(i));
 
-            ContextMenu::new(underlay, move || path_button_overlay(count, i, connected)).into()
+            ContextMenu::new(underlay, move || {
+                path_button_overlay(count, name.to_string(), i, connected)
+            })
+            .into()
         })
         .collect()
 }
 
-fn path_button_overlay<'a>(count: usize, page: usize, connected: bool) -> Element<'a, TransAction> {
-    let overlay = column![
-        text_button(text("translate"))
-            .on_press_maybe(connected.then_some(TransAction::Translate(page))),
-        text_button(text("translate page"))
-            .on_press_maybe(connected.then_some(TransAction::TranslatePage(page)))
-    ];
-
+fn path_button_overlay<'a>(
+    count: usize,
+    name: String,
+    page: usize,
+    connected: bool,
+) -> Element<'a, TransAction> {
     let part_buttons = (0..count).map(|i| {
-        text_button(text(format!("translate part {}", i + 1)))
+        context_menu_button(text(format!("translate part {}", i + 1)).color(Color::WHITE))
             .on_press_maybe(connected.then_some(TransAction::TranslatePart(page, i)))
             .into()
     });
 
-    container(overlay.extend(part_buttons))
+    let overlay = column![
+        context_menu_button(text("save").color(Color::WHITE))
+            .on_press(TransAction::SavePage(name, page)),
+        context_menu_button(text("translate").color(Color::WHITE))
+            .on_press_maybe(connected.then_some(TransAction::Translate(page))),
+        context_menu_button(text("translate page").color(Color::WHITE))
+            .on_press_maybe(connected.then_some(TransAction::TranslatePage(page)))
+    ]
+    .extend(part_buttons)
+    .padding(5)
+    .spacing(5);
+
+    container(scrollable(overlay).width(Length::Fill))
         .style(container::rounded_box)
+        .max_height(400)
+        .width(300)
         .into()
 }
 

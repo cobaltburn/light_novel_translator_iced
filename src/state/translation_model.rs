@@ -60,10 +60,7 @@ pub enum Method {
 }
 
 impl Method {
-    pub fn join_tasks(
-        &self,
-        tasks: impl IntoIterator<Item = Task<TransAction>>,
-    ) -> Task<TransAction> {
+    pub fn join_tasks(&self, tasks: Vec<Task<TransAction>>) -> Task<TransAction> {
         match self {
             Method::Batch => Task::batch(tasks),
             Method::Chain => {
