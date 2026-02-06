@@ -1,11 +1,10 @@
 use crate::{
-    controller::builder::epub::{BuilderPage, DocBuilder},
+    controller::builder::DocBuilder,
     error::Result,
     message::{Message, display_error, open_epub},
-    state::format_model::{FormatModel, FormatPage},
+    model::format::{Format, FormatPage},
 };
 use epub::doc::EpubDoc;
-use epub_builder::{EpubBuilder, ZipLibrary};
 use iced::{Task, widget::text_editor};
 use std::{ffi::OsStr, fs::read_dir, io::Cursor, mem, path::PathBuf};
 use tokio::fs::read_to_string;
@@ -22,7 +21,7 @@ pub enum FormatAction {
     Build,
 }
 
-impl FormatModel {
+impl Format {
     pub fn perform(&mut self, action: FormatAction) -> Task<Message> {
         match action {
             FormatAction::SelectEpub => Task::future(open_epub())
@@ -37,7 +36,10 @@ impl FormatModel {
                 Err(error) => Task::future(display_error(error)).discard(),
             }),
             FormatAction::Build => Task::done(self.get_build_content())
-                .and_then(|builder| Task::done(builder.build()))
+                .then(|builder| match builder {
+                    Ok(builder) => Task::done(builder.build()),
+                    Err(error) => Task::done(Err(error)),
+                })
                 .then(|content| match content {
                     Ok((content, name)) => Task::future(save_epub(content, name)),
                     Err(error) => Task::done(Err(error)),
@@ -78,21 +80,13 @@ impl FormatModel {
         Ok(())
     }
 
-    pub fn get_build_content(&mut self) -> Option<DocBuilder> {
+    pub fn get_build_content(&mut self) -> Result<DocBuilder> {
         let name = mem::take(&mut self.epub_name);
-        let epub = mem::take(&mut self.epub)?;
+        let epub = mem::take(&mut self.epub).unwrap();
         let pages = mem::take(&mut self.pages);
-        let pages = pages.into_iter().map(BuilderPage::from).collect();
-        let builder = EpubBuilder::new(ZipLibrary::new().ok()?).ok()?;
         self.source_folder.clear();
 
-        let doc_builder = DocBuilder {
-            epub,
-            name,
-            pages,
-            builder,
-        };
-        Some(doc_builder)
+        DocBuilder::new(epub, name, pages)
     }
 }
 

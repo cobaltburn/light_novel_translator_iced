@@ -1,7 +1,7 @@
 use crate::{
-    controller::markdown::{convert_html, join_partition, partition_text},
+    controller::parse::{convert_html, join_partition, partition_text},
     message::{Message, display_error, open_epub},
-    state::doc_model::DocModel,
+    model::doc::Doc,
 };
 use epub::doc::EpubDoc;
 use iced::Task;
@@ -17,7 +17,7 @@ pub enum DocAction {
     Dec,
 }
 
-impl DocModel {
+impl Doc {
     pub fn perform(&mut self, action: DocAction) -> Task<Message> {
         match action {
             DocAction::OpenEpub => Task::future(open_epub())

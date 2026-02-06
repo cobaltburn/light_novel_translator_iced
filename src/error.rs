@@ -9,9 +9,6 @@ pub enum Error {
     #[error(transparent)]
     OllamaError(#[from] ollama_rs::error::OllamaError),
 
-    #[error(transparent)]
-    GenaiError(#[from] genai::Error),
-
     #[error("ServerError: {0}")]
     ServerError(&'static str),
 
@@ -32,6 +29,12 @@ pub enum Error {
 
     #[error(transparent)]
     EpubBuilderError(#[from] epub_builder::Error),
+
+    #[error(transparent)]
+    IconError(#[from] iced::window::icon::Error),
+
+    #[error(transparent)]
+    IcedError(#[from] iced::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

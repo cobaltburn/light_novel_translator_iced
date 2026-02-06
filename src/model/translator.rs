@@ -1,7 +1,7 @@
 use crate::{
     actions::trans_action::TransAction,
     message::Message,
-    state::{doc_model::DocModel, format_model::FormatModel, translation_model::TranslationModel},
+    model::{doc::Doc, extraction::Extraction, format::Format, translation::Translation},
     view::View,
 };
 use iced::{Function, Task};
@@ -11,10 +11,11 @@ use iced::{Function, Task};
 pub struct Translator {
     pub view: View,
     pub side_bar_collapsed: bool,
-    pub current_tab: usize,
-    pub doc_model: DocModel,
-    pub translation_models: Vec<TranslationModel>,
-    pub format_model: FormatModel,
+    pub active_tab: usize,
+    pub doc: Doc,
+    pub translations: Vec<Translation>,
+    pub format: Format,
+    pub extraction: Extraction,
 }
 
 impl Default for Translator {
@@ -22,16 +23,17 @@ impl Default for Translator {
         Self {
             view: Default::default(),
             side_bar_collapsed: Default::default(),
-            current_tab: Default::default(),
-            doc_model: Default::default(),
-            translation_models: vec![
-                TranslationModel::default(),
-                TranslationModel::default(),
-                TranslationModel::default(),
-                TranslationModel::default(),
-                TranslationModel::default(),
+            active_tab: Default::default(),
+            doc: Default::default(),
+            translations: vec![
+                Translation::default(),
+                Translation::default(),
+                Translation::default(),
+                Translation::default(),
+                Translation::default(),
             ],
-            format_model: Default::default(),
+            format: Default::default(),
+            extraction: Extraction::default(),
         }
     }
 }
@@ -46,19 +48,19 @@ impl Translator {
     }
 
     pub fn set_tab(&mut self, tab: usize) {
-        self.current_tab = tab;
+        self.active_tab = tab;
     }
 
     pub fn close_tab(&mut self, tab: usize) {
-        self.translation_models.remove(tab);
+        self.translations.remove(tab);
 
-        if self.translation_models.get(self.current_tab).is_none() {
-            self.current_tab -= 1;
+        if self.translations.get(self.active_tab).is_none() {
+            self.active_tab -= 1;
         }
     }
 
     pub fn translation_action(&mut self, tab: usize, action: TransAction) -> Task<Message> {
-        match self.translation_models.get_mut(tab) {
+        match self.translations.get_mut(tab) {
             Some(model) => model
                 .perform(action)
                 .map(Message::TranslationAction.with(tab)),

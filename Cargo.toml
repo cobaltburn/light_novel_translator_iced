@@ -5,21 +5,21 @@ edition = "2024"
 
 [dependencies]
 async-stream = "0.3.6"
+base64 = "0.22.1"
+# config = "0.15.19"
 epub = "2.1.4"
 epub-builder = "0.8.0"
-genai = "0.4.4"
 htmd = "0.2.2"
-iced = { version = "0.14.0", features = ["advanced", "debug", "lazy", "markdown", "svg", "tokio"] }
+iced = { version = "0.14.0", features = ["advanced", "debug", "image", "lazy", "markdown", "svg", "tokio"] }
 iced_aw = "0.13.0"
 log = { version = "0.4.27" }
 ollama-rs = { version = "0.3.3", features = ["stream", "tokio", "tokio-stream"] }
 pulldown-cmark = "0.13.0"
 quick-xml = { version = "0.37.5", features = ["tokio"] }
-rayon = "1.11.0"
 regex = "1.11.2"
 reqwest = "0.12.26"
-rfd = { version = "0.16.0", default-features = false, features = ["tokio", "xdg-portal"] }
-# rfd = { version = "0.16.0", default-features = false, features = ["tokio", "gtk3"] }
+rfd = { version = "0.17.2", features = ["xdg-portal"] }
+# serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "2.0.12"
 tokio = { version = "1.45.1", features = ["fs", "rt-multi-thread", "time", "tokio-macros"] }
 tokio-stream = "0.1.17"

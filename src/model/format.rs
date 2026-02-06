@@ -4,7 +4,7 @@ use std::{io::Cursor, path::PathBuf};
 
 #[non_exhaustive]
 #[derive(Default, Debug)]
-pub struct FormatModel {
+pub struct Format {
     pub pages: Vec<FormatPage>,
     pub current_page: Option<usize>,
     pub source_folder: String,
@@ -12,7 +12,7 @@ pub struct FormatModel {
     pub epub: Option<EpubDoc<Cursor<Vec<u8>>>>,
 }
 
-impl FormatModel {
+impl Format {
     pub fn current_content(&self) -> Option<&Content> {
         let page = self.current_page?;
         self.pages.get(page).map(|e| &e.content)

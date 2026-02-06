@@ -1,7 +1,8 @@
+use crate::actions::extraction_action::ExtractAction;
 use crate::actions::{
     doc_action::DocAction, format_action::FormatAction, trans_action::TransAction,
 };
-use crate::{error::Error, state::translator::Translator, view::View};
+use crate::{error::Error, model::translator::Translator, view::View};
 use iced::Task;
 
 #[non_exhaustive]
@@ -10,6 +11,7 @@ pub enum Message {
     DocAction(DocAction),
     TranslationAction(usize, TransAction),
     FormatAction(FormatAction),
+    ExtractAction(ExtractAction),
     SetView(View),
     ToggleSideBar,
     SelectTab(usize),
@@ -20,9 +22,10 @@ pub enum Message {
 impl Translator {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::DocAction(action) => self.doc_model.perform(action),
+            Message::DocAction(action) => self.doc.perform(action),
             Message::TranslationAction(tab, action) => self.translation_action(tab, action),
-            Message::FormatAction(action) => self.format_model.perform(action),
+            Message::FormatAction(action) => self.format.perform(action),
+            Message::ExtractAction(action) => self.extraction.perform(action).map(Into::into),
             Message::SetView(view) => self.set_view(view).into(),
             Message::ToggleSideBar => self.toggle_side_bar_collapse().into(),
             Message::SelectTab(tab) => self.set_tab(tab).into(),
@@ -41,6 +44,12 @@ impl From<DocAction> for Message {
 impl From<FormatAction> for Message {
     fn from(action: FormatAction) -> Self {
         Message::FormatAction(action)
+    }
+}
+
+impl From<ExtractAction> for Message {
+    fn from(action: ExtractAction) -> Self {
+        Message::ExtractAction(action)
     }
 }
 

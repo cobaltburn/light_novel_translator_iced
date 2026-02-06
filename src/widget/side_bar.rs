@@ -1,13 +1,13 @@
-use crate::app::ICONS;
-use crate::{components::text_button, message::Message, state::translator::Translator, view::View};
-use iced::alignment::Horizontal;
-use iced::widget::{Button, Container, svg};
+use crate::{
+    app::ICONS, message::Message, model::translator::Translator, view::View, widget::text_button,
+};
+use iced::widget::{Button, Container};
 use iced::{
     Border, Color, Length,
-    widget::{button, column, container, scrollable, text},
+    alignment::Horizontal,
+    widget::{button, column, container, scrollable, svg, text},
 };
 
-// TODO have the icons be moved into file on build
 pub fn side_bar_container(state: &Translator) -> Container<'_, Message> {
     match state.side_bar_collapsed {
         false => side_bar(state),
@@ -18,8 +18,9 @@ pub fn side_bar(state: &Translator) -> Container<'_, Message> {
     container(scrollable(column![
         side_bar_toggle(state).width(Length::Fill),
         side_bar_button(View::Translation, &state.view),
-        side_bar_button(View::Doc, &state.view),
         side_bar_button(View::Format, &state.view),
+        side_bar_button(View::Extraction, &state.view),
+        side_bar_button(View::Doc, &state.view),
     ]))
     .width(200)
     .height(Length::Fill)
@@ -55,8 +56,8 @@ pub fn side_bar_button(view: View, current_view: &View) -> Button<'static, Messa
 
 pub fn side_bar_toggle(state: &Translator) -> Button<'_, Message> {
     let image_path = match state.side_bar_collapsed {
-        true => &ICONS.join("chevron-right.svg"),
-        false => &ICONS.join("chevron-left.svg"),
+        true => ICONS.join("chevron-right.svg"),
+        false => ICONS.join("chevron-left.svg"),
     };
 
     button(

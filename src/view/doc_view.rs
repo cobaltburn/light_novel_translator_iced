@@ -1,19 +1,18 @@
-use crate::actions::doc_action::DocAction;
-use crate::state::doc_model::DocModel;
-use crate::state::translator::Translator;
-use crate::view::text_scrollable;
-use iced::alignment::Horizontal;
-use iced::widget::space::vertical;
-use iced::widget::{Container, button, column, container, pick_list, row, text};
-use iced::{Element, Length, Padding};
+use crate::{actions::doc_action::DocAction, model::doc::Doc, view::text_scrollable};
+use iced::widget::{button, column, container, pick_list, row, text};
+use iced::{
+    Element, Length, Padding,
+    alignment::Horizontal,
+    widget::{Container, space::vertical},
+};
 
-pub fn doc_view(Translator { doc_model, .. }: &Translator) -> Element<'_, DocAction> {
+pub fn doc_view(model: &Doc) -> Element<'_, DocAction> {
     container(column![
         vertical(),
-        column![epub_select_button(), text_scrollable(&doc_model.content),]
+        column![epub_select_button(), text_scrollable(&model.content),]
             .height(Length::FillPortion(9))
             .padding(10),
-        page_selector(doc_model).height(Length::FillPortion(1))
+        page_selector(model).height(Length::FillPortion(1))
     ])
     .center_x(Length::Fill)
     .align_top(Length::Fill)
@@ -23,7 +22,7 @@ pub fn doc_view(Translator { doc_model, .. }: &Translator) -> Element<'_, DocAct
     .into()
 }
 
-pub fn page_selector(model: &DocModel) -> Container<'_, DocAction> {
+pub fn page_selector(model: &Doc) -> Container<'_, DocAction> {
     container(row![
         button(text("◀")).on_press(DocAction::Dec),
         pick_list(

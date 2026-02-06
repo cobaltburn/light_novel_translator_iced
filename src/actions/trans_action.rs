@@ -1,13 +1,16 @@
 use crate::{
     actions::server_action::ServerAction,
     controller::{
-        doc::get_ordered_path,
-        markdown::{convert_html, partition_text},
-        xml::{part_tag, remove_think_tags},
+        check_english_chars, get_ordered_path,
+        parse::{convert_html, partition_text, remove_think_tags},
+        part_tag,
     },
     error::{Error, Result},
     message::{display_error, open_epub},
-    state::translation_model::{Method, Page, TranslationModel},
+    model::{
+        Activity,
+        translation::{Page, Translation},
+    },
 };
 use epub::doc::EpubDoc;
 use iced::Task;
@@ -28,39 +31,54 @@ pub enum TransAction {
     },
     PageComplete(usize),
     SavePages(PathBuf),
-    SavePage(String, usize),
+    SavePage {
+        name: String,
+        page: usize,
+    },
     OpenEpub,
-    SetEpub((String, Vec<Page>)),
+    SetEpub {
+        name: String,
+        pages: Vec<Page>,
+    },
     Translate(usize),
     TranslatePage(usize),
     TranslatePart(usize, usize),
+    CancelTranslate,
     SaveTranslation(String),
     ServerAction(ServerAction),
-    SetMethod(Method),
 }
 
-impl TranslationModel {
+impl Translation {
     pub fn perform(&mut self, action: TransAction) -> Task<TransAction> {
         match action {
-            TransAction::ServerAction(action) => self.server_state.perform(action),
+            TransAction::ServerAction(action) => self.server_state.perform(action).map(Into::into),
             TransAction::SetPage(page) => self.set_current_page(page).into(),
             TransAction::UpdateContent {
                 content,
                 page,
                 part,
             } => self.update_content(content, page, part).into(),
-            TransAction::PageComplete(page) => self.mark_complete(page).into(),
-            TransAction::Translate(page) => self.translate(page),
-            TransAction::TranslatePage(page) => self.translate_page(page),
-            TransAction::TranslatePart(page, part) => self.translate_part(page, part),
+            TransAction::PageComplete(page) => self.check_complete(page).into(),
+            TransAction::CancelTranslate => self.cancel().into(),
             TransAction::SavePages(path) => self.save_pages(path),
-            TransAction::SetEpub((file_name, buffer)) => self.set_epub(file_name, buffer).into(),
-            TransAction::SetMethod(method) => self.set_method(method).into(),
-            TransAction::SavePage(file_name, page) => self.save_page(file_name, page),
+            TransAction::SetEpub { name, pages } => self.set_epub(name, pages).into(),
+            TransAction::SavePage { name, page } => self.save_page(name, page),
+            TransAction::Translate(page) => match self.translate(page) {
+                Ok(task) => task,
+                Err(error) => Task::future(display_error(error)).discard(),
+            },
+            TransAction::TranslatePage(page) => match self.translate_page(page) {
+                Ok(task) => task,
+                Err(error) => Task::future(display_error(error)).discard(),
+            },
+            TransAction::TranslatePart(page, part) => match self.translate_part(page, part) {
+                Ok(task) => task,
+                Err(error) => Task::future(display_error(error)).discard(),
+            },
             TransAction::OpenEpub => Task::future(open_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .then(|doc| match doc {
-                    Ok(doc) => Task::done(TransAction::SetEpub(doc).into()),
+                    Ok((name, pages)) => Task::done(TransAction::SetEpub { name, pages }.into()),
                     Err(error) => Task::future(display_error(error)).discard(),
                 }),
             TransAction::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
@@ -80,25 +98,45 @@ impl TranslationModel {
         };
     }
 
-    pub fn set_method(&mut self, method: Method) {
-        self.method = method;
+    fn cancel(&mut self) {
+        self.pages
+            .iter_mut()
+            .filter(|p| matches!(p.activity, Activity::Active))
+            .for_each(|p| p.activity = Activity::Incomplete);
+        self.server_state.abort();
     }
 
-    pub fn set_current_page(&mut self, page: usize) {
-        self.current_page = Some(page);
+    fn set_current_page(&mut self, page: usize) {
+        self.current_page = page;
     }
 
-    pub fn mark_complete(&mut self, page: usize) {
-        if let Some(page) = self.pages.get_mut(page) {
-            page.complete = true;
+    fn check_complete(&mut self, page: usize) {
+        let Some(page) = self.pages.get_mut(page) else {
+            return;
+        };
+
+        if page.text.iter().any(|text| text.is_empty()) {
+            page.activity = Activity::Incomplete;
+        } else if page.text.iter().all(|text| check_english_chars(text, 75.0)) {
+            page.activity = Activity::Complete;
+        } else {
+            page.activity = Activity::Error;
         }
     }
 
-    pub fn save_page(&mut self, file_name: String, page: usize) -> Task<TransAction> {
+    pub fn save_page(&mut self, name: String, page: usize) -> Task<TransAction> {
         match self.pages.get(page) {
             Some(page) => {
-                let content = page.text.join(" ");
-                Task::future(save_file(file_name, content)).discard()
+                let content: String = page
+                    .text
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| format!("{}{}\n", part_tag(i + 1), t))
+                    .collect();
+
+                let name = format!("{}.md", name);
+
+                Task::future(save_file(name, content)).discard()
             }
             None => Task::none(),
         }
@@ -108,10 +146,15 @@ impl TranslationModel {
         let tasks = self
             .pages
             .iter()
-            .filter(|page| page.complete && !page.text.is_empty())
             .map(|page| {
                 let name = page.path.file_stem().unwrap().to_os_string();
-                (name, remove_think_tags(&page.text.join("\n")))
+                let text: String = page
+                    .text
+                    .iter()
+                    .enumerate()
+                    .map(|(i, t)| format!("{}{}\n", part_tag(i + 1), t))
+                    .collect();
+                (name, remove_think_tags(&text))
             })
             .map(|(name, contents)| {
                 let file_path = path.join(name).with_extension("md");
@@ -123,103 +166,116 @@ impl TranslationModel {
         Task::batch(tasks).discard()
     }
 
-    pub fn set_epub(&mut self, file_name: String, pages: Vec<Page>) {
-        self.current_page = Some(0);
-        self.file_name = file_name;
+    pub fn set_epub(&mut self, name: String, pages: Vec<Page>) {
+        self.current_page = 0;
+        self.file_name = name;
         self.pages = pages;
     }
 
-    pub fn translate(&mut self, page: usize) -> Task<TransAction> {
+    pub fn translate(&mut self, page: usize) -> Result<Task<TransAction>> {
         if !self.server_state.connected() {
-            let error = Error::ServerError("Not connected to a server");
-            return Task::future(display_error(error)).discard();
+            return Err(Error::ServerError("Not connected to a server"));
         }
 
         let Some(model) = self.server_state.current_model.clone() else {
-            let error = Error::ServerError("No model selected");
-            return Task::future(display_error(error)).discard();
+            return Err(Error::ServerError("No model selected"));
         };
 
         let Some(current_page) = self.pages.get_mut(page) else {
             let file_name = self.file_name.clone();
-            return Task::done(ServerAction::Abort.into()).chain(
+            return Ok(Task::done(ServerAction::Abort.into()).chain(
                 Task::future(complete_dialog(file_name.clone())).then(move |x| match x {
                     true => Task::done(TransAction::SaveTranslation(file_name.clone())),
                     false => Task::none(),
                 }),
-            );
+            ));
         };
+
+        current_page.activity = Activity::Active;
 
         current_page.clear_content();
 
-        let tasks = self.server_state.collect_task(current_page, &model, page);
-        let task = self.method.join_tasks(tasks);
-        let complete_task = self.bind_handle(Task::done(TransAction::PageComplete(page)));
-        let next_task = self.bind_handle(Task::done(TransAction::Translate(page + 1)));
+        let tasks = self
+            .server_state
+            .translation_tasks(current_page, &model, page)?;
+        let task = self.server_state.method.join_tasks(tasks);
+        let complete_task = self
+            .server_state
+            .bind_handle(Task::done(TransAction::PageComplete(page)));
+        let next_task = self
+            .server_state
+            .bind_handle(Task::done(TransAction::Translate(page + 1)));
 
-        task.chain(complete_task).chain(next_task)
+        Ok(task.chain(complete_task).chain(next_task))
     }
 
-    pub fn translate_page(&mut self, page: usize) -> Task<TransAction> {
+    pub fn translate_page(&mut self, page: usize) -> Result<Task<TransAction>> {
         if !self.server_state.connected() {
-            let error = Error::ServerError("Not connected to a server");
-            return Task::future(display_error(error)).discard();
+            return Err(Error::ServerError("Not connected to a server"));
         }
 
         let Some(model) = self.server_state.current_model.clone() else {
-            let error = Error::ServerError("No model selected");
-            return Task::future(display_error(error)).discard();
+            return Err(Error::ServerError("No model selected"));
         };
 
         let Some(current_page) = self.pages.get_mut(page) else {
-            return Task::done(ServerAction::Abort.into());
+            return Ok(Task::done(ServerAction::Abort.into()));
         };
+
+        current_page.activity = Activity::Active;
 
         current_page.clear_content();
 
-        let tasks = self.server_state.collect_task(current_page, &model, page);
-        let task = self.method.join_tasks(tasks);
-        let complete_task = self.bind_handle(Task::done(TransAction::PageComplete(page)));
+        let tasks = self
+            .server_state
+            .translation_tasks(current_page, &model, page)?;
+        let task = self.server_state.method.join_tasks(tasks);
+        let complete_task = self
+            .server_state
+            .bind_handle(Task::done(TransAction::PageComplete(page)));
 
-        task.chain(complete_task)
-            .chain(Task::done(ServerAction::Abort.into()))
+        let task = task
+            .chain(complete_task)
+            .chain(Task::done(ServerAction::Abort.into()));
+
+        Ok(task)
     }
 
-    pub fn translate_part(&mut self, page: usize, part: usize) -> Task<TransAction> {
+    pub fn translate_part(&mut self, page: usize, part: usize) -> Result<Task<TransAction>> {
         if !self.server_state.connected() {
-            let error = Error::ServerError("Not connected to a server");
-            return Task::future(display_error(error)).discard();
+            return Err(Error::ServerError("Not connected to a server"));
         }
 
         let Some(model) = self.server_state.current_model.clone() else {
-            let error = Error::ServerError("No model selected");
-            return Task::future(display_error(error)).discard();
+            return Err(Error::ServerError("No model selected"));
         };
 
         let Some(current_page) = self.pages.get_mut(page) else {
-            return Task::done(ServerAction::Abort.into());
+            return Ok(Task::done(ServerAction::Abort.into()));
         };
 
         let Some(section) = current_page.sections.get_mut(part) else {
             log::error!("an invalid part was passed");
-            return Task::none();
+            return Ok(Task::none());
         };
+
+        current_page.activity = Activity::Active;
 
         let text = current_page.text.get_mut(part).unwrap();
         text.clear();
-        text.push_str(&part_tag(part + 1));
 
         let task = self
             .server_state
-            .translate_part(section.clone(), model, page, part);
+            .translate_part(section.clone(), model, page, part)?;
+        let complete_task = self
+            .server_state
+            .bind_handle(Task::done(TransAction::PageComplete(page)));
 
-        task.chain(Task::done(ServerAction::Abort.into()))
-    }
+        let task = task
+            .chain(complete_task)
+            .chain(Task::done(ServerAction::Abort.into()));
 
-    pub fn bind_handle(&mut self, task: Task<TransAction>) -> Task<TransAction> {
-        let (task, handle) = task.abortable();
-        self.server_state.handles.push(handle.abort_on_drop());
-        task
+        Ok(task)
     }
 }
 
@@ -291,8 +347,12 @@ pub async fn get_pages(file_name: String, buffer: Vec<u8>) -> Result<(String, Ve
             Ok(Page::new(path, sections))
         })
         .collect();
+    let pages: Vec<_> = pages?
+        .into_iter()
+        .filter(|p| !p.sections.is_empty())
+        .collect();
 
-    Ok((file_name, pages?))
+    Ok((file_name, pages))
 }
 
 pub async fn complete_dialog(file_name: String) -> bool {

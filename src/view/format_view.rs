@@ -1,36 +1,38 @@
 use crate::{
-    actions::format_action::FormatAction,
-    components::text_button,
-    state::{format_model::FormatModel, translator::Translator},
-    view::menu_button,
+    actions::format_action::FormatAction, model::format::Format, view::menu_button,
+    widget::text_button,
+};
+use iced::widget::{
+    button, column, container, row, scrollable, space::vertical, text, text_editor,
 };
 use iced::{
-    Border, Color, Element, Length, Padding, Renderer, Theme, color,
-    widget::{
-        Container, Row, Space, button, column, container, row, scrollable, space::vertical, text,
-        text_editor,
-    },
+    Border, Color, Element, Length, Padding, Renderer, Theme,
+    alignment::Vertical,
+    color,
+    widget::{Container, Row, Space, container::transparent},
 };
-use iced::{alignment::Vertical, widget::container::transparent};
 use iced_aw::{Menu, MenuBar, menu::Item};
 
-pub fn format_view(Translator { format_model, .. }: &Translator) -> Element<'_, FormatAction> {
+pub fn format_view(model: &Format) -> Element<'_, FormatAction> {
     container(column![
         vertical(),
         column![
-            format_menu_bar(format_model),
-            row![format_side_bar(format_model), format_text(format_model)].spacing(10)
+            format_menu_bar(model),
+            row![format_side_bar(model), format_text(model)].spacing(10)
         ]
         .height(Length::FillPortion(9))
-        .padding(20),
+        .padding(10),
         vertical(),
     ])
+    .center_x(Length::Fill)
+    .align_top(Length::Fill)
     .width(Length::Fill)
     .height(Length::Fill)
+    .padding(10)
     .into()
 }
 
-fn format_menu_bar(state: &FormatModel) -> Row<'_, FormatAction> {
+fn format_menu_bar(state: &Format) -> Row<'_, FormatAction> {
     row![
         MenuBar::new(vec![build_menu(state)]).spacing(5),
         button(text("build").center()).on_press(FormatAction::Build),
@@ -40,7 +42,7 @@ fn format_menu_bar(state: &FormatModel) -> Row<'_, FormatAction> {
     .padding(Padding::default().bottom(15))
 }
 
-fn build_menu(state: &FormatModel) -> Item<'_, FormatAction, Theme, Renderer> {
+fn build_menu(state: &Format) -> Item<'_, FormatAction, Theme, Renderer> {
     Item::with_menu(
         menu_button("content"),
         Menu::new(vec![
@@ -52,7 +54,7 @@ fn build_menu(state: &FormatModel) -> Item<'_, FormatAction, Theme, Renderer> {
     )
 }
 
-fn content_button(model: &FormatModel) -> Row<'_, FormatAction> {
+fn content_button(model: &Format) -> Row<'_, FormatAction> {
     row![
         button(text("content")).on_press(FormatAction::SelectFolder),
         container(text(&model.source_folder).center())
@@ -69,7 +71,7 @@ fn content_button(model: &FormatModel) -> Row<'_, FormatAction> {
     .spacing(10)
 }
 
-fn epub_button(model: &FormatModel) -> Row<'_, FormatAction> {
+fn epub_button(model: &Format) -> Row<'_, FormatAction> {
     row![
         button(text("epub").center()).on_press(FormatAction::SelectEpub),
         container(text(&model.epub_name).center())
@@ -86,18 +88,17 @@ fn epub_button(model: &FormatModel) -> Row<'_, FormatAction> {
     .spacing(10)
 }
 
-fn format_text(model: &FormatModel) -> Container<'_, FormatAction> {
-    let current_text: Element<_> = match model.current_content() {
-        Some(content) => text_editor(content)
+fn format_text(model: &Format) -> Container<'_, FormatAction> {
+    let current_text = model.current_content().map(|content| {
+        text_editor(content)
             .on_action(FormatAction::EditContent)
             .height(Length::Fill)
             .style(|theme, status| text_editor::Style {
                 border: Border::default(),
                 ..text_editor::default(theme, status)
             })
-            .into(),
-        None => text("").into(),
-    };
+    });
+
     container(current_text)
         .padding(10)
         .height(Length::Fill)
@@ -111,7 +112,7 @@ fn format_text(model: &FormatModel) -> Container<'_, FormatAction> {
         })
 }
 
-pub fn format_side_bar(model: &FormatModel) -> Container<'_, FormatAction> {
+pub fn format_side_bar(model: &Format) -> Container<'_, FormatAction> {
     container(
         scrollable(column(format_path_buttons(model)).width(250).spacing(10)).height(Length::Fill),
     )
@@ -126,7 +127,7 @@ pub fn format_side_bar(model: &FormatModel) -> Container<'_, FormatAction> {
     })
 }
 
-fn format_path_buttons(model: &FormatModel) -> Vec<Element<'_, FormatAction>> {
+fn format_path_buttons(model: &Format) -> Vec<Element<'_, FormatAction>> {
     model
         .pages
         .iter()

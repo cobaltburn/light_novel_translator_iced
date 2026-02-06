@@ -1,13 +1,10 @@
 use crate::{
     controller::{
-        builder::{
-            DEFAULT_STYLESHEET, HEADER,
-            xml::{remove_part_tags, remove_think_tags, to_xml, update_image_paths, wrap_tag},
-        },
-        doc::get_ordered_path,
+        DEFAULT_STYLESHEET, HEADER, get_ordered_path,
+        xml::{remove_part_tags, remove_think_tags, to_xml, update_image_paths, wrap_tag},
     },
     error::Result,
-    state::format_model::FormatPage,
+    model::format::FormatPage,
 };
 use epub::doc::{EpubDoc, ResourceItem};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};
@@ -32,6 +29,21 @@ pub struct DocBuilder {
 }
 
 impl DocBuilder {
+    pub fn new(
+        epub: EpubDoc<Cursor<Vec<u8>>>,
+        name: String,
+        pages: Vec<FormatPage>,
+    ) -> Result<Self> {
+        let builder = EpubBuilder::new(ZipLibrary::new()?)?;
+        let pages = pages.into_iter().map(BuilderPage::from).collect();
+        Ok(DocBuilder {
+            epub,
+            name,
+            pages,
+            builder,
+        })
+    }
+
     pub fn build(mut self) -> Result<(Vec<u8>, String)> {
         self.builder
             .epub_version(EpubVersion::V30)
