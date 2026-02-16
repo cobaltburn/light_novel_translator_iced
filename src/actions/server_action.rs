@@ -13,7 +13,6 @@ pub enum ServerAction {
     Connect,
     SetMethod(Method),
     ThinkToggled(bool),
-    SetPause(u64),
     Abort,
 }
 
@@ -23,7 +22,6 @@ impl Server {
             ServerAction::SelectModel(model) => self.set_current_model(model).into(),
             ServerAction::SetModels(models) => self.set_models(models).into(),
             ServerAction::ThinkToggled(toggled) => self.set_thinking(toggled).into(),
-            ServerAction::SetPause(pause) => self.set_pause(pause).into(),
             ServerAction::SetMethod(method) => self.set_method(method).into(),
             ServerAction::Connect => self.connect(),
             ServerAction::Abort => self.abort().into(),
@@ -57,9 +55,5 @@ impl Server {
 
     pub fn set_thinking(&mut self, toggled: bool) {
         self.settings.think = toggled
-    }
-
-    pub fn set_pause(&mut self, pause: u64) {
-        self.settings.pause = pause;
     }
 }

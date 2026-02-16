@@ -86,15 +86,11 @@ impl Server {
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub think: bool,
-    pub pause: u64,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self {
-            think: true,
-            pause: Default::default(),
-        }
+        Self { think: true }
     }
 }
 

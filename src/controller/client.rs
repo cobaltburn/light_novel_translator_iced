@@ -82,7 +82,7 @@ impl Client {
                     page,
                     part,
                 }),
-                Err(error) => Task::done(ServerAction::Abort.into())
+                Err(error) => Task::done(TransAction::CancelTranslate)
                     .chain(Task::future(display_error(error)).discard()),
             })
     }
