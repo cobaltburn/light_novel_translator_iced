@@ -22,6 +22,9 @@ pub enum Error {
     XmlError(#[from] quick_xml::Error),
 
     #[error(transparent)]
+    EncodingError(#[from] quick_xml::encoding::EncodingError),
+
+    #[error(transparent)]
     AttrError(#[from] AttrError),
 
     #[error(transparent)]

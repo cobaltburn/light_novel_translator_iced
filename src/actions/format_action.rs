@@ -1,12 +1,18 @@
 use crate::{
     controller::builder::DocBuilder,
     error::Result,
-    message::{Message, display_error, open_epub},
+    message::{Message, display_error, select_epub},
     model::format::{Format, FormatPage},
 };
 use epub::doc::EpubDoc;
 use iced::{Task, widget::text_editor};
-use std::{ffi::OsStr, fs::read_dir, io::Cursor, mem, path::PathBuf};
+use std::{
+    ffi::OsStr,
+    fs::read_dir,
+    io::Cursor,
+    mem,
+    path::{Path, PathBuf},
+};
 use tokio::fs::read_to_string;
 
 #[non_exhaustive]
@@ -17,17 +23,19 @@ pub enum FormatAction {
     SetPages(String, Vec<(PathBuf, String)>),
     EditContent(text_editor::Action),
     SelectEpub,
-    SetEpub((String, Vec<u8>)),
+    SetEpub((PathBuf, Vec<u8>)),
     Build,
 }
 
 impl Format {
     pub fn perform(&mut self, action: FormatAction) -> Task<Message> {
         match action {
-            FormatAction::SelectEpub => Task::future(open_epub())
+            FormatAction::SelectEpub => Task::future(select_epub())
                 .and_then(|doc| Task::done(FormatAction::SetEpub(doc).into())),
-            FormatAction::SelectFolder => Task::future(select_format_folder())
-                .and_then(|(f, p)| Task::done(FormatAction::SetPages(f, p).into())),
+            FormatAction::SelectFolder => {
+                Task::future(select_format_folder(self.epub_path.clone()))
+                    .and_then(|(f, p)| Task::done(FormatAction::SetPages(f, p).into()))
+            }
             FormatAction::SetPage(page) => self.set_current_page(page).into(),
             FormatAction::SetPages(folder, pages) => self.set_pages(folder, pages).into(),
             FormatAction::EditContent(action) => self.edit_current_content(action).into(),
@@ -72,27 +80,33 @@ impl Format {
         };
     }
 
-    fn set_epub(&mut self, (name, buffer): (String, Vec<u8>)) -> Result<()> {
+    fn set_epub(&mut self, (name, buffer): (PathBuf, Vec<u8>)) -> Result<()> {
         let epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 
-        self.epub_name = name;
+        self.epub_path = name;
         self.epub = Some(epub);
         Ok(())
     }
 
     pub fn get_build_content(&mut self) -> Result<DocBuilder> {
-        let name = mem::take(&mut self.epub_name);
         let epub = mem::take(&mut self.epub).unwrap();
         let pages = mem::take(&mut self.pages);
+        let name = mem::take(&mut self.epub_path);
+        let name = name
+            .file_name()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
         self.source_folder.clear();
 
         DocBuilder::new(epub, name, pages)
     }
 }
 
-pub async fn select_format_folder() -> Option<(String, Vec<(PathBuf, String)>)> {
+pub async fn select_format_folder(path: PathBuf) -> Option<(String, Vec<(PathBuf, String)>)> {
+    let path = path.parent().unwrap_or(&Path::new(""));
     let handle = rfd::AsyncFileDialog::new()
         .set_title("select translated folder")
+        .set_directory(path)
         .pick_folder()
         .await?;
 

@@ -72,9 +72,14 @@ fn content_button(model: &Format) -> Row<'_, FormatAction> {
 }
 
 fn epub_button(model: &Format) -> Row<'_, FormatAction> {
+    let name = model
+        .epub_path
+        .file_name()
+        .map(|e| e.to_string_lossy())
+        .unwrap_or_default();
     row![
         button(text("epub").center()).on_press(FormatAction::SelectEpub),
-        container(text(&model.epub_name).center())
+        container(text(name).center())
             .width(Length::Fill)
             .padding(5)
             .style(|theme| transparent(theme).border(Border {

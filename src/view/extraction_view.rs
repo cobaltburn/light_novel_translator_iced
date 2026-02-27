@@ -2,13 +2,11 @@ use crate::{
     actions::{extraction_action::ExtractAction, server_action::ServerAction},
     model::{
         extraction::{Extraction, ImageView},
-        server::{Method, Server},
+        server::{Method, Server, Think},
     },
     view::menu_button,
 };
-use iced::widget::{
-    button, checkbox, column, container, image::Viewer, radio, row, scrollable, text,
-};
+use iced::widget::{button, column, container, image::Viewer, radio, row, scrollable, text};
 use iced::{
     Border, Color, Element, Length, Padding,
     alignment::{Horizontal, Vertical},
@@ -153,9 +151,9 @@ fn server_menu(state: &Server) -> Item<'_, ExtractAction, Theme, Renderer> {
         menu_button("server"),
         Menu::new(vec![
             Item::new(ollama_connect(state).map(Into::into)),
-            Item::new(execution_selector(state).map(Into::into)),
+            Item::new(think_selector(state).map(Into::into)),
         ])
-        .width(300),
+        .width(400),
     )
 }
 
@@ -174,15 +172,13 @@ fn extract_button(model: &Extraction) -> Element<'_, ExtractAction> {
         .into()
 }
 
-fn ollama_connect(state: &Server) -> Element<'static, ServerAction> {
+fn ollama_connect(state: &Server) -> Element<'_, ServerAction> {
     container(
         row![
             text("Ollama").center(),
             button("connect").on_press(ServerAction::Connect),
             horizontal(),
-            checkbox(state.settings.think)
-                .label("Think")
-                .on_toggle(ServerAction::ThinkToggled),
+            execution_selector(state),
         ]
         .align_y(Vertical::Center)
         .spacing(5),
@@ -192,8 +188,45 @@ fn ollama_connect(state: &Server) -> Element<'static, ServerAction> {
     .into()
 }
 
+fn think_selector(state: &Server) -> Element<'_, ServerAction> {
+    container(
+        row![
+            text("Think:"),
+            radio(
+                "None",
+                Think::None,
+                Some(state.settings.think),
+                ServerAction::SetThink
+            ),
+            radio(
+                "Low",
+                Think::Low,
+                Some(state.settings.think),
+                ServerAction::SetThink
+            ),
+            radio(
+                "Medium",
+                Think::Medium,
+                Some(state.settings.think),
+                ServerAction::SetThink
+            ),
+            radio(
+                "High",
+                Think::High,
+                Some(state.settings.think),
+                ServerAction::SetThink
+            ),
+        ]
+        .spacing(10),
+    )
+    .align_left(Length::Fill)
+    .padding(10)
+    .into()
+}
+
 fn execution_selector(model: &Server) -> Element<'_, ServerAction> {
     row![
+        text("Excetion:"),
         radio(
             "Chain",
             Method::Chain,

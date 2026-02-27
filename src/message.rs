@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::actions::extraction_action::ExtractAction;
 use crate::actions::{
     doc_action::DocAction, format_action::FormatAction, trans_action::TransAction,
@@ -53,14 +55,14 @@ impl From<ExtractAction> for Message {
     }
 }
 
-pub async fn open_epub() -> Option<(String, Vec<u8>)> {
+pub async fn select_epub() -> Option<(PathBuf, Vec<u8>)> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("select epub")
         .add_filter("epub", &["epub"])
         .pick_file()
         .await?;
     let buf = handle.read().await;
-    Some((handle.file_name(), buf))
+    Some((handle.path().to_path_buf(), buf))
 }
 
 pub async fn display_error<T: Into<Error>>(error: T) {

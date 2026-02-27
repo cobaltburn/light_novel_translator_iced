@@ -1,7 +1,7 @@
 use crate::{
     controller::client::Client,
     message::display_error,
-    model::server::{Method, Server},
+    model::server::{Method, Server, Think},
 };
 use iced::Task;
 use ollama_rs::Ollama;
@@ -10,9 +10,9 @@ use ollama_rs::Ollama;
 pub enum ServerAction {
     SelectModel(String),
     SetModels(Vec<String>),
-    Connect,
     SetMethod(Method),
-    ThinkToggled(bool),
+    SetThink(Think),
+    Connect,
     Abort,
 }
 
@@ -21,7 +21,7 @@ impl Server {
         match action {
             ServerAction::SelectModel(model) => self.set_current_model(model).into(),
             ServerAction::SetModels(models) => self.set_models(models).into(),
-            ServerAction::ThinkToggled(toggled) => self.set_thinking(toggled).into(),
+            ServerAction::SetThink(think) => self.set_thinking(think).into(),
             ServerAction::SetMethod(method) => self.set_method(method).into(),
             ServerAction::Connect => self.connect(),
             ServerAction::Abort => self.abort().into(),
@@ -53,7 +53,7 @@ impl Server {
         self.handles.clear(); // handles must be added with abort on drop
     }
 
-    pub fn set_thinking(&mut self, toggled: bool) {
-        self.settings.think = toggled
+    pub fn set_thinking(&mut self, think: Think) {
+        self.settings.think = think
     }
 }

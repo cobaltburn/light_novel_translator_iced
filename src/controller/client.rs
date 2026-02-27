@@ -4,7 +4,7 @@ use crate::{
     },
     error::{Error, Result},
     message::display_error,
-    model::server::Settings,
+    model::server::{Settings, Think},
 };
 use iced::Task;
 use ollama_rs::{
@@ -91,7 +91,7 @@ impl Client {
         self,
         model: String,
         section: String,
-        think: bool,
+        think: Think,
     ) -> Result<ChatMessageResponseStream> {
         let Client::Ollama(client) = self else {
             return Err(Error::ServerError("server not connected"));
@@ -145,7 +145,7 @@ impl Client {
         self,
         model: String,
         image_base64: String,
-        think: bool,
+        think: Think,
     ) -> Result<GenerationResponseStream> {
         let Client::Ollama(client) = self else {
             return Err(Error::ServerError("server not connected"));

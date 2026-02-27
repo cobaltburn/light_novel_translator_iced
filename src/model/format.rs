@@ -8,7 +8,7 @@ pub struct Format {
     pub pages: Vec<FormatPage>,
     pub current_page: Option<usize>,
     pub source_folder: String,
-    pub epub_name: String,
+    pub epub_path: PathBuf,
     pub epub: Option<EpubDoc<Cursor<Vec<u8>>>>,
 }
 

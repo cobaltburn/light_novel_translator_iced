@@ -1,17 +1,9 @@
-use crate::{controller::part_tag, error::Result};
-use htmd::HtmlToMarkdown;
+use crate::controller::part_tag;
 use regex::Regex;
 
 pub fn remove_think_tags(text: &str) -> String {
     let rg = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
     rg.replace_all(text, "").to_string()
-}
-
-pub fn convert_html(html: &str) -> Result<String> {
-    let converter = HtmlToMarkdown::builder()
-        .skip_tags(vec!["head", "img", "image"])
-        .build();
-    Ok(converter.convert(html)?)
 }
 
 pub fn partition_text(text: &str) -> Vec<String> {

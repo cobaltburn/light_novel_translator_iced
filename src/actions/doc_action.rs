@@ -1,16 +1,19 @@
 use crate::{
-    controller::parse::{convert_html, join_partition, partition_text},
-    message::{Message, display_error, open_epub},
+    controller::{
+        parse::{join_partition, partition_text},
+        xml_converter::{HEAD, XmlConverter},
+    },
+    message::{Message, display_error, select_epub},
     model::doc::Doc,
 };
 use epub::doc::EpubDoc;
 use iced::Task;
-use std::io::Cursor;
+use std::{io::Cursor, path::PathBuf};
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DocAction {
-    SetEpub(String, Vec<u8>),
+    SetEpub(PathBuf, Vec<u8>),
     OpenEpub,
     SetPage(usize),
     Inc,
@@ -20,7 +23,7 @@ pub enum DocAction {
 impl Doc {
     pub fn perform(&mut self, action: DocAction) -> Task<Message> {
         match action {
-            DocAction::OpenEpub => Task::future(open_epub())
+            DocAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buf)| Task::done(DocAction::SetEpub(name, buf).into())),
             DocAction::SetEpub(file_name, buffer) => self.set_epub(file_name, buffer),
             DocAction::SetPage(page) => self.set_page(page).into(),
@@ -47,14 +50,17 @@ impl Doc {
         }
     }
 
-    pub fn set_epub(&mut self, file_name: String, buffer: Vec<u8>) -> Task<Message> {
+    pub fn set_epub(&mut self, file_name: PathBuf, buffer: Vec<u8>) -> Task<Message> {
         let epub = match EpubDoc::from_reader(Cursor::new(buffer)) {
             Ok(epub) => epub,
             Err(error) => return Task::future(display_error(error)).discard(),
         };
         self.current_page = Some(0);
         self.total_pages = epub.get_num_chapters();
-        self.file_name = Some(file_name);
+
+        self.file_name = file_name
+            .file_name()
+            .map(|e| e.to_string_lossy().to_string());
 
         self.epub = Some(epub);
         self.set_page(0);
@@ -63,10 +69,13 @@ impl Doc {
     }
 
     pub fn get_page(&mut self, page: usize) -> Option<String> {
+        let converter = XmlConverter {
+            skip: vec![HEAD, b"image", b"img"],
+        };
         let epub = self.epub.as_mut()?;
         epub.set_current_chapter(page);
         let html = epub.get_current_str()?.0;
-        let markdown = convert_html(&html).unwrap();
+        let markdown = converter.convert(&html).unwrap();
         let parts = partition_text(&markdown);
         Some(join_partition(parts))
     }

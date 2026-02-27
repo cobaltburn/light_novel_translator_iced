@@ -2,11 +2,12 @@ use crate::{
     actions::server_action::ServerAction,
     controller::{
         check_english_chars, get_ordered_path,
-        parse::{convert_html, partition_text, remove_think_tags},
+        parse::{partition_text, remove_think_tags},
         part_tag,
+        xml_converter::{HEAD, XmlConverter},
     },
     error::{Error, Result},
-    message::{display_error, open_epub},
+    message::{display_error, select_epub},
     model::{
         Activity,
         translation::{Page, Translation},
@@ -75,7 +76,7 @@ impl Translation {
                 Ok(task) => task,
                 Err(error) => Task::future(display_error(error)).discard(),
             },
-            TransAction::OpenEpub => Task::future(open_epub())
+            TransAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .then(|doc| match doc {
                     Ok((name, pages)) => Task::done(TransAction::SetEpub { name, pages }.into()),
@@ -326,10 +327,13 @@ pub async fn save_file(file_name: String, content: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_pages(file_name: String, buffer: Vec<u8>) -> Result<(String, Vec<Page>)> {
+pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, Vec<Page>)> {
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 
     let paths = get_ordered_path(&epub);
+    let converter = XmlConverter {
+        skip: vec![HEAD, b"image", b"img"],
+    };
 
     let pages: Result<Vec<Page>> = paths
         .into_iter()
@@ -338,7 +342,7 @@ pub async fn get_pages(file_name: String, buffer: Vec<u8>) -> Result<(String, Ve
             (path, html)
         })
         .map(|(path, html)| {
-            let markdown = convert_html(&html)?;
+            let markdown = converter.convert(&html)?;
             let mut sections = Vec::new();
             if !markdown.is_empty() {
                 let partitioned = partition_text(&markdown);
@@ -352,6 +356,10 @@ pub async fn get_pages(file_name: String, buffer: Vec<u8>) -> Result<(String, Ve
         .filter(|p| !p.sections.is_empty())
         .collect();
 
+    let file_name = file_name
+        .file_name()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_default();
     Ok((file_name, pages))
 }
 

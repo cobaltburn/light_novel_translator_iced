@@ -5,6 +5,7 @@ pub mod builder;
 pub mod client;
 pub mod parse;
 pub mod xml;
+pub mod xml_converter;
 
 pub fn get_ordered_path(epub: &EpubDoc<Cursor<Vec<u8>>>) -> Vec<PathBuf> {
     epub.spine

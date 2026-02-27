@@ -5,6 +5,7 @@ use crate::{
     model::translation::Page,
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
+use ollama_rs::generation::parameters::ThinkType;
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -83,14 +84,28 @@ impl Server {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Settings {
-    pub think: bool,
+    pub think: Think,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self { think: true }
+#[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
+pub enum Think {
+    #[default]
+    High,
+    Medium,
+    Low,
+    None,
+}
+
+impl Into<ThinkType> for Think {
+    fn into(self) -> ThinkType {
+        match self {
+            Think::High => ThinkType::High,
+            Think::Medium => ThinkType::Medium,
+            Think::Low => ThinkType::Low,
+            Think::None => ThinkType::False,
+        }
     }
 }
 

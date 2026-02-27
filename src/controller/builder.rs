@@ -214,8 +214,8 @@ fn gen_html(markdown: &str) -> Result<String> {
     let markdown = remove_think_tags(markdown);
     let markdown = remove_part_tags(&markdown);
     let markdown = replace_jp_symbols(&markdown);
-    let markdown = &*escape(markdown);
-    let xml = to_xml(markdown);
+    let markdown = escape(markdown);
+    let xml = to_xml(&markdown);
 
     let body = wrap_tag(&xml, "body");
 
