@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use quick_xml::events::attributes::AttrError;
 use thiserror::Error;
 
@@ -11,6 +13,9 @@ pub enum Error {
 
     #[error("ServerError: {0}")]
     ServerError(&'static str),
+
+    #[error("ConversionError path: {0:?}, {1:?}")]
+    ConversionError(PathBuf, Box<Error>),
 
     #[error(transparent)]
     IOError(#[from] std::io::Error),

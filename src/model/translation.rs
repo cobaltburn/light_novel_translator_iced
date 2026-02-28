@@ -20,7 +20,11 @@ pub struct Translation {
 
 impl Translation {
     pub fn tab_label(&self) -> TabLabel {
-        TabLabel::Text(self.file_name.clone())
+        let file_name = self.file_name.clone();
+        match self.server_state.handles.is_empty() {
+            true => TabLabel::Text(file_name),
+            false => TabLabel::IconText('\u{25CF}', file_name),
+        }
     }
 
     pub fn current_content(&self) -> Option<&[String]> {

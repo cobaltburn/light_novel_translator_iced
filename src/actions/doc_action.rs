@@ -75,7 +75,10 @@ impl Doc {
         let epub = self.epub.as_mut()?;
         epub.set_current_chapter(page);
         let html = epub.get_current_str()?.0;
-        let markdown = converter.convert(&html).unwrap();
+        let markdown = converter
+            .convert(&html)
+            .inspect_err(|e| log::error!("{e}"))
+            .ok()?;
         let parts = partition_text(&markdown);
         Some(join_partition(parts))
     }

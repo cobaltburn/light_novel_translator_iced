@@ -18,12 +18,12 @@ use iced::{
         space::{horizontal, vertical},
     },
 };
-use iced_aw::{Menu, MenuBar, TabLabel, Tabs, card::Status, menu::Item, style::tab_bar};
+use iced_aw::{Menu, MenuBar, Tabs, card::Status, menu::Item, style::tab_bar};
 
 pub fn traslation_view(models: &Vec<Translation>, tab_id: usize) -> Element<'_, Message> {
     let tabs = models
         .iter()
-        .map(translation_labeled_tab)
+        .map(|e| (e.tab_label(), tab(e)))
         .enumerate()
         .map(|(i, (label, tab))| {
             let tab = tab.map(Message::TranslationAction.with(i));
@@ -34,13 +34,17 @@ pub fn traslation_view(models: &Vec<Translation>, tab_id: usize) -> Element<'_, 
         .set_active_tab(&tab_id)
         .tab_label_padding(Padding::new(0.0))
         .tab_bar_height(Length::Fixed(40.0))
-        .text_size(12.0)
+        .text_size(13.0)
         .tab_bar_style(|theme, status| match status {
             Status::Active | Status::Hovered => tab_bar::Style {
                 text_color: Color::BLACK,
+                icon_color: Color::from_rgb8(0, 255, 0),
                 ..tab_bar::primary(theme, status)
             },
-            _ => tab_bar::primary(theme, status),
+            _ => tab_bar::Style {
+                icon_color: Color::from_rgb8(0, 255, 0),
+                ..tab_bar::primary(theme, status)
+            },
         });
 
     if models.len() > 1 {
@@ -50,21 +54,13 @@ pub fn traslation_view(models: &Vec<Translation>, tab_id: usize) -> Element<'_, 
     tabs.into()
 }
 
-fn translation_labeled_tab(model: &Translation) -> (TabLabel, Element<'_, TransAction>) {
-    (model.tab_label(), tab(model))
-}
-
 fn tab(model: &Translation) -> Element<'_, TransAction> {
+    let red = Color::from_rgb8(255, 0, 0);
     let content = model.current_content().unwrap_or_default();
     let content = content
         .into_iter()
         .enumerate()
-        .map(|(i, t)| {
-            [
-                span(part_tag(i + 1)).color(Color::from_rgb8(255, 0, 0)),
-                span(t),
-            ]
-        })
+        .map(|(i, t)| [span(part_tag(i + 1)).color(red), span(t)])
         .flatten()
         .collect();
 

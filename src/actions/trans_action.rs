@@ -342,7 +342,9 @@ pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, V
             (path, html)
         })
         .map(|(path, html)| {
-            let markdown = converter.convert(&html)?;
+            let markdown = converter
+                .convert(&html)
+                .map_err(|e| Error::ConversionError(path.clone(), e.into()))?;
             let mut sections = Vec::new();
             if !markdown.is_empty() {
                 let partitioned = partition_text(&markdown);
