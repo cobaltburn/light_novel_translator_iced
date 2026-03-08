@@ -1,11 +1,11 @@
-use crate::error::Result;
+use crate::error::{Error, Result};
 use pulldown_cmark::{Options, Parser, html::push_html};
 use quick_xml::{
     Reader, Writer,
     events::{BytesStart, Event},
 };
 use regex::Regex;
-use std::{io::Cursor, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{borrow::Cow, io::Cursor, os::unix::ffi::OsStrExt, path::PathBuf};
 
 pub fn to_xml(markdown: &str) -> String {
     let mut html = String::new();
@@ -62,25 +62,110 @@ fn update_image(
     image_folder: &PathBuf,
     attr: &str,
 ) -> Result<BytesStart<'static>> {
-    let link = tag.try_get_attribute(attr)?;
-    let tag = if let Some(link) = link {
-        let path = PathBuf::from(str::from_utf8(&link.value)?);
-        let file_name = path.file_name().unwrap();
-        let path = image_folder.join(file_name);
-        let path = path.as_os_str();
-
-        let attributes = tag
-            .attributes()
-            .flatten()
-            .filter(|a| a.key.as_ref() != attr.as_bytes())
-            .collect::<Vec<_>>();
-
-        BytesStart::new(str::from_utf8(tag.name().into_inner())?)
-            .with_attributes(attributes)
-            .with_attributes([(attr.as_bytes(), path.as_bytes())])
-            .into_owned()
-    } else {
-        tag.into_owned()
+    let Some(link) = tag.try_get_attribute(attr)? else {
+        return Ok(tag.into_owned());
     };
+
+    let path = PathBuf::from(link.unescape_value()?.as_ref());
+    let file_name = path.file_name().unwrap();
+    let path = image_folder.join(file_name);
+    let path = path.as_os_str();
+
+    let attributes = tag
+        .attributes()
+        .flatten()
+        .filter(|a| a.key.as_ref() != attr.as_bytes())
+        .collect::<Vec<_>>();
+
+    let tag = BytesStart::new(str::from_utf8(tag.name().as_ref())?)
+        .with_attributes(attributes)
+        .with_attributes([(attr.as_bytes(), path.as_bytes())])
+        .into_owned();
     Ok(tag)
+}
+
+pub fn extract_html_tag(html: &str) -> Result<BytesStart<'_>> {
+    let mut reader = Reader::from_str(html.as_ref());
+    let tag = loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"html" => {
+                break tag;
+            }
+            Event::Eof => return Err(Error::BuildError("No head tag found")),
+            _ => (),
+        }
+    };
+    let lang = "xml:lang";
+
+    let attributes = tag
+        .attributes()
+        .flatten()
+        .filter(|a| a.key.as_ref() != lang.as_bytes())
+        .collect::<Vec<_>>();
+
+    let tag = BytesStart::new(str::from_utf8(tag.name().as_ref())?)
+        .with_attributes(attributes)
+        .with_attributes([(lang, "en")])
+        .into_owned();
+
+    Ok(tag)
+}
+
+pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
+    let mut reader = Reader::from_str(html.as_ref());
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"head" => {
+                return Ok(reader.read_text(tag.name())?);
+            }
+            Event::Eof => return Err(Error::BuildError("No head tag found")),
+            _ => (),
+        }
+    }
+}
+
+pub fn starting_image_tag(html: &str) -> Result<Option<BytesStart<'_>>> {
+    let image_folder = PathBuf::from("../Images");
+    let body = extract_body(html)?;
+    let mut reader = Reader::from_str(body.as_ref());
+    reader.config_mut().trim_text(true);
+
+    loop {
+        match reader.read_event()? {
+            Event::Empty(tag) if tag.name().as_ref() == IMG.as_bytes() => {
+                let tag = update_image(tag, &image_folder, SRC)?;
+                return Ok(Some(tag));
+            }
+            Event::Empty(tag) if tag.name().as_ref() == IMAGE.as_bytes() => {
+                let tag = update_image(tag, &image_folder, XLINK)?;
+                return Ok(Some(tag));
+            }
+            Event::Text(_) | Event::Eof => return Ok(None),
+            _ => (),
+        }
+    }
+}
+
+pub fn body_tag(html: &str) -> Result<BytesStart<'_>> {
+    let mut reader = Reader::from_str(html);
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"body" => return Ok(tag.into_owned()),
+            Event::Eof => return Err(Error::BuildError("No body tag found")),
+            _ => (),
+        }
+    }
+}
+
+pub fn extract_body(html: &str) -> Result<Cow<'_, str>> {
+    let mut reader = Reader::from_str(html);
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"body" => {
+                return Ok(reader.read_text(tag.name())?);
+            }
+            Event::Eof => return Err(Error::BuildError("No body tag found")),
+            _ => (),
+        }
+    }
 }

@@ -111,7 +111,7 @@ impl Client {
                     time::sleep(Duration::from_secs(10)).await
                 }
                 Err(OllamaError::Other(error)) if error.contains("429") => {
-                    time::sleep(Duration::from_secs(10)).await
+                    time::sleep(Duration::from_secs(30)).await
                 }
                 Err(error) => return Err(Error::OllamaError(error)),
             }

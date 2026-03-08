@@ -2363,7 +2363,7 @@ dependencies = [
 
 [[package]]
 name = "light_novel_translator_iced"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "async-stream",
  "base64",
@@ -3641,7 +3641,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd58c6a1fc307e1092aa0bb23d204ca4d1f021764142cd0424dccc84d2d5d106"
 dependencies = [
  "memchr",
- "tokio",
 ]
 
 [[package]]

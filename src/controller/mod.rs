@@ -26,15 +26,8 @@ pub fn check_english_chars(text: &str, min: f32) -> bool {
     percent > min
 }
 
-pub const HEADER: &str = r#"
-<head>
-    <meta charset="UTF-8" />
-    <link rel="stylesheet" type="text/css" href="../stylesheet.css" />
-</head>
-"#;
-
 pub const DEFAULT_STYLESHEET: &[u8] = br#"
-        /* EPUB Default Stylesheet */
+    /* EPUB Default Stylesheet */
 
     /* Reset and base styles */
     * {

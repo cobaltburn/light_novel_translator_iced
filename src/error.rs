@@ -17,6 +17,9 @@ pub enum Error {
     #[error("ConversionError path: {0:?}, {1:?}")]
     ConversionError(PathBuf, Box<Error>),
 
+    #[error("BuildError: {0}")]
+    BuildError(&'static str),
+
     #[error(transparent)]
     IOError(#[from] std::io::Error),
 

@@ -2,6 +2,7 @@ use std::io::Cursor;
 
 use crate::error::Result;
 use quick_xml::Writer;
+use quick_xml::events::BytesStart;
 use quick_xml::{Reader, events::Event};
 
 pub const H1: &[u8] = b"h1";
@@ -17,13 +18,17 @@ const STYLE: &[u8] = b"style";
 const SCRIPT: &[u8] = b"script";
 const INVALID_TAG: [&[u8]; 2] = [STYLE, SCRIPT];
 
-pub struct XmlConverter {
-    pub skip: Vec<&'static [u8]>,
+pub struct XmlConverter<'a> {
+    pub skip_tags: Vec<&'a [u8]>,
+    pub skip_class: Vec<String>,
 }
 
-impl XmlConverter {
-    pub fn new(skip: Vec<&'static [u8]>) -> Self {
-        Self { skip }
+impl XmlConverter<'_> {
+    pub fn new(skip_tags: Vec<&'static [u8]>, skip_class: Vec<String>) -> Self {
+        Self {
+            skip_tags,
+            skip_class,
+        }
     }
 
     pub fn convert(&self, html: &str) -> Result<String> {
@@ -41,16 +46,19 @@ impl XmlConverter {
                 Event::Start(tag) if TAGS.contains(&tag.name().as_ref()) => {
                     let text = reader.read_text(tag.name())?;
                     let text = extract_text(&text)?;
-                    let text = match tag.name().as_ref() {
-                        H1 => format!("# {}", text),
-                        H2 => format!("## {}", text),
-                        H3 => format!("### {}", text),
-                        H4 => format!("#### {}", text),
-                        H5 => format!("##### {}", text),
-                        H6 => format!("###### {}", text),
-                        _ => text,
+                    let count = match tag.name().as_ref() {
+                        _ if text.is_empty() => None,
+                        H1 => Some(1),
+                        H2 => Some(2),
+                        H3 => Some(3),
+                        H4 => Some(4),
+                        H5 => Some(5),
+                        H6 => Some(6),
+                        _ => None,
                     };
-                    content.push(text);
+
+                    let lead = count.map_or(String::new(), |i| format!("{} ", "#".repeat(i)));
+                    content.push(format!("{}{}", lead, text));
                 }
                 Event::Text(text) => {
                     content.push(text.decode()?.to_string());
@@ -60,33 +68,38 @@ impl XmlConverter {
             }
         }
 
-        Ok(content.join("\n"))
+        Ok(String::from(content.join("\n").trim()))
     }
 
     fn remove_tags<'a>(&self, reader: &mut Reader<&'a [u8]>) -> Result<Vec<u8>> {
         let mut writer = Writer::new(Cursor::new(Vec::<u8>::new()));
         loop {
             match reader.read_event()? {
-                Event::Start(tag)
-                    if INVALID_TAG.contains(&tag.name().as_ref())
-                        || self.skip.contains(&tag.name().as_ref()) =>
-                {
+                Event::Start(tag) if self.should_skip(&tag)? => {
                     reader.read_to_end(tag.name())?;
                 }
-                e @ Event::Start(_)
-                | e @ Event::End(_)
-                | e @ Event::Empty(_)
-                | e @ Event::Text(_) => writer.write_event(e)?,
-                e @ Event::Eof => {
-                    writer.write_event(e)?;
-                    break;
+                e @ (Event::Start(_) | Event::End(_) | Event::Empty(_) | Event::Text(_)) => {
+                    writer.write_event(e)?
                 }
+                Event::Eof => break,
                 _ => (),
             }
         }
 
         let buffer = writer.into_inner().into_inner();
         Ok(buffer)
+    }
+
+    fn should_skip(&self, tag: &BytesStart<'_>) -> Result<bool> {
+        let class_attr = "class";
+        let name = tag.name();
+        let skip = INVALID_TAG.contains(&name.as_ref())
+            || self.skip_tags.contains(&name.as_ref())
+            || tag.try_get_attribute(class_attr)?.is_some_and(|a| {
+                let val = a.unescape_value().unwrap_or_default();
+                self.skip_class.iter().any(|e| val.contains(e))
+            });
+        Ok(skip)
     }
 }
 

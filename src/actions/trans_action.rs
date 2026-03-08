@@ -54,16 +54,16 @@ impl Translation {
         match action {
             TransAction::ServerAction(action) => self.server_state.perform(action).map(Into::into),
             TransAction::SetPage(page) => self.set_current_page(page).into(),
-            TransAction::UpdateContent {
-                content,
-                page,
-                part,
-            } => self.update_content(content, page, part).into(),
             TransAction::PageComplete(page) => self.check_complete(page).into(),
             TransAction::CancelTranslate => self.cancel().into(),
             TransAction::SavePages(path) => self.save_pages(path),
             TransAction::SetEpub { name, pages } => self.set_epub(name, pages).into(),
             TransAction::SavePage { name, page } => self.save_page(name, page),
+            TransAction::UpdateContent {
+                content,
+                page,
+                part,
+            } => self.update_content(content, page, part).into(),
             TransAction::Translate(page) => match self.translate(page) {
                 Ok(task) => task,
                 Err(error) => Task::future(display_error(error)).discard(),
@@ -331,9 +331,10 @@ pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, V
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 
     let paths = get_ordered_path(&epub);
-    let converter = XmlConverter {
-        skip: vec![HEAD, b"image", b"img"],
-    };
+    let converter = XmlConverter::new(
+        vec![HEAD, b"image", b"img"],
+        vec![String::from("--preface"), String::from("--afterword")],
+    );
 
     let pages: Result<Vec<Page>> = paths
         .into_iter()

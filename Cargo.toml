@@ -1,6 +1,6 @@
 [package]
 name = "light_novel_translator_iced"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
@@ -13,7 +13,7 @@ iced_aw = "0.13.0"
 log = { version = "0.4.29" }
 ollama-rs = { version = "0.3.4", features = ["stream", "tokio", "tokio-stream"] }
 pulldown-cmark = "0.13.0"
-quick-xml = { version = "0.39.1", features = ["tokio"] }
+quick-xml = "0.39.1" 
 regex = "1.12.3"
 rfd = { version = "0.17.2", features = ["xdg-portal"] }
 thiserror = "2.0.18"

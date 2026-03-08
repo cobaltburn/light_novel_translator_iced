@@ -69,9 +69,11 @@ impl Doc {
     }
 
     pub fn get_page(&mut self, page: usize) -> Option<String> {
-        let converter = XmlConverter {
-            skip: vec![HEAD, b"image", b"img"],
-        };
+        let converter = XmlConverter::new(
+            vec![HEAD, b"image", b"img"],
+            vec![String::from("--preface"), String::from("--afterword")],
+        );
+
         let epub = self.epub.as_mut()?;
         epub.set_current_chapter(page);
         let html = epub.get_current_str()?.0;
