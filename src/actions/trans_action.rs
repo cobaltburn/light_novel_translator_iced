@@ -4,7 +4,7 @@ use crate::{
         check_english_chars, get_ordered_path,
         parse::{partition_text, remove_think_tags},
         part_tag,
-        xml_converter::{HEAD, XmlConverter},
+        xml::strip_data_tags,
     },
     error::{Error, Result},
     message::{display_error, select_epub},
@@ -14,6 +14,7 @@ use crate::{
     },
 };
 use epub::doc::EpubDoc;
+use htmd::HtmlToMarkdown;
 use iced::Task;
 use std::{
     io::Cursor,
@@ -331,10 +332,10 @@ pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, V
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 
     let paths = get_ordered_path(&epub);
-    let converter = XmlConverter::new(
-        vec![HEAD, b"image", b"img"],
-        vec![String::from("--preface"), String::from("--afterword")],
-    );
+    let converter = HtmlToMarkdown::builder()
+        .skip_tags(vec!["head", "img", "image"])
+        .scripting_enabled(false)
+        .build();
 
     let pages: Result<Vec<Page>> = paths
         .into_iter()
@@ -343,11 +344,12 @@ pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, V
             (path, html)
         })
         .map(|(path, html)| {
-            let markdown = converter
-                .convert(&html)
-                .map_err(|e| Error::ConversionError(path.clone(), e.into()))?;
+            let html = strip_data_tags(&html)?;
+            let markdown = converter.convert(&html)?;
             let mut sections = Vec::new();
             if !markdown.is_empty() {
+                let lines = markdown.lines();
+                let markdown = lines.map(|s| format!("{}\n", s.trim())).collect::<String>();
                 let partitioned = partition_text(&markdown);
                 sections = partitioned.chunks(3).map(|x| x.join(" ")).collect();
             }

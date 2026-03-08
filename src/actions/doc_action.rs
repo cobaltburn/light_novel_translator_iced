@@ -1,12 +1,13 @@
 use crate::{
     controller::{
         parse::{join_partition, partition_text},
-        xml_converter::{HEAD, XmlConverter},
+        xml::strip_data_tags,
     },
     message::{Message, display_error, select_epub},
     model::doc::Doc,
 };
 use epub::doc::EpubDoc;
+use htmd::HtmlToMarkdown;
 use iced::Task;
 use std::{io::Cursor, path::PathBuf};
 
@@ -69,18 +70,21 @@ impl Doc {
     }
 
     pub fn get_page(&mut self, page: usize) -> Option<String> {
-        let converter = XmlConverter::new(
-            vec![HEAD, b"image", b"img"],
-            vec![String::from("--preface"), String::from("--afterword")],
-        );
+        let converter = HtmlToMarkdown::builder()
+            .skip_tags(vec!["head", "img", "image"])
+            .scripting_enabled(false)
+            .build();
 
         let epub = self.epub.as_mut()?;
         epub.set_current_chapter(page);
         let html = epub.get_current_str()?.0;
+        let html = strip_data_tags(&html).ok()?;
         let markdown = converter
             .convert(&html)
             .inspect_err(|e| log::error!("{e}"))
             .ok()?;
+        let lines = markdown.lines();
+        let markdown = lines.map(|s| format!("{}\n", s.trim())).collect::<String>();
         let parts = partition_text(&markdown);
         Some(join_partition(parts))
     }

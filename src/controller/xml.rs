@@ -8,7 +8,7 @@ use regex::Regex;
 use std::{borrow::Cow, io::Cursor, os::unix::ffi::OsStrExt, path::PathBuf};
 
 pub fn to_xml(markdown: &str) -> String {
-    let mut html = String::new();
+    let mut html = String::with_capacity(markdown.len());
     let parser = Parser::new_ext(markdown, Options::all());
     push_html(&mut html, parser);
     html
@@ -24,8 +24,19 @@ pub fn remove_part_tags(input: &str) -> String {
     rg.replace_all(input, "").to_string()
 }
 
-pub fn wrap_tag(xml: &str, tag: &str) -> String {
-    format!("<{0}>\n{1}\n</{0}>", tag, xml)
+pub fn strip_data_tags(html: &str) -> Result<String> {
+    let mut reader = Reader::from_str(html);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    loop {
+        match reader.read_event()? {
+            e @ (Event::Start(_) | Event::End(_) | Event::Empty(_) | Event::Text(_)) => {
+                writer.write_event(e)?;
+            }
+            Event::Eof => break,
+            _ => (),
+        }
+    }
+    Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
 const SRC: &str = "src";
@@ -33,19 +44,20 @@ const XLINK: &str = "xlink:href";
 const IMG: &str = "img";
 const IMAGE: &str = "image";
 
-pub fn update_image_paths(xml: &str) -> Result<String> {
-    let image_folder = PathBuf::from("../Images");
-    let mut reader = Reader::from_str(xml);
+pub fn update_image_paths(html: &str) -> Result<String> {
+    let folder = PathBuf::from("../Images");
+    let mut reader = Reader::from_str(html);
+    reader.config_mut().trim_text(true);
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
     loop {
         match reader.read_event()? {
             Event::Empty(tag) if tag.name().as_ref() == IMG.as_bytes() => {
-                let tag = update_image(tag, &image_folder, SRC)?;
+                let tag = update_tag_path(tag, &folder, SRC)?;
                 writer.write_event(Event::Empty(tag))?;
             }
             Event::Empty(tag) if tag.name().as_ref() == IMAGE.as_bytes() => {
-                let tag = update_image(tag, &image_folder, XLINK)?;
+                let tag = update_tag_path(tag, &folder, XLINK)?;
                 writer.write_event(Event::Empty(tag))?;
             }
             Event::Eof => break,
@@ -53,13 +65,32 @@ pub fn update_image_paths(xml: &str) -> Result<String> {
         }
     }
 
-    let buf = writer.into_inner().into_inner();
-    Ok(String::from_utf8(buf)?)
+    Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-fn update_image(
+pub fn update_style_path(html: &str) -> Result<String> {
+    let folder = PathBuf::from("../Styles");
+    let mut reader = Reader::from_str(html);
+    reader.config_mut().trim_text(true);
+    let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
+
+    loop {
+        match reader.read_event()? {
+            Event::Empty(tag) if tag.name().as_ref() == b"link" => {
+                let tag = update_tag_path(tag, &folder, "href")?;
+                writer.write_event(Event::Empty(tag))?;
+            }
+            Event::Eof => break,
+            event => writer.write_event(event)?,
+        }
+    }
+
+    Ok(String::from_utf8(writer.into_inner().into_inner())?)
+}
+
+fn update_tag_path(
     tag: BytesStart<'_>,
-    image_folder: &PathBuf,
+    folder: &PathBuf,
     attr: &str,
 ) -> Result<BytesStart<'static>> {
     let Some(link) = tag.try_get_attribute(attr)? else {
@@ -68,7 +99,7 @@ fn update_image(
 
     let path = PathBuf::from(link.unescape_value()?.as_ref());
     let file_name = path.file_name().unwrap();
-    let path = image_folder.join(file_name);
+    let path = folder.join(file_name);
     let path = path.as_os_str();
 
     let attributes = tag
@@ -133,11 +164,11 @@ pub fn starting_image_tag(html: &str) -> Result<Option<BytesStart<'_>>> {
     loop {
         match reader.read_event()? {
             Event::Empty(tag) if tag.name().as_ref() == IMG.as_bytes() => {
-                let tag = update_image(tag, &image_folder, SRC)?;
+                let tag = update_tag_path(tag, &image_folder, SRC)?;
                 return Ok(Some(tag));
             }
             Event::Empty(tag) if tag.name().as_ref() == IMAGE.as_bytes() => {
-                let tag = update_image(tag, &image_folder, XLINK)?;
+                let tag = update_tag_path(tag, &image_folder, XLINK)?;
                 return Ok(Some(tag));
             }
             Event::Text(_) | Event::Eof => return Ok(None),

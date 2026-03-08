@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use quick_xml::events::attributes::AttrError;
 use thiserror::Error;
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
@@ -47,5 +49,3 @@ pub enum Error {
     #[error(transparent)]
     IcedError(#[from] iced::Error),
 }
-
-pub type Result<T> = std::result::Result<T, Error>;

@@ -2,7 +2,7 @@ use crate::controller::{
     DEFAULT_STYLESHEET, get_ordered_path,
     xml::{
         body_tag, extract_head, extract_html_tag, remove_part_tags, remove_think_tags,
-        starting_image_tag, to_xml, update_image_paths,
+        starting_image_tag, to_xml, update_image_paths, update_style_path,
     },
 };
 use crate::error::{Error, Result};
@@ -12,13 +12,13 @@ use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};
 use quick_xml::{
     Reader, Writer,
     escape::escape,
-    events::{BytesDecl, BytesEnd, BytesText, Event},
+    events::{BytesDecl, BytesText, Event},
 };
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
     ffi::OsStr,
-    io::Cursor,
+    io::{self, Cursor},
     mem,
     path::PathBuf,
 };
@@ -57,6 +57,7 @@ impl DocBuilder {
 
         self.add_images()?;
         self.add_cover_image()?;
+        self.add_style_sheets()?;
 
         for content in self.collect_contents()? {
             self.builder.add_content(content)?;
@@ -78,7 +79,7 @@ impl DocBuilder {
         let content = self.epub.get_resource_by_path(&path).unwrap();
         let file_name = path
             .file_name()
-            .ok_or(Error::BuildError("Invalid file name"))?;
+            .ok_or(Error::BuildError("Invalid file name found"))?;
         let path = PathBuf::from("Images").join(file_name);
 
         self.builder.add_cover_image(path, &*content, mime)?;
@@ -87,13 +88,11 @@ impl DocBuilder {
     }
 
     pub fn add_images(&mut self) -> Result<()> {
-        let image_folder = PathBuf::from("Images");
-        let images = self.get_images();
-
-        for ResourceItem { path, mime, .. } in images {
+        let folder = PathBuf::from("Images");
+        for ResourceItem { path, mime, .. } in self.get_images() {
             let content = self.epub.get_resource_by_path(&path).unwrap();
             let file_name = path.file_name().unwrap();
-            let path = image_folder.join(file_name);
+            let path = folder.join(file_name);
             self.builder.add_resource(path, &*content, mime)?;
         }
 
@@ -107,6 +106,32 @@ impl DocBuilder {
             .iter()
             .filter_map(|(id, e)| {
                 if e.mime.starts_with("image") && &cover != id {
+                    Some(e.to_owned())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn add_style_sheets(&mut self) -> Result<()> {
+        let folder = PathBuf::from("Styles");
+        for ResourceItem { path, mime, .. } in self.get_style_sheets() {
+            let content = self.epub.get_resource_by_path(&path).unwrap();
+            let file_name = path.file_name().unwrap();
+            let path = folder.join(file_name);
+            self.builder.add_resource(path, &*content, mime)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn get_style_sheets(&self) -> Vec<ResourceItem> {
+        self.epub
+            .resources
+            .iter()
+            .filter_map(|(_, e)| {
+                if e.mime == "text/css" {
                     Some(e.to_owned())
                 } else {
                     None
@@ -135,8 +160,6 @@ impl DocBuilder {
 
         let chapter_file_names = self.chapter_file_names();
 
-        let mut count = 0;
-
         let mut contents = Vec::new();
         let pages = self
             .pages
@@ -144,12 +167,16 @@ impl DocBuilder {
             .filter_map(|e| Some((e.path.file_name()?, e)))
             .collect::<HashMap<_, _>>();
 
+        let mut count = 0;
         for (href, md_file, epub_buf) in file_parts {
             let md_name = md_file.file_name().unwrap_or_default();
             let html = str::from_utf8(&epub_buf)?;
             let html = match pages.get(md_name) {
                 Some(e) => build_html(html, &e.content)?,
-                None => update_image_paths(html)?,
+                None => {
+                    let html = update_image_paths(html)?;
+                    update_style_path(&html)?
+                }
             };
 
             let file_name = href.file_name().unwrap();
@@ -199,7 +226,6 @@ fn to_text_path(path: &PathBuf) -> PathBuf {
     PathBuf::from("Text").join(file_name)
 }
 
-const HTML: &str = "html";
 fn build_html(html: &str, content: &str) -> Result<String> {
     let content = convert_content(content);
     let body = to_xml(&content);
@@ -208,34 +234,33 @@ fn build_html(html: &str, content: &str) -> Result<String> {
 
     writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("utf-8"), None)))?;
     writer.write_event(Event::DocType(BytesText::new("html")))?;
-    writer.write_event(Event::Start(extract_html_tag(html)?))?;
-
-    write_header(&mut writer, html)?;
-
-    write_body(&mut writer, html, &body)?;
-
-    writer.write_event(Event::End(BytesEnd::new(HTML)))?;
+    let html_tag = extract_html_tag(html)?;
+    writer
+        .create_element("html")
+        .with_attributes(html_tag.attributes().flatten())
+        .write_inner_content(|writer| {
+            write_header(writer, html).map_err(io::Error::other)?;
+            write_body(writer, html, &body).map_err(io::Error::other)
+        })?;
 
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
 fn write_header(writer: &mut Writer<Cursor<Vec<u8>>>, html: &str) -> Result<()> {
-    let head = extract_head(html)?;
-    let mut reader = Reader::from_str(&head);
+    let html = extract_head(html)?;
+    let html = update_style_path(&html)?;
+    let mut reader = Reader::from_str(&html);
     reader.config_mut().trim_text(true);
-
-    let mut events = Vec::new();
-    loop {
-        match reader.read_event()? {
-            Event::Eof => break,
-            e => events.push(e),
-        }
-    }
 
     writer
         .create_element("head")
         .write_inner_content(|writer| {
-            events.into_iter().try_for_each(|e| writer.write_event(e))?;
+            loop {
+                match reader.read_event().map_err(io::Error::other)? {
+                    Event::Eof => break,
+                    e => writer.write_event(e)?,
+                }
+            }
             writer
                 .create_element("link")
                 .with_attribute(("rel", "stylesheet"))
@@ -252,13 +277,6 @@ fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, html: &str, body: &str) -> R
     let mut reader = Reader::from_str(body);
     reader.config_mut().trim_text(true);
 
-    let mut events = Vec::new();
-    loop {
-        match reader.read_event()? {
-            Event::Eof => break,
-            e => events.push(e),
-        }
-    }
     let image = starting_image_tag(html)?;
 
     let body = body_tag(html)?;
@@ -270,7 +288,12 @@ fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, html: &str, body: &str) -> R
             if let Some(image) = image {
                 writer.write_event(Event::Empty(image))?;
             };
-            events.into_iter().try_for_each(|e| writer.write_event(e))?;
+            loop {
+                match reader.read_event().map_err(io::Error::other)? {
+                    Event::Eof => break,
+                    e => writer.write_event(e)?,
+                }
+            }
             Ok(())
         })?;
     Ok(())

@@ -5,7 +5,6 @@ pub mod builder;
 pub mod client;
 pub mod parse;
 pub mod xml;
-pub mod xml_converter;
 
 pub fn get_ordered_path(epub: &EpubDoc<Cursor<Vec<u8>>>) -> Vec<PathBuf> {
     epub.spine
@@ -169,15 +168,6 @@ pub const DEFAULT_STYLESHEET: &[u8] = br#"
 
     blockquote p {
         text-indent: 0;
-    }
-
-    /* Code */
-    code {
-        font-family: "Courier New", Courier, monospace;
-        font-size: 0.9em;
-        background-color: #f5f5f5;
-        padding: 0.1em 0.3em;
-        border-radius: 3px;
     }
 
     pre {
