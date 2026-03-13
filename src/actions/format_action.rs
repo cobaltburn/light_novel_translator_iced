@@ -5,7 +5,7 @@ use crate::{
     model::format::{Format, FormatPage},
 };
 use epub::doc::EpubDoc;
-use iced::{Task, widget::text_editor};
+use iced::{Task, widget::image::Handle};
 use std::{
     ffi::OsStr,
     fs::read_dir,
@@ -18,10 +18,8 @@ use tokio::fs::read_to_string;
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum FormatAction {
-    SetPage(usize),
     SelectFolder,
     SetPages(String, Vec<(PathBuf, String)>),
-    EditContent(text_editor::Action),
     SelectEpub,
     SetEpub((PathBuf, Vec<u8>)),
     Build,
@@ -36,9 +34,7 @@ impl Format {
                 Task::future(select_format_folder(self.epub_path.clone()))
                     .and_then(|(f, p)| Task::done(FormatAction::SetPages(f, p).into()))
             }
-            FormatAction::SetPage(page) => self.set_current_page(page).into(),
             FormatAction::SetPages(folder, pages) => self.set_pages(folder, pages).into(),
-            FormatAction::EditContent(action) => self.edit_current_content(action).into(),
             FormatAction::SetEpub(doc) => Task::done(self.set_epub(doc)).then(|r| match r {
                 Ok(_) => Task::none(),
                 Err(error) => Task::future(display_error(error)).discard(),
@@ -60,31 +56,19 @@ impl Format {
         }
     }
 
-    fn set_current_page(&mut self, page: usize) {
-        self.current_page = Some(page);
-    }
-
     fn set_pages(&mut self, folder: String, pages: Vec<(PathBuf, String)>) {
         self.pages = pages.into_iter().map(|e| FormatPage::from(e)).collect();
-        self.current_page = Some(0);
         self.source_folder = folder;
     }
 
-    fn edit_current_content(&mut self, action: text_editor::Action) {
-        let Some(i) = self.current_page else {
-            return;
-        };
-
-        if let Some(page) = self.pages.get_mut(i) {
-            page.content.perform(action);
-        };
-    }
-
     fn set_epub(&mut self, (name, buffer): (PathBuf, Vec<u8>)) -> Result<()> {
-        let epub = EpubDoc::from_reader(Cursor::new(buffer))?;
+        let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
+        let cover = epub.get_cover().map(|e| Handle::from_bytes(e.0));
 
         self.epub_path = name;
         self.epub = Some(epub);
+        self.cover = cover;
+
         Ok(())
     }
 
@@ -97,6 +81,7 @@ impl Format {
             .map(|e| e.to_string_lossy().to_string())
             .unwrap_or_default();
         self.source_folder.clear();
+        self.cover = None;
 
         DocBuilder::new(epub, name, pages)
     }

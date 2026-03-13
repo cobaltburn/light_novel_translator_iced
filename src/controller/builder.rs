@@ -217,7 +217,10 @@ fn to_text_path(path: &PathBuf) -> PathBuf {
 }
 
 fn build_html(html: &str, content: &str) -> Result<String> {
-    let content = convert_content(content);
+    let content = remove_think_tags(content);
+    let content = remove_part_tags(&content);
+    let content = replace_jp_symbols(&content);
+    let content = escape(content);
     let content = to_xml(&content);
     let image = starting_image_tag(html)?;
 
@@ -230,7 +233,6 @@ fn build_html(html: &str, content: &str) -> Result<String> {
         .create_element("html")
         .with_attribute(("xmlns:epub", "http://www.idpf.org/2007/ops"))
         .with_attribute(("xml:lang", "en"))
-        .with_attribute(("class", "vrtl"))
         .write_inner_content(|writer| {
             write_header(html, writer).map_err(io::Error::other)?;
             write_body(writer, &content, image).map_err(io::Error::other)
@@ -287,6 +289,7 @@ fn write_body(
 
     writer
         .create_element("body")
+        .with_attribute(("class", "p-text"))
         .write_inner_content(|writer| {
             if let Some(image) = header_image {
                 writer.write_event(Event::Empty(image))?;
@@ -300,14 +303,6 @@ fn write_body(
             Ok(())
         })?;
     Ok(())
-}
-
-fn convert_content(content: &str) -> Cow<'static, str> {
-    let content = remove_think_tags(content);
-    let content = remove_part_tags(&content);
-    let content = replace_jp_symbols(&content);
-    let content = escape(content);
-    content
 }
 
 pub fn replace_jp_symbols(text: &str) -> String {
@@ -327,7 +322,7 @@ impl From<FormatPage> for BuilderPage {
     fn from(FormatPage { path, content, .. }: FormatPage) -> Self {
         BuilderPage {
             path,
-            content: content.text(),
+            content: content,
         }
     }
 }

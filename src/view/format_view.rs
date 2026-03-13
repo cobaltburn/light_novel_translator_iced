@@ -1,24 +1,22 @@
-use crate::{
-    actions::format_action::FormatAction, model::format::Format, view::menu_button,
-    widget::text_button,
-};
-use iced::widget::{
-    button, column, container, row, scrollable, space::vertical, text, text_editor,
-};
+use crate::{actions::format_action::FormatAction, model::format::Format};
+use iced::alignment::Horizontal;
+use iced::widget::{Column, image, text_input};
+use iced::widget::{button, column, container, row, scrollable, space::vertical, text};
 use iced::{
-    Border, Color, Element, Length, Padding, Renderer, Theme,
+    Border, Color, Element, Length, Padding,
     alignment::Vertical,
-    color,
-    widget::{Container, Row, Space, container::transparent},
+    widget::{Row, container::transparent},
 };
-use iced_aw::{Menu, MenuBar, menu::Item};
 
 pub fn format_view(model: &Format) -> Element<'_, FormatAction> {
     container(column![
         vertical(),
         column![
             format_menu_bar(model),
-            row![format_side_bar(model), format_text(model)].spacing(10)
+            row![epub_image(model), epub_metadata(model)].spacing(10),
+            container(button(text("build").center()).on_press(FormatAction::Build))
+                .align_right(Length::Fill)
+                .padding(20)
         ]
         .height(Length::FillPortion(9))
         .padding(10),
@@ -32,26 +30,11 @@ pub fn format_view(model: &Format) -> Element<'_, FormatAction> {
     .into()
 }
 
-fn format_menu_bar(state: &Format) -> Row<'_, FormatAction> {
-    row![
-        MenuBar::new(vec![build_menu(state)]).spacing(5),
-        button(text("build").center()).on_press(FormatAction::Build),
-    ]
-    .width(Length::Fill)
-    .spacing(10)
-    .padding(Padding::default().bottom(15))
-}
-
-fn build_menu(state: &Format) -> Item<'_, FormatAction, Theme, Renderer> {
-    Item::with_menu(
-        menu_button("content"),
-        Menu::new(vec![
-            Item::new(epub_button(state)),
-            Item::new(content_button(state)),
-        ])
+fn format_menu_bar(model: &Format) -> Row<'_, FormatAction> {
+    row![epub_button(model), content_button(model),]
+        .width(Length::Fill)
         .spacing(10)
-        .width(400),
-    )
+        .padding(Padding::default().bottom(15))
 }
 
 fn content_button(model: &Format) -> Row<'_, FormatAction> {
@@ -93,7 +76,81 @@ fn epub_button(model: &Format) -> Row<'_, FormatAction> {
     .spacing(10)
 }
 
-fn format_text(model: &Format) -> Container<'_, FormatAction> {
+fn epub_image(model: &Format) -> Element<'_, FormatAction> {
+    let cover_image = model.cover.as_ref().map(|handle| image(handle));
+    container(cover_image)
+        .padding(10)
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .center(Length::Fill)
+        .into()
+}
+
+fn epub_metadata(model @ Format { metadata, .. }: &Format) -> Element<'_, FormatAction> {
+    let label_width = 80;
+    let content = column![
+        row![
+            container(text("Title: "))
+                .align_right(Length::Fill)
+                .width(label_width),
+            container(text_input("Title", &metadata.title))
+        ]
+        .align_y(Vertical::Center),
+        row![
+            container(text("Author(s): "))
+                .align_right(Length::Fill)
+                .width(label_width),
+            container(text_input("Author(s)", &metadata.authors))
+        ]
+        .align_y(Vertical::Center),
+        row![
+            container(text("Series: "))
+                .align_right(Length::Fill)
+                .width(label_width),
+            container(text_input("Series", &metadata.series))
+        ]
+        .align_y(Vertical::Center),
+        content_files(model)
+    ]
+    .spacing(5);
+    container(content)
+        .padding(10)
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .align_top(Length::Fill)
+        .align_x(Horizontal::Center)
+        .into()
+}
+
+fn content_files(Format { pages, .. }: &Format) -> Element<'_, FormatAction> {
+    let pages: Column<_> = pages
+        .iter()
+        .filter_map(|p| p.path.file_stem())
+        .map(|p| text(p.to_string_lossy()).into())
+        .collect();
+    container(
+        scrollable(
+            pages
+                .padding(Padding::new(5.0).horizontal(10))
+                .width(Length::Fill)
+                .spacing(10),
+        )
+        .height(Length::Fill),
+    )
+    .height(Length::Fill)
+    .width(Length::Fill)
+    .padding(Padding::new(10.0).left(0).right(5))
+    .style(|theme| {
+        transparent(theme).border(Border {
+            color: Color::WHITE,
+            width: 1.0,
+            radius: 8.into(),
+        })
+    })
+    .into()
+}
+
+/* fn format_text(model: &Format) -> Container<'_, FormatAction> {
     let current_text = model.current_content().map(|content| {
         text_editor(content)
             .on_action(FormatAction::EditContent)
@@ -115,9 +172,9 @@ fn format_text(model: &Format) -> Container<'_, FormatAction> {
                 radius: 8.into(),
             })
         })
-}
+} */
 
-pub fn format_side_bar(model: &Format) -> Container<'_, FormatAction> {
+/* fn format_side_bar(model: &Format) -> Container<'_, FormatAction> {
     container(
         scrollable(column(format_path_buttons(model)).width(250).spacing(10)).height(Length::Fill),
     )
@@ -130,9 +187,9 @@ pub fn format_side_bar(model: &Format) -> Container<'_, FormatAction> {
             radius: 8.into(),
         })
     })
-}
+} */
 
-fn format_path_buttons(model: &Format) -> Vec<Element<'_, FormatAction>> {
+/* fn format_path_buttons(model: &Format) -> Vec<Element<'_, FormatAction>> {
     model
         .pages
         .iter()
@@ -149,4 +206,4 @@ fn format_path_buttons(model: &Format) -> Vec<Element<'_, FormatAction>> {
                 .into()
         })
         .collect()
-}
+} */

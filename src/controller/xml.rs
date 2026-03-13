@@ -102,43 +102,16 @@ pub fn update_tag_path(
     let path = folder.join(file_name);
     let path = path.as_os_str();
 
-    let attributes = tag
+    let attributes: Vec<_> = tag
         .attributes()
         .flatten()
         .filter(|a| a.key.as_ref() != attr.as_bytes())
-        .collect::<Vec<_>>();
+        .collect();
 
     let tag = BytesStart::new(str::from_utf8(tag.name().as_ref())?)
         .with_attributes(attributes)
         .with_attributes([(attr.as_bytes(), path.as_bytes())])
         .into_owned();
-    Ok(tag)
-}
-
-pub fn extract_html_tag(html: &str) -> Result<BytesStart<'_>> {
-    let mut reader = Reader::from_str(html.as_ref());
-    let tag = loop {
-        match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"html" => {
-                break tag;
-            }
-            Event::Eof => return Err(Error::BuildError("No head tag found")),
-            _ => (),
-        }
-    };
-    let lang = "xml:lang";
-
-    let attributes = tag
-        .attributes()
-        .flatten()
-        .filter(|a| a.key.as_ref() != lang.as_bytes())
-        .collect::<Vec<_>>();
-
-    let tag = BytesStart::new(str::from_utf8(tag.name().as_ref())?)
-        .with_attributes(attributes)
-        .with_attributes([(lang, "en")])
-        .into_owned();
-
     Ok(tag)
 }
 

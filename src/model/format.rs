@@ -1,36 +1,38 @@
 use epub::doc::EpubDoc;
-use iced::widget::text_editor::{self, Content};
+use iced::widget::image::Handle;
 use std::{io::Cursor, path::PathBuf};
 
 #[non_exhaustive]
 #[derive(Default, Debug)]
 pub struct Format {
     pub pages: Vec<FormatPage>,
-    pub current_page: Option<usize>,
     pub source_folder: String,
     pub epub_path: PathBuf,
     pub epub: Option<EpubDoc<Cursor<Vec<u8>>>>,
-}
-
-impl Format {
-    pub fn current_content(&self) -> Option<&Content> {
-        let page = self.current_page?;
-        self.pages.get(page).map(|e| &e.content)
-    }
+    pub cover: Option<Handle>,
+    pub metadata: EpubMetadata,
 }
 
 #[non_exhaustive]
 #[derive(Default, Debug)]
 pub struct FormatPage {
     pub path: PathBuf,
-    pub content: text_editor::Content,
+    pub content: String,
 }
 
-impl<S: AsRef<str>> From<(PathBuf, S)> for FormatPage {
-    fn from((path, content): (PathBuf, S)) -> Self {
+impl From<(PathBuf, String)> for FormatPage {
+    fn from((path, content): (PathBuf, String)) -> Self {
         FormatPage {
             path,
-            content: Content::with_text(content.as_ref()),
+            content: content,
         }
     }
+}
+
+#[non_exhaustive]
+#[derive(Default, Debug)]
+pub struct EpubMetadata {
+    pub title: String,
+    pub authors: String,
+    pub series: String,
 }
