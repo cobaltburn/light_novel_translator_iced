@@ -39,10 +39,10 @@ pub fn strip_data_tags(html: &str) -> Result<String> {
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-const SRC: &str = "src";
-const XLINK: &str = "xlink:href";
-const IMG: &str = "img";
-const IMAGE: &str = "image";
+pub const SRC: &str = "src";
+pub const XLINK: &str = "xlink:href";
+pub const IMG: &str = "img";
+pub const IMAGE: &str = "image";
 
 pub fn update_image_paths(html: &str) -> Result<String> {
     let folder = PathBuf::from("../Images");
@@ -88,7 +88,7 @@ pub fn update_style_path(html: &str) -> Result<String> {
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-fn update_tag_path(
+pub fn update_tag_path(
     tag: BytesStart<'_>,
     folder: &PathBuf,
     attr: &str,
@@ -142,19 +142,6 @@ pub fn extract_html_tag(html: &str) -> Result<BytesStart<'_>> {
     Ok(tag)
 }
 
-pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
-    let mut reader = Reader::from_str(html.as_ref());
-    loop {
-        match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"head" => {
-                return Ok(reader.read_text(tag.name())?);
-            }
-            Event::Eof => return Err(Error::BuildError("No head tag found")),
-            _ => (),
-        }
-    }
-}
-
 pub fn starting_image_tag(html: &str) -> Result<Option<BytesStart<'_>>> {
     let image_folder = PathBuf::from("../Images");
     let body = extract_body(html)?;
@@ -177,22 +164,24 @@ pub fn starting_image_tag(html: &str) -> Result<Option<BytesStart<'_>>> {
     }
 }
 
-pub fn body_tag(html: &str) -> Result<BytesStart<'_>> {
+pub fn extract_body(html: &str) -> Result<Cow<'_, str>> {
     let mut reader = Reader::from_str(html);
     loop {
         match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"body" => return Ok(tag.into_owned()),
+            Event::Start(tag) if tag.name().as_ref() == b"body" => {
+                return Ok(reader.read_text(tag.name())?);
+            }
             Event::Eof => return Err(Error::BuildError("No body tag found")),
             _ => (),
         }
     }
 }
 
-pub fn extract_body(html: &str) -> Result<Cow<'_, str>> {
+pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
     let mut reader = Reader::from_str(html);
     loop {
         match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"body" => {
+            Event::Start(tag) if tag.name().as_ref() == b"head" => {
                 return Ok(reader.read_text(tag.name())?);
             }
             Event::Eof => return Err(Error::BuildError("No body tag found")),

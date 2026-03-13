@@ -1,8 +1,8 @@
 use crate::controller::{
     DEFAULT_STYLESHEET, get_ordered_path,
     xml::{
-        body_tag, extract_head, extract_html_tag, remove_part_tags, remove_think_tags,
-        starting_image_tag, to_xml, update_image_paths, update_style_path,
+        extract_head, remove_part_tags, remove_think_tags, starting_image_tag, to_xml,
+        update_image_paths, update_style_path, update_tag_path,
     },
 };
 use crate::error::{Error, Result};
@@ -12,7 +12,7 @@ use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};
 use quick_xml::{
     Reader, Writer,
     escape::escape,
-    events::{BytesDecl, BytesText, Event},
+    events::{BytesDecl, BytesStart, BytesText, Event},
 };
 use std::{
     borrow::Cow,
@@ -104,13 +104,8 @@ impl DocBuilder {
         self.epub
             .resources
             .iter()
-            .filter_map(|(id, e)| {
-                if e.mime.starts_with("image") && &cover != id {
-                    Some(e.to_owned())
-                } else {
-                    None
-                }
-            })
+            .filter(|(id, e)| e.mime.starts_with("image") && &cover != *id)
+            .map(|(_, e)| e.to_owned())
             .collect()
     }
 
@@ -130,13 +125,8 @@ impl DocBuilder {
         self.epub
             .resources
             .iter()
-            .filter_map(|(_, e)| {
-                if e.mime == "text/css" {
-                    Some(e.to_owned())
-                } else {
-                    None
-                }
-            })
+            .filter(|(_, e)| e.mime == "text/css")
+            .map(|(_, e)| e.to_owned())
             .collect()
     }
 
@@ -144,28 +134,28 @@ impl DocBuilder {
         let epub_paths = get_ordered_path(&self.epub);
 
         let path_map = self.path_map();
-        let linked_files = epub_paths
+        let linked_files: Vec<_> = epub_paths
             .iter()
             .map(|stem| link_files(stem, &path_map))
-            .collect::<Vec<_>>();
+            .collect();
 
-        let file_parts = linked_files
+        let file_parts: Vec<_> = linked_files
             .into_iter()
             .map(|(md_file, xhtml_path)| {
                 let epub_buf = self.epub.get_resource_by_path(&xhtml_path).unwrap();
                 let href = to_text_path(&xhtml_path);
                 (href, md_file, epub_buf)
             })
-            .collect::<Vec<_>>();
+            .collect();
 
         let chapter_file_names = self.chapter_file_names();
 
         let mut contents = Vec::new();
-        let pages = self
+        let pages: HashMap<_, _> = self
             .pages
             .iter()
             .filter_map(|e| Some((e.path.file_name()?, e)))
-            .collect::<HashMap<_, _>>();
+            .collect();
 
         let mut count = 0;
         for (href, md_file, epub_buf) in file_parts {
@@ -196,9 +186,9 @@ impl DocBuilder {
             .resources
             .values()
             .filter(|r| r.mime == XHTML_MIME)
-            .map(|item| {
-                let stem = item.path.file_stem().unwrap().to_string_lossy();
-                (stem, &item.path)
+            .map(|ResourceItem { path, .. }| {
+                let stem = path.file_stem().unwrap().to_string_lossy();
+                (stem, path)
             })
             .collect()
     }
@@ -208,7 +198,7 @@ impl DocBuilder {
             .toc
             .iter()
             .map(|n| n.content.file_name().unwrap())
-            .collect::<HashSet<_>>()
+            .collect()
     }
 }
 
@@ -228,39 +218,34 @@ fn to_text_path(path: &PathBuf) -> PathBuf {
 
 fn build_html(html: &str, content: &str) -> Result<String> {
     let content = convert_content(content);
-    let body = to_xml(&content);
+    let content = to_xml(&content);
+    let image = starting_image_tag(html)?;
 
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
     writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("utf-8"), None)))?;
     writer.write_event(Event::DocType(BytesText::new("html")))?;
-    let html_tag = extract_html_tag(html)?;
+
     writer
         .create_element("html")
-        .with_attributes(html_tag.attributes().flatten())
+        .with_attribute(("xmlns:epub", "http://www.idpf.org/2007/ops"))
+        .with_attribute(("xml:lang", "en"))
+        .with_attribute(("class", "vrtl"))
         .write_inner_content(|writer| {
-            write_header(writer, html).map_err(io::Error::other)?;
-            write_body(writer, html, &body).map_err(io::Error::other)
+            write_header(html, writer).map_err(io::Error::other)?;
+            write_body(writer, &content, image).map_err(io::Error::other)
         })?;
 
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-fn write_header(writer: &mut Writer<Cursor<Vec<u8>>>, html: &str) -> Result<()> {
-    let html = extract_head(html)?;
-    let html = update_style_path(&html)?;
-    let mut reader = Reader::from_str(&html);
-    reader.config_mut().trim_text(true);
+fn write_header(html: &str, writer: &mut Writer<Cursor<Vec<u8>>>) -> Result<()> {
+    let head = extract_head(html)?;
 
     writer
         .create_element("head")
         .write_inner_content(|writer| {
-            loop {
-                match reader.read_event().map_err(io::Error::other)? {
-                    Event::Eof => break,
-                    e => writer.write_event(e)?,
-                }
-            }
+            write_head(head, writer).map_err(io::Error::other)?;
             writer
                 .create_element("link")
                 .with_attribute(("rel", "stylesheet"))
@@ -273,19 +258,37 @@ fn write_header(writer: &mut Writer<Cursor<Vec<u8>>>, html: &str) -> Result<()> 
     Ok(())
 }
 
-fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, html: &str, body: &str) -> Result<()> {
-    let mut reader = Reader::from_str(body);
+pub fn write_head(head: Cow<'_, str>, writer: &mut Writer<Cursor<Vec<u8>>>) -> Result<()> {
+    let folder = PathBuf::from("../Styles");
+    let mut reader = Reader::from_str(&head);
     reader.config_mut().trim_text(true);
 
-    let image = starting_image_tag(html)?;
+    loop {
+        match reader.read_event()? {
+            Event::Empty(tag) if tag.name().as_ref() == b"link" => {
+                let tag = update_tag_path(tag, &folder, "href")?;
+                writer.write_event(Event::Empty(tag))?;
+            }
+            Event::Eof => break,
+            e => writer.write_event(e)?,
+        }
+    }
 
-    let body = body_tag(html)?;
+    Ok(())
+}
+
+fn write_body(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    content: &str,
+    header_image: Option<BytesStart<'_>>,
+) -> Result<()> {
+    let mut reader = Reader::from_str(content);
+    reader.config_mut().trim_text(true);
 
     writer
         .create_element("body")
-        .with_attributes(body.attributes().flatten())
         .write_inner_content(|writer| {
-            if let Some(image) = image {
+            if let Some(image) = header_image {
                 writer.write_event(Event::Empty(image))?;
             };
             loop {
