@@ -54,7 +54,7 @@ impl Translation {
     pub fn perform(&mut self, action: TransAction) -> Task<TransAction> {
         match action {
             TransAction::ServerAction(action) => self.server_state.perform(action).map(Into::into),
-            TransAction::SetPage(page) => self.set_current_page(page).into(),
+            TransAction::SetPage(page) => (self.current_page = page).into(),
             TransAction::PageComplete(page) => self.check_complete(page).into(),
             TransAction::CancelTranslate => self.cancel().into(),
             TransAction::SavePages(path) => self.save_pages(path),
@@ -106,10 +106,6 @@ impl Translation {
             .filter(|p| matches!(p.activity, Activity::Active))
             .for_each(|p| p.activity = Activity::Incomplete);
         self.server_state.abort();
-    }
-
-    fn set_current_page(&mut self, page: usize) {
-        self.current_page = page;
     }
 
     fn check_complete(&mut self, page: usize) {
@@ -346,6 +342,7 @@ pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, V
         .map(|(path, html)| {
             let html = strip_data_tags(&html)?;
             let markdown = converter.convert(&html)?;
+            let markdown = markdown.trim();
             let mut sections = Vec::new();
             if !markdown.is_empty() {
                 let lines = markdown.lines();

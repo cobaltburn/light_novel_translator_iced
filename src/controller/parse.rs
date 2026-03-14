@@ -7,20 +7,21 @@ pub fn remove_think_tags(text: &str) -> String {
 }
 
 pub fn partition_text(text: &str) -> Vec<String> {
-    let mut messages = Vec::new();
-    let mut msg = String::new();
-    let sentences = text.split_inclusive("。").map(str::to_owned);
+    let mut messages = Vec::with_capacity(text.len() / 2000);
+    let mut msg = String::with_capacity(2500);
+    let sentences = text.split_inclusive("。");
 
     for sentence in sentences {
         if msg.len() < 2000 {
             msg.push_str(&sentence);
         } else {
-            messages.push(msg);
-            msg = String::new();
+            messages.push(msg.trim().to_string());
+            msg = String::with_capacity(2500);
         }
     }
-    if !msg.is_empty() {
-        messages.push(msg);
+
+    if !msg.trim().is_empty() {
+        messages.push(msg.trim().to_string());
     }
 
     messages

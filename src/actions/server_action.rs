@@ -19,10 +19,10 @@ pub enum ServerAction {
 impl Server {
     pub fn perform(&mut self, action: ServerAction) -> Task<ServerAction> {
         match action {
-            ServerAction::SelectModel(model) => self.set_current_model(model).into(),
+            ServerAction::SelectModel(model) => (self.current_model = Some(model)).into(),
+            ServerAction::SetThink(think) => (self.settings.think = think).into(),
+            ServerAction::SetMethod(method) => (self.method = method).into(),
             ServerAction::SetModels(models) => self.set_models(models).into(),
-            ServerAction::SetThink(think) => self.set_thinking(think).into(),
-            ServerAction::SetMethod(method) => self.set_method(method).into(),
             ServerAction::Connect => self.connect(),
             ServerAction::Abort => self.abort().into(),
         }
@@ -41,19 +41,7 @@ impl Server {
         self.models = models;
     }
 
-    pub fn set_method(&mut self, method: Method) {
-        self.method = method;
-    }
-
-    pub fn set_current_model(&mut self, model: String) {
-        self.current_model = Some(model);
-    }
-
     pub fn abort(&mut self) {
         self.handles.clear(); // handles must be added with abort on drop
-    }
-
-    pub fn set_thinking(&mut self, think: Think) {
-        self.settings.think = think
     }
 }

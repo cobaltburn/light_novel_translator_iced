@@ -1,12 +1,15 @@
-use crate::controller::{
-    DEFAULT_STYLESHEET, get_ordered_path,
-    xml::{
-        extract_head, remove_part_tags, remove_think_tags, starting_image_tag, to_xml,
-        update_image_paths, update_style_path, update_tag_path,
-    },
-};
 use crate::error::{Error, Result};
 use crate::model::format::FormatPage;
+use crate::{
+    controller::{
+        DEFAULT_STYLESHEET, get_ordered_path,
+        xml::{
+            extract_head, remove_part_tags, starting_image_tag, to_xml, update_image_paths,
+            update_style_path, update_tag_path,
+        },
+    },
+    model::format::EpubMetadata,
+};
 use epub::doc::{EpubDoc, ResourceItem};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};
 use quick_xml::{
@@ -31,6 +34,7 @@ pub struct DocBuilder {
     pub builder: EpubBuilder<ZipLibrary>,
     pub name: String,
     pub pages: Vec<BuilderPage>,
+    pub metadata: EpubMetadata,
 }
 
 impl DocBuilder {
@@ -38,14 +42,14 @@ impl DocBuilder {
         epub: EpubDoc<Cursor<Vec<u8>>>,
         name: String,
         pages: Vec<FormatPage>,
+        metadata: EpubMetadata,
     ) -> Result<Self> {
-        let builder = EpubBuilder::new(ZipLibrary::new()?)?;
-        let pages = pages.into_iter().map(BuilderPage::from).collect();
         Ok(DocBuilder {
             epub,
             name,
-            pages,
-            builder,
+            metadata,
+            pages: pages.into_iter().map(BuilderPage::from).collect(),
+            builder: EpubBuilder::new(ZipLibrary::new()?)?,
         })
     }
 
@@ -54,6 +58,17 @@ impl DocBuilder {
             .epub_version(EpubVersion::V30)
             .stylesheet(DEFAULT_STYLESHEET)?
             .set_lang("en");
+
+        self.builder.set_title(mem::take(&mut self.metadata.title));
+
+        let authors = self
+            .metadata
+            .authors
+            .split("&")
+            .map(|e| e.trim().to_string())
+            .collect();
+
+        self.builder.set_authors(authors);
 
         self.add_images()?;
         self.add_cover_image()?;
@@ -217,8 +232,7 @@ fn to_text_path(path: &PathBuf) -> PathBuf {
 }
 
 fn build_html(html: &str, content: &str) -> Result<String> {
-    let content = remove_think_tags(content);
-    let content = remove_part_tags(&content);
+    let content = remove_part_tags(content);
     let content = replace_jp_symbols(&content);
     let content = escape(content);
     let content = to_xml(&content);

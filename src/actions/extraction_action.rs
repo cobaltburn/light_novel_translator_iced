@@ -31,15 +31,15 @@ pub enum ExtractAction {
 impl Extraction {
     pub fn perform(&mut self, action: ExtractAction) -> Task<ExtractAction> {
         match action {
+            ExtractAction::SetImageView(view) => (self.image_view = view).into(),
+            ExtractAction::SetPage(page) => (self.current_page = page).into(),
+            ExtractAction::SetImages(images) => self.set_images(images).into(),
+            ExtractAction::CheckToggle(page) => self.toggle_check(page).into(),
+            ExtractAction::PageComplete(page) => self.mark_compete(page).into(),
+            ExtractAction::SaveText => self.save_text(),
             ExtractAction::ServerAction(action) => {
                 self.server_state.perform(action).map(Into::into)
             }
-            ExtractAction::SetImages(images) => self.set_images(images).into(),
-            ExtractAction::SetPage(page) => self.set_page(page).into(),
-            ExtractAction::CheckToggle(page) => self.toggle_check(page).into(),
-            ExtractAction::SetImageView(view) => self.set_view(view).into(),
-            ExtractAction::PageComplete(page) => self.mark_compete(page).into(),
-            ExtractAction::SaveText => self.save_text(),
             ExtractAction::UpdateContent { content, page } => {
                 self.update_content(content, page).into()
             }
@@ -62,17 +62,9 @@ impl Extraction {
         }
     }
 
-    fn set_view(&mut self, view: ImageView) {
-        self.image_view = view;
-    }
-
     fn set_images(&mut self, images: Vec<ImagePage>) {
         self.pages = images;
         self.current_page = 0;
-    }
-
-    fn set_page(&mut self, page: usize) {
-        self.current_page = page;
     }
 
     fn mark_compete(&mut self, page: usize) {

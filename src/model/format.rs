@@ -34,5 +34,4 @@ impl From<(PathBuf, String)> for FormatPage {
 pub struct EpubMetadata {
     pub title: String,
     pub authors: String,
-    pub series: String,
 }

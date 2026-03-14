@@ -9,12 +9,18 @@ use iced::{
 };
 
 pub fn format_view(model: &Format) -> Element<'_, FormatAction> {
+    let build = model
+        .epub
+        .as_ref()
+        .filter(|_| !model.pages.is_empty())
+        .map(|_| FormatAction::Build);
+
     container(column![
         vertical(),
         column![
             format_menu_bar(model),
             row![epub_image(model), epub_metadata(model)].spacing(10),
-            container(button(text("build").center()).on_press(FormatAction::Build))
+            container(button(text("build").center()).on_press_maybe(build))
                 .align_right(Length::Fill)
                 .padding(20)
         ]
@@ -83,6 +89,13 @@ fn epub_image(model: &Format) -> Element<'_, FormatAction> {
         .height(Length::Fill)
         .width(Length::Fill)
         .center(Length::Fill)
+        .style(|theme| {
+            transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 0.2,
+                radius: 5.into(),
+            })
+        })
         .into()
 }
 
@@ -93,21 +106,14 @@ fn epub_metadata(model @ Format { metadata, .. }: &Format) -> Element<'_, Format
             container(text("Title: "))
                 .align_right(Length::Fill)
                 .width(label_width),
-            container(text_input("Title", &metadata.title))
+            text_input("Title", &metadata.title).on_input(FormatAction::SetTitle)
         ]
         .align_y(Vertical::Center),
         row![
             container(text("Author(s): "))
                 .align_right(Length::Fill)
                 .width(label_width),
-            container(text_input("Author(s)", &metadata.authors))
-        ]
-        .align_y(Vertical::Center),
-        row![
-            container(text("Series: "))
-                .align_right(Length::Fill)
-                .width(label_width),
-            container(text_input("Series", &metadata.series))
+            text_input("Author(s)", &metadata.authors).on_input(FormatAction::SetAuthors)
         ]
         .align_y(Vertical::Center),
         content_files(model)
@@ -149,61 +155,3 @@ fn content_files(Format { pages, .. }: &Format) -> Element<'_, FormatAction> {
     })
     .into()
 }
-
-/* fn format_text(model: &Format) -> Container<'_, FormatAction> {
-    let current_text = model.current_content().map(|content| {
-        text_editor(content)
-            .on_action(FormatAction::EditContent)
-            .height(Length::Fill)
-            .style(|theme, status| text_editor::Style {
-                border: Border::default(),
-                ..text_editor::default(theme, status)
-            })
-    });
-
-    container(current_text)
-        .padding(10)
-        .height(Length::Fill)
-        .width(Length::Fill)
-        .style(|theme| {
-            transparent(theme).border(Border {
-                color: Color::WHITE,
-                width: 1.0,
-                radius: 8.into(),
-            })
-        })
-} */
-
-/* fn format_side_bar(model: &Format) -> Container<'_, FormatAction> {
-    container(
-        scrollable(column(format_path_buttons(model)).width(250).spacing(10)).height(Length::Fill),
-    )
-    .height(Length::Fill)
-    .padding(Padding::new(10.0).left(0).right(5))
-    .style(|theme| {
-        transparent(theme).border(Border {
-            color: Color::WHITE,
-            width: 1.0,
-            radius: 8.into(),
-        })
-    })
-} */
-
-/* fn format_path_buttons(model: &Format) -> Vec<Element<'_, FormatAction>> {
-    model
-        .pages
-        .iter()
-        .enumerate()
-        .map(|(i, page)| {
-            let name = page.path.file_stem().unwrap().to_str().unwrap();
-            let mut button_text = text(name).width(Length::Fill);
-            if model.current_page.is_some_and(|p| p == i) {
-                button_text = button_text.color(color!(0x2ac3de))
-            }
-
-            text_button(row![button_text, Space::new().width(10)])
-                .on_press(FormatAction::SetPage(i))
-                .into()
-        })
-        .collect()
-} */
