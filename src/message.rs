@@ -17,7 +17,6 @@ pub enum Message {
     SetView(View),
     ToggleSideBar,
     SelectTab(usize),
-    AddTab,
     CloseTab(usize),
     Log(String),
 }
@@ -33,7 +32,6 @@ impl Translator {
             Message::ToggleSideBar => self.toggle_side_bar_collapse().into(),
             Message::SelectTab(tab) => self.set_tab(tab).into(),
             Message::CloseTab(tab) => self.close_tab(tab).into(),
-            Message::AddTab => self.add_tab().into(),
             Message::Log(message) => log::info!("test message: {}", message).into(),
         }
     }
