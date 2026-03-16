@@ -31,7 +31,7 @@ impl fmt::Display for View {
         let view = match self {
             View::Doc => "Document",
             View::Translation => "Translation",
-            View::Format => "Format",
+            View::Format => "Build",
             View::Extraction => "Extraction",
         };
         write!(f, "{}", view)

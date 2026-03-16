@@ -96,7 +96,7 @@ fn menu_bar(model @ Translation { server_state, .. }: &Translation) -> Row<'_, T
 fn translate_button(model: &Translation) -> Button<'_, TransAction> {
     let (button_text, message) = if !model.server_state.handles.is_empty() {
         ("cancel", Some(TransAction::CancelTranslate))
-    } else if !model.server_state.connected() {
+    } else if !model.server_state.connected() || model.file_name.is_empty() {
         ("translate", None)
     } else {
         let msg = TransAction::Translate(model.current_page);
