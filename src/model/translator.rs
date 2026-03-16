@@ -25,13 +25,7 @@ impl Default for Translator {
             side_bar_collapsed: Default::default(),
             active_tab: Default::default(),
             doc: Default::default(),
-            translations: vec![
-                Translation::default(),
-                Translation::default(),
-                Translation::default(),
-                Translation::default(),
-                Translation::default(),
-            ],
+            translations: vec![Translation::default()],
             format: Default::default(),
             extraction: Extraction::default(),
         }
@@ -66,5 +60,9 @@ impl Translator {
                 .map(Message::TranslationAction.with(tab)),
             None => Task::none(),
         }
+    }
+
+    pub fn add_tab(&mut self) {
+        self.translations.push(Translation::default())
     }
 }

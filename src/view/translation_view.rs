@@ -8,7 +8,6 @@ use crate::{
     },
     view::{menu_button, rich_text_scrollable},
 };
-use iced::widget::{button, column, container, radio, row, scrollable, span, text};
 use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::Vertical,
@@ -18,24 +17,25 @@ use iced::{
         space::{horizontal, vertical},
     },
 };
-use iced_aw::{Menu, MenuBar, Tabs, card::Status, menu::Item, style::tab_bar};
+use iced::{
+    border::Radius,
+    widget::{button, column, container, radio, row, scrollable, span, text},
+};
+use iced_aw::{Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
 
 pub fn traslation_view(models: &Vec<Translation>, tab_id: usize) -> Element<'_, Message> {
     let tabs = models
         .iter()
-        .map(|e| (e.tab_label(), tab(e)))
         .enumerate()
-        .map(|(i, (label, tab))| {
-            let tab = tab.map(Message::TranslationAction.with(i));
-            (i, label, tab)
-        });
+        .map(|(i, e)| (i, e.tab_label()))
+        .collect();
 
-    let mut tabs = Tabs::new_with_tabs(tabs, Message::SelectTab)
+    let mut tabs = TabBar::with_tab_labels(tabs, Message::SelectTab)
         .set_active_tab(&tab_id)
-        .tab_label_padding(Padding::new(0.0))
-        .tab_bar_height(Length::Fixed(40.0))
+        .padding(Padding::new(0.0))
+        .height(Length::Fixed(40.0))
         .text_size(13.0)
-        .tab_bar_style(|theme, status| match status {
+        .style(|theme, status| match status {
             Status::Active | Status::Hovered => tab_bar::Style {
                 text_color: Color::BLACK,
                 icon_color: Color::from_rgb8(0, 255, 0),
@@ -51,7 +51,11 @@ pub fn traslation_view(models: &Vec<Translation>, tab_id: usize) -> Element<'_, 
         tabs = tabs.on_close(Message::CloseTab);
     }
 
-    tabs.into()
+    let model = models.get(tab_id);
+    let tab = model.map(|model| tab(model).map(Message::TranslationAction.with(tab_id)));
+    let add_tab = model.map(|model| new_tab_button(model));
+
+    column![row![tabs, add_tab].height(Length::Fixed(40.0)), tab].into()
 }
 
 fn tab(model: &Translation) -> Element<'_, TransAction> {
@@ -80,6 +84,22 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
     .height(Length::Fill)
     .padding(10)
     .into()
+}
+
+fn new_tab_button(_model: &Translation) -> Element<'_, Message> {
+    button(container(text("+").center()).center(Length::Fill))
+        .on_press(Message::AddTab)
+        .width(Length::Fixed(50.0))
+        .height(Length::Fill)
+        .style(|theme, status| button::Style {
+            border: Border {
+                color: Color::WHITE,
+                width: 0.5,
+                radius: Radius::from(0),
+            },
+            ..button::primary(theme, status)
+        })
+        .into()
 }
 
 fn menu_bar(model @ Translation { server_state, .. }: &Translation) -> Row<'_, TransAction> {
