@@ -79,7 +79,7 @@ fn path_button_overlay<'a>(
     active: bool,
 ) -> Element<'a, TransAction> {
     let part_buttons = (0..count).map(|i| {
-        context_menu_button(text(format!("translate part {}", i + 1)).color(Color::WHITE))
+        context_menu_button(text!("translate part {}", i + 1).color(Color::WHITE))
             .on_press_maybe(active.then_some(TransAction::TranslatePart(page, i)))
             .into()
     });

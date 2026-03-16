@@ -125,12 +125,22 @@ impl DocBuilder {
     }
 
     fn add_style_sheets(&mut self) -> Result<()> {
+        let mime = "text/css";
         let folder = PathBuf::from("Styles");
-        for ResourceItem { path, mime, .. } in self.get_style_sheets() {
-            let content = self.epub.get_resource_by_path(&path).unwrap();
-            let file_name = path.file_name().unwrap();
-            let path = folder.join(file_name);
-            self.builder.add_resource(path, &*content, mime)?;
+        let style_sheets: Vec<_> = self
+            .get_style_sheets()
+            .iter()
+            .flat_map(|ResourceItem { path, .. }| {
+                let content = self.epub.get_resource_by_path(&path)?;
+                let path = folder.join(path.file_name()?);
+                Some((path, content))
+            })
+            .collect();
+
+        for (path, content) in style_sheets {
+            if let Err(error) = self.builder.add_resource(path, &*content, mime) {
+                log::error!("{:#?}", error);
+            }
         }
 
         Ok(())

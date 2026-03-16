@@ -9,19 +9,21 @@ pub fn remove_think_tags(text: &str) -> String {
 pub fn partition_text(text: &str) -> Vec<String> {
     let mut messages = Vec::with_capacity(text.len() / 2000);
     let mut msg = String::with_capacity(2500);
-    let sentences = text.split_inclusive("。");
+    let sentences = text.lines();
 
     for sentence in sentences {
-        if msg.len() < 2000 {
-            msg.push_str(&sentence);
+        if msg.len() < 2500 {
+            msg.push_str(sentence);
+            msg.push_str("\n");
         } else {
             messages.push(msg.trim().to_string());
-            msg = String::with_capacity(2500);
+            msg.clear();
         }
     }
 
-    if !msg.trim().is_empty() {
-        messages.push(msg.trim().to_string());
+    let msg = msg.trim();
+    if !msg.is_empty() {
+        messages.push(msg.to_string());
     }
 
     messages

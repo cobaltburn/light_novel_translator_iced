@@ -120,7 +120,7 @@ fn epub_metadata(model @ Format { metadata, .. }: &Format) -> Element<'_, Format
     ]
     .spacing(5);
     container(content)
-        .padding(10)
+        .padding(Padding::new(1.0).top(10))
         .height(Length::Fill)
         .width(Length::Fill)
         .align_top(Length::Fill)

@@ -133,7 +133,7 @@ fn server_menu(state: &Server) -> Item<'_, TransAction, Theme, Renderer> {
 fn ollama_input(state: &Server) -> Element<'_, ServerAction> {
     container(
         row![
-            text("Ollama").center(),
+            text("Ollama: ").center(),
             button("connect").on_press(ServerAction::Connect),
             horizontal(),
             execution_selector(state)

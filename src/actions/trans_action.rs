@@ -333,26 +333,28 @@ pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, V
         .scripting_enabled(false)
         .build();
 
-    let pages: Result<Vec<Page>> = paths
+    let pages: Result<Vec<_>> = paths
         .into_iter()
         .map(|path| {
             let html = epub.get_resource_str_by_path(&path).unwrap();
-            (path, html)
-        })
-        .map(|(path, html)| {
             let html = strip_data_tags(&html)?;
             let markdown = converter.convert(&html)?;
-            let markdown = markdown.trim();
-            let mut sections = Vec::new();
-            if !markdown.is_empty() {
-                let lines = markdown.lines();
-                let markdown = lines.map(|s| format!("{}\n", s.trim())).collect::<String>();
+            let markdown: Vec<_> = markdown.lines().map(|s| s.trim()).collect();
+            Ok((path, markdown.join("\n")))
+        })
+        .map(|result| {
+            result.map(|(path, markdown)| {
                 let partitioned = partition_text(&markdown);
-                sections = partitioned.chunks(3).map(|x| x.join(" ")).collect();
-            }
-            Ok(Page::new(path, sections))
+                let sections = partitioned
+                    .chunks(3)
+                    .map(|x| x.join(" "))
+                    .filter(|e| !e.trim_matches('#').is_empty())
+                    .collect();
+                Page::new(path, sections)
+            })
         })
         .collect();
+
     let pages: Vec<_> = pages?
         .into_iter()
         .filter(|p| !p.sections.is_empty())
