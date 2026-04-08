@@ -5,8 +5,8 @@ use crate::{
     controller::{
         DEFAULT_STYLESHEET, get_ordered_path,
         xml::{
-            extract_head, remove_part_tags, starting_image_tag, to_xml, update_image_paths,
-            update_style_path, update_tag_path,
+            extract_head, remove_part_tags, to_xml, update_image_paths, update_style_path,
+            update_tag_path,
         },
     },
     model::format::EpubMetadata,
