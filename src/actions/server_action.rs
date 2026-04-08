@@ -19,9 +19,9 @@ pub enum ServerAction {
 impl Server {
     pub fn perform(&mut self, action: ServerAction) -> Task<ServerAction> {
         match action {
-            ServerAction::SelectModel(model) => (self.current_model = Some(model)).into(),
-            ServerAction::SetThink(think) => (self.settings.think = think).into(),
-            ServerAction::SetMethod(method) => (self.method = method).into(),
+            ServerAction::SelectModel(model) => self.select_model(model).into(),
+            ServerAction::SetThink(think) => self.set_think(think).into(),
+            ServerAction::SetMethod(method) => self.select_method(method).into(),
             ServerAction::SetModels(models) => self.set_models(models).into(),
             ServerAction::Connect => self.connect(),
             ServerAction::Abort => self.abort().into(),
@@ -36,7 +36,18 @@ impl Server {
         })
     }
 
-    pub fn set_models(&mut self, models: Vec<String>) {
+    fn select_model(&mut self, model: String) {
+        self.current_model = Some(model)
+    }
+    fn select_method(&mut self, method: Method) {
+        self.method = method;
+    }
+
+    fn set_think(&mut self, think: Think) {
+        self.settings.think = think
+    }
+
+    fn set_models(&mut self, models: Vec<String>) {
         self.current_model = models.first().cloned();
         self.models = models;
     }

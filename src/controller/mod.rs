@@ -17,14 +17,6 @@ pub fn part_tag(n: usize) -> String {
     format!("\n\n<part>{}</part>\n\n", n)
 }
 
-pub fn check_english_chars(text: &str, min: f32) -> bool {
-    let text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-    let ascsii_count = text.chars().filter(|c| c.is_ascii_alphanumeric()).count() as f32;
-    let total = text.chars().count() as f32;
-    let percent = (ascsii_count / total) * 100.0;
-    percent > min
-}
-
 pub const DEFAULT_STYLESHEET: &[u8] = br#"
     /* EPUB Default Stylesheet */
 

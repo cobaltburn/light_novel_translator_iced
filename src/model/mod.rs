@@ -12,5 +12,5 @@ pub enum Activity {
     Incomplete,
     Complete,
     Active,
-    Error,
+    Error(usize),
 }

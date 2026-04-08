@@ -1,3 +1,4 @@
+use crate::controller::xml::{count_lines, image_position};
 use crate::error::{Error, Result};
 use crate::model::format::FormatPage;
 use crate::{
@@ -15,8 +16,9 @@ use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};
 use quick_xml::{
     Reader, Writer,
     escape::escape,
-    events::{BytesDecl, BytesStart, BytesText, Event},
+    events::{BytesDecl, BytesStart, Event},
 };
+use std::collections::VecDeque;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
@@ -104,11 +106,20 @@ impl DocBuilder {
 
     pub fn add_images(&mut self) -> Result<()> {
         let folder = PathBuf::from("Images");
-        for ResourceItem { path, mime, .. } in self.get_images() {
-            let content = self.epub.get_resource_by_path(&path).unwrap();
-            let file_name = path.file_name().unwrap();
-            let path = folder.join(file_name);
-            self.builder.add_resource(path, &*content, mime)?;
+        let image_resources: Vec<_> = self
+            .get_images()
+            .into_iter()
+            .flat_map(|ResourceItem { path, mime, .. }| {
+                let content = self.epub.get_resource_by_path(&path)?;
+                let path = folder.join(path.file_name()?);
+                Some((path, content, mime))
+            })
+            .collect();
+
+        for (path, content, mime) in image_resources {
+            if let Err(error) = self.builder.add_resource(path, &*content, mime) {
+                log::error!("{:#?}", error);
+            }
         }
 
         Ok(())
@@ -129,7 +140,7 @@ impl DocBuilder {
         let folder = PathBuf::from("Styles");
         let style_sheets: Vec<_> = self
             .get_style_sheets()
-            .iter()
+            .into_iter()
             .flat_map(|ResourceItem { path, .. }| {
                 let content = self.epub.get_resource_by_path(&path)?;
                 let path = folder.join(path.file_name()?);
@@ -246,45 +257,38 @@ fn build_html(html: &str, content: &str) -> Result<String> {
     let content = replace_jp_symbols(&content);
     let content = escape(content);
     let content = to_xml(&content);
-    let image = starting_image_tag(html)?;
+
+    let lines = count_lines(&content)?;
+    let images = image_position(html)?;
+    let content = add_image_tags(&content, lines, images)?;
 
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
     writer.write_event(Event::Decl(BytesDecl::new("1.0", Some("utf-8"), None)))?;
-    writer.write_event(Event::DocType(BytesText::new("html")))?;
 
     writer
         .create_element("html")
         .with_attribute(("xmlns:epub", "http://www.idpf.org/2007/ops"))
         .with_attribute(("xml:lang", "en"))
         .write_inner_content(|writer| {
-            write_header(html, writer).map_err(io::Error::other)?;
-            write_body(writer, &content, image).map_err(io::Error::other)
+            write_header(writer, html).map_err(io::Error::other)?;
+            write_body(writer, &content).map_err(io::Error::other)
         })?;
 
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-fn write_header(html: &str, writer: &mut Writer<Cursor<Vec<u8>>>) -> Result<()> {
+fn write_header(writer: &mut Writer<Cursor<Vec<u8>>>, html: &str) -> Result<()> {
     let head = extract_head(html)?;
 
     writer
         .create_element("head")
-        .write_inner_content(|writer| {
-            write_head(head, writer).map_err(io::Error::other)?;
-            writer
-                .create_element("link")
-                .with_attribute(("rel", "stylesheet"))
-                .with_attribute(("type", "text/css"))
-                .with_attribute(("href", "../stylesheet.css"))
-                .write_empty()?;
-            Ok(())
-        })?;
+        .write_inner_content(|writer| write_head(writer, head).map_err(io::Error::other))?;
 
     Ok(())
 }
 
-pub fn write_head(head: Cow<'_, str>, writer: &mut Writer<Cursor<Vec<u8>>>) -> Result<()> {
+pub fn write_head(writer: &mut Writer<Cursor<Vec<u8>>>, head: Cow<'_, str>) -> Result<()> {
     let folder = PathBuf::from("../Styles");
     let mut reader = Reader::from_str(&head);
     reader.config_mut().trim_text(true);
@@ -300,14 +304,16 @@ pub fn write_head(head: Cow<'_, str>, writer: &mut Writer<Cursor<Vec<u8>>>) -> R
         }
     }
 
+    writer
+        .create_element("link")
+        .with_attribute(("rel", "stylesheet"))
+        .with_attribute(("type", "text/css"))
+        .with_attribute(("href", "../stylesheet.css"))
+        .write_empty()?;
     Ok(())
 }
 
-fn write_body(
-    writer: &mut Writer<Cursor<Vec<u8>>>,
-    content: &str,
-    header_image: Option<BytesStart<'_>>,
-) -> Result<()> {
+fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, content: &str) -> Result<()> {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
 
@@ -315,9 +321,6 @@ fn write_body(
         .create_element("body")
         .with_attribute(("class", "p-text"))
         .write_inner_content(|writer| {
-            if let Some(image) = header_image {
-                writer.write_event(Event::Empty(image))?;
-            };
             loop {
                 match reader.read_event().map_err(io::Error::other)? {
                     Event::Eof => break,
@@ -327,6 +330,35 @@ fn write_body(
             Ok(())
         })?;
     Ok(())
+}
+
+fn add_image_tags(content: &str, lines: i32, images: Vec<(BytesStart<'_>, f64)>) -> Result<String> {
+    let mut reader = Reader::from_str(content);
+    reader.config_mut().trim_text(true);
+
+    let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
+
+    let mut count = 0;
+    let mut images = VecDeque::from(images);
+
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"p" => {
+                if let Some((tag, _)) =
+                    images.pop_front_if(|(_, i)| (count as f64 / lines as f64) >= *i)
+                {
+                    writer.write_event(Event::Empty(tag))?;
+                }
+
+                writer.write_event(Event::Start(tag))?;
+                count += 1;
+            }
+            Event::Eof => break,
+            e => writer.write_event(e)?,
+        }
+    }
+
+    Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
 pub fn replace_jp_symbols(text: &str) -> String {

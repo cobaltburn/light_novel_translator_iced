@@ -8,30 +8,35 @@ use crate::{
     },
     view::{menu_button, rich_text_scrollable},
 };
-use iced::widget::{button, column, container, radio, row, scrollable, span, text};
 use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::Vertical,
+    color,
     widget::{
         Button, Container, Row,
         container::transparent,
         space::{horizontal, vertical},
     },
 };
-use iced_aw::{Menu, MenuBar, Tabs, card::Status, menu::Item, style::tab_bar};
+use iced::{
+    border::Radius,
+    widget::{button, column, container, radio, row, scrollable, span, text},
+};
+use iced_aw::{Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
+use std::collections::BTreeMap;
 
-pub fn traslation_view(models: &Vec<Translation>, tab_id: usize) -> Element<'_, Message> {
-    let tabs = models.iter().enumerate().map(|(i, e)| {
-        let tab = tab(e).map(Message::TranslationAction.with(i));
-        (i, e.tab_label(), tab)
-    });
+pub fn traslation_view(
+    models: &BTreeMap<usize, Translation>,
+    tab_id: usize,
+) -> Element<'_, Message> {
+    let tabs = models.iter().map(|(&i, e)| (i, e.tab_label())).collect();
 
-    let mut tabs = Tabs::new_with_tabs(tabs, Message::SelectTab)
+    let mut tabs = TabBar::with_tab_labels(tabs, Message::SelectTab)
         .set_active_tab(&tab_id)
-        .tab_label_padding(0.0)
-        .tab_bar_height(Length::Fixed(40.0))
+        .padding(Padding::new(0.0))
+        .height(Length::Fixed(40.0))
         .text_size(13.0)
-        .tab_bar_style(|theme, status| match status {
+        .style(|theme, status| match status {
             Status::Active | Status::Hovered => tab_bar::Style {
                 text_color: Color::BLACK,
                 icon_color: Color::from_rgb8(0, 255, 0),
@@ -47,16 +52,36 @@ pub fn traslation_view(models: &Vec<Translation>, tab_id: usize) -> Element<'_, 
         tabs = tabs.on_close(Message::CloseTab);
     }
 
-    tabs.into()
+    let model = models.get(&tab_id);
+    let tab = model.map(|model| tab(model).map(Message::TranslationAction.with(tab_id)));
+    let add_tab = model.map(|model| new_tab_button(model));
+
+    column![row![tabs, add_tab].height(Length::Fixed(40.0)), tab].into()
+}
+
+fn new_tab_button(_model: &Translation) -> Element<'_, Message> {
+    button(container(text("+").center()).center(Length::Fill))
+        .on_press(Message::AddTab)
+        .width(Length::Fixed(50.0))
+        .height(Length::Fill)
+        .style(|theme, status| button::Style {
+            border: Border {
+                color: Color::WHITE,
+                width: 0.5,
+                radius: Radius::from(0),
+            },
+            ..button::primary(theme, status)
+        })
+        .into()
 }
 
 fn tab(model: &Translation) -> Element<'_, TransAction> {
-    let red = Color::from_rgb8(255, 0, 0);
-    let content = model.current_content().unwrap_or_default();
-    let content = content
+    let content = model
+        .current_content()
+        .unwrap_or_default()
         .into_iter()
         .enumerate()
-        .map(|(i, t)| [span(part_tag(i + 1)).color(red), span(t)])
+        .map(|(i, t)| [span(part_tag(i + 1)).color(color!(0xff0000)), span(t)])
         .flatten()
         .collect();
 
@@ -78,7 +103,12 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
     .into()
 }
 
-fn menu_bar(model @ Translation { server_state, .. }: &Translation) -> Row<'_, TransAction> {
+fn menu_bar(
+    model @ Translation {
+        server: server_state,
+        ..
+    }: &Translation,
+) -> Row<'_, TransAction> {
     row![
         MenuBar::new(vec![file_menu(model), server_menu(server_state),]).spacing(5),
         translate_button(model),
@@ -90,9 +120,9 @@ fn menu_bar(model @ Translation { server_state, .. }: &Translation) -> Row<'_, T
 }
 
 fn translate_button(model: &Translation) -> Button<'_, TransAction> {
-    let (button_text, message) = if !model.server_state.handles.is_empty() {
+    let (button_text, message) = if !model.server.handles.is_empty() {
         ("cancel", Some(TransAction::CancelTranslate))
-    } else if !model.server_state.connected() || model.file_name.is_empty() {
+    } else if !model.server.connected() || model.file_name.is_empty() {
         ("translate", None)
     } else {
         let msg = TransAction::Translate(model.current_page);
@@ -103,16 +133,20 @@ fn translate_button(model: &Translation) -> Button<'_, TransAction> {
 }
 
 fn side_bar(model: &Translation) -> Container<'_, TransAction> {
-    container(scrollable(model.path_buttons().width(250).spacing(10)).height(Length::Fill))
-        .height(Length::Fill)
-        .padding(Padding::new(10.0).left(0).right(5))
-        .style(|theme| {
-            transparent(theme).border(Border {
-                color: Color::WHITE,
-                width: 1.0,
-                radius: 8.into(),
-            })
+    container(
+        scrollable(model.path_buttons().width(250).spacing(10))
+            .spacing(5)
+            .height(Length::Fill),
+    )
+    .height(Length::Fill)
+    .padding(Padding::new(10.0).left(0).right(5))
+    .style(|theme| {
+        transparent(theme).border(Border {
+            color: Color::WHITE,
+            width: 1.0,
+            radius: 8.into(),
         })
+    })
 }
 
 fn server_menu(state: &Server) -> Item<'_, TransAction, Theme, Renderer> {

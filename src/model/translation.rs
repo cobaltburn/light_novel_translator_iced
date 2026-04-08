@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 #[derive(Default, Debug)]
 pub struct Translation {
-    pub server_state: Server,
+    pub server: Server,
     pub file_name: String,
     pub current_page: usize,
     pub pages: Vec<Page>,
@@ -21,7 +21,7 @@ pub struct Translation {
 impl Translation {
     pub fn tab_label(&self) -> TabLabel {
         let file_name = self.file_name.clone();
-        match self.server_state.handles.is_empty() {
+        match self.server.handles.is_empty() {
             true => TabLabel::Text(file_name),
             false => TabLabel::IconText('\u{25CF}', file_name),
         }
@@ -51,7 +51,7 @@ impl Translation {
                 let mark = match page.activity {
                     Activity::Incomplete => None,
                     Activity::Complete => Some(check_mark()),
-                    Activity::Error => Some(cross_mark()),
+                    Activity::Error(i) => Some(row![text(i), cross_mark()].spacing(5).into()),
                     Activity::Active => Some(active_mark()),
                 };
 
@@ -60,7 +60,7 @@ impl Translation {
                     .padding(Padding::default().right(10));
 
                 let count = page.sections.len();
-                let active = self.server_state.connected() && self.server_state.handles.is_empty();
+                let active = self.server.connected() && self.server.handles.is_empty();
                 let underlay = text_button(button_content).on_press(TransAction::SetPage(i));
 
                 ContextMenu::new(underlay, move || {
@@ -69,6 +69,15 @@ impl Translation {
                 .into()
             })
             .collect()
+    }
+}
+
+impl From<Server> for Translation {
+    fn from(server: Server) -> Self {
+        Self {
+            server,
+            ..Default::default()
+        }
     }
 }
 

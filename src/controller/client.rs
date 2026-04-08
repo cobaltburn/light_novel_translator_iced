@@ -85,6 +85,7 @@ impl Client {
                 Err(error) => Task::done(TransAction::CancelTranslate)
                     .chain(Task::future(display_error(error)).discard()),
             })
+            .chain(Task::done(TransAction::CleanText(page, part)))
     }
 
     async fn translation_stream(

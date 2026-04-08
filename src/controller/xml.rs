@@ -115,28 +115,6 @@ pub fn update_tag_path(
     Ok(tag)
 }
 
-pub fn starting_image_tag(html: &str) -> Result<Option<BytesStart<'_>>> {
-    let image_folder = PathBuf::from("../Images");
-    let body = extract_body(html)?;
-    let mut reader = Reader::from_str(body.as_ref());
-    reader.config_mut().trim_text(true);
-
-    loop {
-        match reader.read_event()? {
-            Event::Empty(tag) if tag.name().as_ref() == IMG.as_bytes() => {
-                let tag = update_tag_path(tag, &image_folder, SRC)?;
-                return Ok(Some(tag));
-            }
-            Event::Empty(tag) if tag.name().as_ref() == IMAGE.as_bytes() => {
-                let tag = update_tag_path(tag, &image_folder, XLINK)?;
-                return Ok(Some(tag));
-            }
-            Event::Text(_) | Event::Eof => return Ok(None),
-            _ => (),
-        }
-    }
-}
-
 pub fn extract_body(html: &str) -> Result<Cow<'_, str>> {
     let mut reader = Reader::from_str(html);
     loop {
@@ -157,8 +135,52 @@ pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
             Event::Start(tag) if tag.name().as_ref() == b"head" => {
                 return Ok(reader.read_text(tag.name())?);
             }
-            Event::Eof => return Err(Error::BuildError("No body tag found")),
+            Event::Eof => return Err(Error::BuildError("No head tag found")),
             _ => (),
         }
     }
+}
+
+pub fn count_lines(html: &str) -> Result<i32> {
+    let mut reader = Reader::from_str(html);
+    let mut count = 0;
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"p" => count += 1,
+            Event::Eof => break,
+            _ => (),
+        }
+    }
+
+    Ok(count)
+}
+
+pub fn image_position(html: &str) -> Result<Vec<(BytesStart<'_>, f64)>> {
+    let folder = PathBuf::from("../Images");
+    let mut reader = Reader::from_str(html);
+    let mut count = 0;
+    let mut images = vec![];
+
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"p" => count += 1,
+            Event::Empty(tag) if tag.name().as_ref() == IMG.as_bytes() => {
+                let tag = update_tag_path(tag, &folder, SRC)?;
+                images.push((tag, count))
+            }
+            Event::Empty(tag) if tag.name().as_ref() == IMAGE.as_bytes() => {
+                let tag = update_tag_path(tag, &folder, XLINK)?;
+                images.push((tag, count))
+            }
+            Event::Eof => break,
+            _ => (),
+        }
+    }
+
+    images.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
+    let images = images
+        .into_iter()
+        .map(|(b, i)| (b, i as f64 / count as f64))
+        .collect();
+    Ok(images)
 }

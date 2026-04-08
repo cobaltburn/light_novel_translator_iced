@@ -1,7 +1,7 @@
 use crate::{
     actions::server_action::ServerAction,
     controller::{
-        check_english_chars, get_ordered_path,
+        get_ordered_path,
         parse::{partition_text, remove_think_tags},
         part_tag,
         xml::strip_data_tags,
@@ -45,6 +45,7 @@ pub enum TransAction {
     Translate(usize),
     TranslatePage(usize),
     TranslatePart(usize, usize),
+    CleanText(usize, usize),
     CancelTranslate,
     SaveTranslation(String),
     ServerAction(ServerAction),
@@ -53,8 +54,9 @@ pub enum TransAction {
 impl Translation {
     pub fn perform(&mut self, action: TransAction) -> Task<TransAction> {
         match action {
-            TransAction::ServerAction(action) => self.server_state.perform(action).map(Into::into),
-            TransAction::SetPage(page) => (self.current_page = page).into(),
+            TransAction::ServerAction(action) => self.server.perform(action).map(Into::into),
+            TransAction::SetPage(page) => self.set_page(page).into(),
+            TransAction::CleanText(page, part) => self.clean_text(page, part).into(),
             TransAction::PageComplete(page) => self.check_complete(page).into(),
             TransAction::CancelTranslate => self.cancel().into(),
             TransAction::SavePages(path) => self.save_pages(path),
@@ -105,7 +107,11 @@ impl Translation {
             .iter_mut()
             .filter(|p| matches!(p.activity, Activity::Active))
             .for_each(|p| p.activity = Activity::Incomplete);
-        self.server_state.abort();
+        self.server.abort();
+    }
+
+    fn set_page(&mut self, page: usize) {
+        self.current_page = page
     }
 
     fn check_complete(&mut self, page: usize) {
@@ -113,13 +119,13 @@ impl Translation {
             return;
         };
 
-        if page.text.iter().any(|text| text.is_empty()) {
-            page.activity = Activity::Incomplete;
-        } else if page.text.iter().all(|text| check_english_chars(text, 75.0)) {
-            page.activity = Activity::Complete;
+        page.activity = if page.text.iter().any(|text| text.is_empty()) {
+            Activity::Incomplete
+        } else if let Some(i) = page.text.iter().position(|text| contains_japanese(text)) {
+            Activity::Error(i + 1)
         } else {
-            page.activity = Activity::Error;
-        }
+            Activity::Complete
+        };
     }
 
     pub fn save_page(&mut self, name: String, page: usize) -> Task<TransAction> {
@@ -171,11 +177,11 @@ impl Translation {
     }
 
     pub fn translate(&mut self, page: usize) -> Result<Task<TransAction>> {
-        if !self.server_state.connected() {
+        if !self.server.connected() {
             return Err(Error::ServerError("Not connected to a server"));
         }
 
-        let Some(model) = self.server_state.current_model.clone() else {
+        let Some(model) = self.server.current_model.clone() else {
             return Err(Error::ServerError("No model selected"));
         };
 
@@ -193,26 +199,24 @@ impl Translation {
 
         current_page.clear_content();
 
-        let tasks = self
-            .server_state
-            .translation_tasks(current_page, &model, page)?;
-        let task = self.server_state.method.join_tasks(tasks);
+        let tasks = self.server.translation_tasks(current_page, &model, page)?;
+        let task = self.server.method.join_tasks(tasks);
         let complete_task = self
-            .server_state
+            .server
             .bind_handle(Task::done(TransAction::PageComplete(page)));
         let next_task = self
-            .server_state
+            .server
             .bind_handle(Task::done(TransAction::Translate(page + 1)));
 
         Ok(task.chain(complete_task).chain(next_task))
     }
 
     pub fn translate_page(&mut self, page: usize) -> Result<Task<TransAction>> {
-        if !self.server_state.connected() {
+        if !self.server.connected() {
             return Err(Error::ServerError("Not connected to a server"));
         }
 
-        let Some(model) = self.server_state.current_model.clone() else {
+        let Some(model) = self.server.current_model.clone() else {
             return Err(Error::ServerError("No model selected"));
         };
 
@@ -224,12 +228,10 @@ impl Translation {
 
         current_page.clear_content();
 
-        let tasks = self
-            .server_state
-            .translation_tasks(current_page, &model, page)?;
-        let task = self.server_state.method.join_tasks(tasks);
+        let tasks = self.server.translation_tasks(current_page, &model, page)?;
+        let task = self.server.method.join_tasks(tasks);
         let complete_task = self
-            .server_state
+            .server
             .bind_handle(Task::done(TransAction::PageComplete(page)));
 
         let task = task
@@ -240,11 +242,11 @@ impl Translation {
     }
 
     pub fn translate_part(&mut self, page: usize, part: usize) -> Result<Task<TransAction>> {
-        if !self.server_state.connected() {
+        if !self.server.connected() {
             return Err(Error::ServerError("Not connected to a server"));
         }
 
-        let Some(model) = self.server_state.current_model.clone() else {
+        let Some(model) = self.server.current_model.clone() else {
             return Err(Error::ServerError("No model selected"));
         };
 
@@ -263,10 +265,10 @@ impl Translation {
         text.clear();
 
         let task = self
-            .server_state
+            .server
             .translate_part(section.clone(), model, page, part)?;
         let complete_task = self
-            .server_state
+            .server
             .bind_handle(Task::done(TransAction::PageComplete(page)));
 
         let task = task
@@ -275,12 +277,62 @@ impl Translation {
 
         Ok(task)
     }
+
+    fn clean_text(&mut self, page: usize, part: usize) {
+        let Some(current_page) = self.pages.get_mut(page) else {
+            return;
+        };
+
+        let Some(text) = current_page.text.get_mut(part) else {
+            return;
+        };
+
+        *text = clean_invisible_chars(text);
+    }
 }
 
 impl From<ServerAction> for TransAction {
     fn from(action: ServerAction) -> Self {
         TransAction::ServerAction(action)
     }
+}
+
+fn contains_japanese(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c,
+            '\u{3040}'..='\u{309F}' |  // Hiragana
+            '\u{30A0}'..='\u{30FF}' |  // Katakana
+            '\u{4E00}'..='\u{9FFF}' |  // CJK Unified Ideographs (common kanji)
+            '\u{3400}'..='\u{4DBF}' |  // CJK Unified Ideographs Extension A
+            '\u{FF65}'..='\u{FF9F}' |  // Half-width Katakana
+            '\u{31F0}'..='\u{31FF}'    // Katakana Phonetic Extensions
+        )
+    })
+}
+
+fn clean_invisible_chars(text: &str) -> String {
+    text.chars()
+        .filter(|&c| {
+            // Keep normal whitespace
+            if c == ' ' || c == '\n' || c == '\r' || c == '\t' {
+                return true;
+            }
+
+            // Remove zero-width and invisible characters
+            if matches!(c,
+                '\u{200B}'..='\u{200F}' |
+                '\u{2060}'..='\u{2064}' |
+                '\u{FEFF}' |
+                '\u{00AD}' |
+                '\u{FFA0}'
+            ) {
+                return false;
+            }
+
+            // Remove other control characters
+            !c.is_control()
+        })
+        .collect()
 }
 
 pub async fn load_folder_markdown() -> Option<Vec<(PathBuf, String)>> {
