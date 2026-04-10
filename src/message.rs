@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use crate::actions::consensus_action::ConsensusAction;
 use crate::actions::extraction_action::ExtractAction;
 use crate::actions::{
     doc_action::DocAction, format_action::FormatAction, trans_action::TransAction,
@@ -11,9 +12,10 @@ use iced::Task;
 #[derive(Debug, Clone)]
 pub enum Message {
     DocAction(DocAction),
-    TranslationAction(usize, TransAction),
+    TransAction(usize, TransAction),
     FormatAction(FormatAction),
     ExtractAction(ExtractAction),
+    ConsensusAction(ConsensusAction),
     SetView(View),
     ToggleSideBar,
     SelectTab(usize),
@@ -26,14 +28,15 @@ impl Translator {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::DocAction(action) => self.doc.perform(action),
-            Message::TranslationAction(tab, action) => self.translation_action(tab, action),
+            Message::TransAction(tab, action) => self.translation_action(tab, action),
             Message::FormatAction(action) => self.format.perform(action),
             Message::ExtractAction(action) => self.extraction.perform(action).map(Into::into),
-            Message::AddTab => self.add_tab().into(),
+            Message::ConsensusAction(action) => self.consensus.perform(action).map(Into::into),
             Message::SetView(view) => self.set_view(view).into(),
             Message::ToggleSideBar => self.toggle_side_bar_collapse().into(),
             Message::SelectTab(tab) => self.set_tab(tab).into(),
             Message::CloseTab(tab) => self.close_tab(tab).into(),
+            Message::AddTab => self.add_tab().into(),
             Message::Log(message) => log::info!("test message: {}", message).into(),
         }
     }
@@ -54,6 +57,12 @@ impl From<FormatAction> for Message {
 impl From<ExtractAction> for Message {
     fn from(action: ExtractAction) -> Self {
         Message::ExtractAction(action)
+    }
+}
+
+impl From<ConsensusAction> for Message {
+    fn from(action: ConsensusAction) -> Self {
+        Message::ConsensusAction(action)
     }
 }
 

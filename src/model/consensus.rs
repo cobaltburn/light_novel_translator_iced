@@ -1,5 +1,7 @@
+use std::path::PathBuf;
+
 use crate::{
-    actions::trans_action::TransAction,
+    actions::consensus_action::ConsensusAction,
     model::{Activity, page::Page, server::Server},
     widget::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
 };
@@ -7,25 +9,18 @@ use iced::{
     Color, Element, Length, Padding,
     widget::{Column, column, container, row, scrollable, text},
 };
-use iced_aw::{ContextMenu, TabLabel};
+use iced_aw::ContextMenu;
 
-#[derive(Default, Debug)]
-pub struct Translation {
+#[derive(Debug, Default)]
+pub struct Consensus {
     pub server: Server,
     pub file_name: String,
     pub current_page: usize,
     pub pages: Vec<Page>,
+    pub translations: Vec<Vec<String>>,
 }
 
-impl Translation {
-    pub fn tab_label(&self) -> TabLabel {
-        let file_name = self.file_name.clone();
-        match self.server.handles.is_empty() {
-            true => TabLabel::Text(file_name),
-            false => TabLabel::IconText('\u{25CF}', file_name),
-        }
-    }
-
+impl Consensus {
     pub fn current_content(&self) -> Option<impl Iterator<Item = &String>> {
         let text = self
             .pages
@@ -37,7 +32,7 @@ impl Translation {
         Some(text)
     }
 
-    pub fn path_buttons(&self) -> Column<'_, TransAction> {
+    pub fn path_buttons(&self) -> Column<'_, ConsensusAction> {
         self.pages
             .iter()
             .enumerate()
@@ -67,7 +62,7 @@ impl Translation {
 
                 let count = page.sections.len();
                 let active = self.server.connected() && self.server.handles.is_empty();
-                let underlay = text_button(button_content).on_press(TransAction::SetPage(i));
+                let underlay = text_button(button_content).on_press(ConsensusAction::SetPage(i));
 
                 ContextMenu::new(underlay, move || {
                     path_button_overlay(count, name.to_string(), i, active)
@@ -78,34 +73,25 @@ impl Translation {
     }
 }
 
-impl From<Server> for Translation {
-    fn from(server: Server) -> Self {
-        Self {
-            server,
-            ..Default::default()
-        }
-    }
-}
-
 fn path_button_overlay<'a>(
     count: usize,
     name: String,
     page: usize,
     active: bool,
-) -> Element<'a, TransAction> {
+) -> Element<'a, ConsensusAction> {
     let part_buttons = (0..count).map(|part| {
         context_menu_button(text!("translate part {}", part + 1).color(Color::WHITE))
-            .on_press_maybe(active.then_some(TransAction::TranslatePart { page, part }))
+            .on_press_maybe(active.then_some(ConsensusAction::TranslatePart { page, part }))
             .into()
     });
 
     let overlay = column![
         context_menu_button(text("save").color(Color::WHITE))
-            .on_press(TransAction::SavePage { name, page }),
+            .on_press(ConsensusAction::SavePage { name, page }),
         context_menu_button(text("translate").color(Color::WHITE))
-            .on_press_maybe(active.then_some(TransAction::Translate(page))),
+            .on_press_maybe(active.then_some(ConsensusAction::Translate(page))),
         context_menu_button(text("translate page").color(Color::WHITE))
-            .on_press_maybe(active.then_some(TransAction::TranslatePage(page)))
+            .on_press_maybe(active.then_some(ConsensusAction::TranslatePage(page)))
     ]
     .extend(part_buttons)
     .padding(5)
@@ -116,4 +102,9 @@ fn path_button_overlay<'a>(
         .max_height(400)
         .width(300)
         .into()
+}
+
+pub struct Folder {
+    pub path: PathBuf,
+    pub text: Vec<(PathBuf, String)>,
 }

@@ -2,7 +2,7 @@ use crate::{
     actions::{server_action::ServerAction, trans_action::TransAction},
     controller::client::{Client, SYSTEM_PROMPT},
     error::Result,
-    model::translation::Page,
+    model::page::{Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
 use ollama_rs::generation::{chat::ChatMessage, parameters::ThinkType};
@@ -52,7 +52,13 @@ impl Server {
             .map(|(part, section)| {
                 let client = self.client.clone();
                 let settings = self.settings.clone();
-                client.translate(model.clone(), section.clone(), page, part, settings)
+                client.translate(
+                    model.clone(),
+                    section.japanese.clone(),
+                    page,
+                    part,
+                    settings,
+                )
             })
             .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
             .collect();
@@ -70,13 +76,13 @@ impl Server {
         let pages = pages.get(..pages.len()).unwrap_or_default();
         let history: Vec<_> = pages
             .into_iter()
-            .map(|p| p.sections.iter().zip(p.text.iter()))
+            .map(|p| &p.sections)
             .flatten()
-            .filter(|e| !e.1.is_empty())
-            .map(|(section, text)| {
+            .filter(|e| !e.text.is_empty())
+            .map(|Section { japanese, text }| {
                 [
                     ChatMessage::user(text.clone()),
-                    ChatMessage::assistant(section.clone()),
+                    ChatMessage::assistant(japanese.clone()),
                 ]
             })
             .collect();
@@ -100,7 +106,7 @@ impl Server {
             .map(|(part, section)| {
                 self.client.clone().translate_history(
                     model.clone(),
-                    section.clone(),
+                    section.japanese.clone(),
                     history.clone(),
                     page,
                     part,
@@ -129,18 +135,17 @@ impl Server {
         let task = match self.method {
             Method::History => {
                 let pages = pages.get(..pages.len()).unwrap_or_default();
-                let section_history = current.sections.iter().zip(current.text.iter());
 
                 let history: Vec<_> = pages
                     .into_iter()
-                    .map(|p| p.sections.iter().zip(p.text.iter()))
+                    .map(|p| &p.sections)
                     .flatten()
-                    .chain(section_history)
-                    .filter(|e| !e.1.is_empty())
-                    .map(|(section, text)| {
+                    .chain(&current.sections)
+                    .filter(|e| !e.text.is_empty())
+                    .map(|Section { japanese, text }| {
                         [
                             ChatMessage::user(text.clone()),
-                            ChatMessage::assistant(section.clone()),
+                            ChatMessage::assistant(japanese.clone()),
                         ]
                     })
                     .collect();
@@ -156,9 +161,9 @@ impl Server {
                     .collect();
 
                 let history = Arc::new(Mutex::new(history));
-                client.translate_history(model, section, history, page, part, settings)?
+                client.translate_history(model, section.japanese, history, page, part, settings)?
             }
-            _ => client.translate(model, section, page, part, settings)?,
+            _ => client.translate(model, section.japanese, page, part, settings)?,
         };
 
         let task = add_handle(&mut self.handles, task);

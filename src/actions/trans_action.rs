@@ -1,25 +1,15 @@
 use crate::{
-    actions::server_action::ServerAction,
-    controller::{
-        get_ordered_path,
-        parse::{partition_text, remove_think_tags},
-        part_tag,
-        xml::strip_data_tags,
+    actions::{
+        clean_invisible_chars, complete_dialog, contains_japanese, get_pages, pick_save_folder,
+        save_file, server_action::ServerAction,
     },
+    controller::{parse::remove_think_tags, part_tag},
     error::{Error, Result},
     message::{display_error, select_epub},
-    model::{
-        Activity,
-        translation::{Page, Translation},
-    },
+    model::{Activity, page::Page, translation::Translation},
 };
-use epub::doc::EpubDoc;
-use htmd::HtmlToMarkdown;
 use iced::Task;
-use std::{
-    io::Cursor,
-    path::{Path, PathBuf},
-};
+use std::path::PathBuf;
 use tokio::fs;
 
 #[non_exhaustive]
@@ -44,7 +34,10 @@ pub enum TransAction {
     },
     Translate(usize),
     TranslatePage(usize),
-    TranslatePart(usize, usize),
+    TranslatePart {
+        page: usize,
+        part: usize,
+    },
     CleanText(usize, usize),
     CancelTranslate,
     SaveTranslation(String),
@@ -75,7 +68,7 @@ impl Translation {
                 Ok(task) => task,
                 Err(error) => Task::future(display_error(error)).discard(),
             },
-            TransAction::TranslatePart(page, part) => match self.translate_part(page, part) {
+            TransAction::TranslatePart { page, part } => match self.translate_part(page, part) {
                 Ok(task) => task,
                 Err(error) => Task::future(display_error(error)).discard(),
             },
@@ -96,8 +89,8 @@ impl Translation {
 
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {
         if let Some(page) = self.pages.get_mut(page) {
-            if let Some(part) = page.text.get_mut(part) {
-                part.push_str(&content);
+            if let Some(section) = page.sections.get_mut(part) {
+                section.text.push_str(&content);
             };
         };
     }
@@ -119,9 +112,13 @@ impl Translation {
             return;
         };
 
-        page.activity = if page.text.iter().any(|text| text.is_empty()) {
+        page.activity = if page.sections.iter().any(|e| e.text.is_empty()) {
             Activity::Incomplete
-        } else if let Some(i) = page.text.iter().position(|text| contains_japanese(text)) {
+        } else if let Some(i) = page
+            .sections
+            .iter()
+            .position(|e| contains_japanese(&e.text))
+        {
             Activity::Error(i + 1)
         } else {
             Activity::Complete
@@ -132,10 +129,10 @@ impl Translation {
         match self.pages.get(page) {
             Some(page) => {
                 let content: String = page
-                    .text
+                    .sections
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("{}{}\n", part_tag(i + 1), t))
+                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.text))
                     .collect();
 
                 let name = format!("{}.md", name);
@@ -153,10 +150,10 @@ impl Translation {
             .map(|page| {
                 let name = page.path.file_stem().unwrap().to_os_string();
                 let text: String = page
-                    .text
+                    .sections
                     .iter()
                     .enumerate()
-                    .map(|(i, t)| format!("{}{}\n", part_tag(i + 1), t))
+                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.text))
                     .collect();
                 (name, remove_think_tags(&text))
             })
@@ -252,7 +249,7 @@ impl Translation {
 
         let current = pages.last_mut().unwrap();
         current.activity = Activity::Active;
-        current.text.get_mut(part).unwrap().clear();
+        current.sections.get_mut(part).unwrap().text.clear();
 
         let server = &mut self.server;
         let task = server.translate_part(pages, model, page, part)?;
@@ -270,11 +267,11 @@ impl Translation {
             return;
         };
 
-        let Some(text) = current_page.text.get_mut(part) else {
+        let Some(section) = current_page.sections.get_mut(part) else {
             return;
         };
 
-        *text = clean_invisible_chars(text);
+        section.text = clean_invisible_chars(&section.text);
     }
 }
 
@@ -282,142 +279,4 @@ impl From<ServerAction> for TransAction {
     fn from(action: ServerAction) -> Self {
         TransAction::ServerAction(action)
     }
-}
-
-fn contains_japanese(text: &str) -> bool {
-    text.chars().any(|c| {
-        matches!(c,
-            '\u{3040}'..='\u{309F}' |  // Hiragana
-            '\u{30A0}'..='\u{30FF}' |  // Katakana
-            '\u{4E00}'..='\u{9FFF}' |  // CJK Unified Ideographs (common kanji)
-            '\u{3400}'..='\u{4DBF}' |  // CJK Unified Ideographs Extension A
-            '\u{FF65}'..='\u{FF9F}' |  // Half-width Katakana
-            '\u{31F0}'..='\u{31FF}'    // Katakana Phonetic Extensions
-        )
-    })
-}
-
-fn clean_invisible_chars(text: &str) -> String {
-    text.chars()
-        .filter(|&c| {
-            // Keep normal whitespace
-            if c == ' ' || c == '\n' || c == '\r' || c == '\t' {
-                return true;
-            }
-
-            // Remove zero-width and invisible characters
-            if matches!(c,
-                '\u{200B}'..='\u{200F}' |
-                '\u{2060}'..='\u{2064}' |
-                '\u{FEFF}' |
-                '\u{00AD}' |
-                '\u{FFA0}'
-            ) {
-                return false;
-            }
-
-            // Remove other control characters
-            !c.is_control()
-        })
-        .collect()
-}
-
-pub async fn load_folder_markdown() -> Option<Vec<(PathBuf, String)>> {
-    let handle = rfd::AsyncFileDialog::new()
-        .set_title("load folder")
-        .pick_folder()
-        .await?;
-    let mut dirs = fs::read_dir(handle.path()).await.ok()?;
-    let mut pages = Vec::new();
-    while let Ok(Some(entry)) = dirs.next_entry().await {
-        let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|x| x == "md") {
-            let content = fs::read_to_string(&path).await.ok()?;
-            pages.push((path, content));
-        }
-    }
-
-    Some(pages)
-}
-
-pub async fn pick_save_folder(file_name: String) -> Option<PathBuf> {
-    let file_name = Path::new(&file_name).file_stem()?.to_str()?;
-    let handle = rfd::AsyncFileDialog::new()
-        .set_title("save translation")
-        .set_file_name(file_name)
-        .save_file()
-        .await?;
-    Some(handle.path().to_path_buf())
-}
-
-pub async fn save_file(file_name: String, content: String) -> Result<()> {
-    let handle = rfd::AsyncFileDialog::new()
-        .set_title("save translation")
-        .set_file_name(file_name)
-        .save_file()
-        .await;
-
-    if let Some(handle) = handle {
-        handle.write(content.as_bytes()).await?
-    }
-    Ok(())
-}
-
-pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, Vec<Page>)> {
-    let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
-
-    let paths = get_ordered_path(&epub);
-    let converter = HtmlToMarkdown::builder()
-        .skip_tags(vec!["head", "img", "image"])
-        .scripting_enabled(false)
-        .build();
-
-    let pages: Result<Vec<_>> = paths
-        .into_iter()
-        .map(|path| {
-            let html = epub.get_resource_str_by_path(&path).unwrap();
-            let html = strip_data_tags(&html)?;
-            let markdown = converter.convert(&html)?;
-            let markdown: Vec<_> = markdown.lines().map(|s| s.trim()).collect();
-            Ok((path, markdown.join("\n")))
-        })
-        .map(|result| {
-            result.map(|(path, markdown)| {
-                let partitioned = partition_text(&markdown);
-                let sections = partitioned
-                    .chunks(3)
-                    .map(|x| x.join(" "))
-                    .filter(|e| !e.trim_matches('#').is_empty())
-                    .collect();
-                Page::new(path, sections)
-            })
-        })
-        .collect();
-
-    let pages: Vec<_> = pages?
-        .into_iter()
-        .filter(|p| !p.sections.is_empty())
-        .collect();
-
-    let file_name = file_name
-        .file_name()
-        .map(|e| e.to_string_lossy().to_string())
-        .unwrap_or_default();
-    Ok((file_name, pages))
-}
-
-pub async fn complete_dialog(file_name: String) -> bool {
-    let file_name = Path::new(&file_name)
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy();
-
-    let dialog = rfd::AsyncMessageDialog::new()
-        .set_title("Translation Complete")
-        .set_description(format!("Save: {}", file_name))
-        .set_buttons(rfd::MessageButtons::YesNo)
-        .show()
-        .await;
-
-    matches!(dialog, rfd::MessageDialogResult::Yes)
 }

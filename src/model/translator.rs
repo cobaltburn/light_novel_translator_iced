@@ -2,7 +2,8 @@ use crate::{
     actions::trans_action::TransAction,
     message::Message,
     model::{
-        doc::Doc, extraction::Extraction, format::Format, server::Server, translation::Translation,
+        consensus::Consensus, doc::Doc, extraction::Extraction, format::Format, server::Server,
+        translation::Translation,
     },
     view::View,
 };
@@ -19,6 +20,7 @@ pub struct Translator {
     pub translations: BTreeMap<usize, Translation>,
     pub format: Format,
     pub extraction: Extraction,
+    pub consensus: Consensus,
 }
 
 impl Default for Translator {
@@ -30,7 +32,8 @@ impl Default for Translator {
             doc: Default::default(),
             translations: BTreeMap::from([(0, Translation::default())]),
             format: Default::default(),
-            extraction: Extraction::default(),
+            extraction: Default::default(),
+            consensus: Default::default(),
         }
     }
 }
@@ -83,9 +86,7 @@ impl Translator {
 
     pub fn translation_action(&mut self, tab: usize, action: TransAction) -> Task<Message> {
         match self.translations.get_mut(&tab) {
-            Some(model) => model
-                .perform(action)
-                .map(Message::TranslationAction.with(tab)),
+            Some(model) => model.perform(action).map(Message::TransAction.with(tab)),
             None => Task::none(),
         }
     }

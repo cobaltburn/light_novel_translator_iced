@@ -12,6 +12,7 @@ use iced::{
 };
 use std::fmt;
 
+pub mod consensus_view;
 pub mod doc_view;
 pub mod extraction_view;
 pub mod format_view;
@@ -22,7 +23,7 @@ pub enum View {
     #[default]
     Translation,
     Doc,
-    Advanced,
+    Consensus,
     Format,
     Extraction,
 }
@@ -34,7 +35,7 @@ impl fmt::Display for View {
             View::Format => "Build",
             View::Translation => "Translation",
             View::Extraction => "Extraction",
-            View::Advanced => "Advanced",
+            View::Consensus => "Consensus",
         };
         write!(f, "{}", view)
     }

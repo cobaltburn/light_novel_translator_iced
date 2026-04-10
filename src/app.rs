@@ -3,8 +3,8 @@ use crate::{
     message::Message,
     model::translator::Translator,
     view::{
-        View, doc_view::doc_view, extraction_view::extraction_view, format_view::format_view,
-        translation_view::traslation_view,
+        View, consensus_view::consensus_view, doc_view::doc_view, extraction_view::extraction_view,
+        format_view::format_view, translation_view::traslation_view,
     },
     widget::side_bar::side_bar_container,
 };
@@ -53,7 +53,7 @@ impl Translator {
             View::Translation => traslation_view(&self.translations, self.active_tab),
             View::Format => format_view(&self.format).map(Into::into),
             View::Extraction => extraction_view(&self.extraction).map(Into::into),
-            View::Advanced => todo!(),
+            View::Consensus => consensus_view(&self.consensus).map(Into::into),
         }
     }
 }

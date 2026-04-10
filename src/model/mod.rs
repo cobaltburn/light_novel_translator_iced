@@ -1,6 +1,8 @@
+pub mod consensus;
 pub mod doc;
 pub mod extraction;
 pub mod format;
+pub mod page;
 pub mod server;
 pub mod translation;
 pub mod translator;
