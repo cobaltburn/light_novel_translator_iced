@@ -22,6 +22,7 @@ pub enum View {
     #[default]
     Translation,
     Doc,
+    Advanced,
     Format,
     Extraction,
 }
@@ -30,9 +31,10 @@ impl fmt::Display for View {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let view = match self {
             View::Doc => "Document",
-            View::Translation => "Translation",
             View::Format => "Build",
+            View::Translation => "Translation",
             View::Extraction => "Extraction",
+            View::Advanced => "Advanced",
         };
         write!(f, "{}", view)
     }

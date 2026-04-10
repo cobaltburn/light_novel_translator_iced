@@ -16,7 +16,11 @@ use ollama_rs::{
         images::Image,
     },
 };
-use std::{ops::Not, time::Duration};
+use std::{
+    ops::Not,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::time;
 
 #[non_exhaustive]
@@ -51,25 +55,20 @@ impl Client {
         section: String,
         page: usize,
         part: usize,
-        settings: Settings,
-    ) -> Result<Task<TransAction>> {
-        match self {
-            Client::Ollama { .. } => {
-                Ok(self.ollama_translate(model, section, page, part, settings))
-            }
-            Client::Disconnected => Err(Error::ServerError("server disconnected")),
-        }
-    }
-
-    fn ollama_translate(
-        self,
-        model: String,
-        section: String,
-        page: usize,
-        part: usize,
         Settings { think, .. }: Settings,
-    ) -> Task<TransAction> {
-        Task::future(self.translation_stream(model, section, think))
+    ) -> Result<Task<TransAction>> {
+        if let Client::Disconnected = self {
+            return Err(Error::ServerError("server disconnected"));
+        }
+
+        let messages = vec![
+            ChatMessage::system(SYSTEM_PROMPT.to_string()),
+            ChatMessage::user(section),
+        ];
+
+        let request = ChatMessageRequest::new(model, messages).think(think);
+
+        let task = Task::future(self.stream(request))
             .then(move |stream| match stream {
                 Ok(stream) => {
                     Task::stream(stream).map_err(|_| Error::ServerError("Failed to read stream"))
@@ -85,28 +84,83 @@ impl Client {
                 Err(error) => Task::done(TransAction::CancelTranslate)
                     .chain(Task::future(display_error(error)).discard()),
             })
-            .chain(Task::done(TransAction::CleanText(page, part)))
+            .chain(Task::done(TransAction::CleanText(page, part)));
+
+        Ok(task)
     }
 
-    async fn translation_stream(
+    async fn stream(self, request: ChatMessageRequest) -> Result<ChatMessageResponseStream> {
+        let Client::Ollama(client) = self else {
+            return Err(Error::ServerError("server not connected"));
+        };
+
+        let stream = loop {
+            match client.send_chat_messages_stream(request.clone()).await {
+                Ok(stream) => break stream,
+                Err(OllamaError::Other(error)) if error.contains("503") => {
+                    time::sleep(Duration::from_secs(10)).await
+                }
+                Err(OllamaError::Other(error)) if error.contains("429") => {
+                    time::sleep(Duration::from_secs(30)).await
+                }
+                Err(error) => return Err(Error::OllamaError(error)),
+            }
+        };
+
+        Ok(stream)
+    }
+
+    pub fn translate_history(
         self,
         model: String,
         section: String,
-        think: Think,
+        history: Arc<Mutex<Vec<ChatMessage>>>,
+        page: usize,
+        part: usize,
+        Settings { think, .. }: Settings,
+    ) -> Result<Task<TransAction>> {
+        if let Client::Disconnected = self {
+            return Err(Error::ServerError("server disconnected"));
+        }
+
+        let request = ChatMessageRequest::new(model, Vec::new()).think(think);
+        history.lock().unwrap().push(ChatMessage::user(section));
+
+        let task = Task::future(self.stream_history(request, history))
+            .then(move |stream| match stream {
+                Ok(stream) => {
+                    Task::stream(stream).map_err(|_| Error::ServerError("Failed to read stream"))
+                }
+                Err(error) => Task::done(Err(error)),
+            })
+            .then(move |response| match response {
+                Ok(msg) => Task::done(TransAction::UpdateContent {
+                    content: msg.message.content,
+                    page,
+                    part,
+                }),
+                Err(error) => Task::done(TransAction::CancelTranslate)
+                    .chain(Task::future(display_error(error)).discard()),
+            })
+            .chain(Task::done(TransAction::CleanText(page, part)));
+
+        Ok(task)
+    }
+
+    async fn stream_history(
+        self,
+        request: ChatMessageRequest,
+        history: Arc<Mutex<Vec<ChatMessage>>>,
     ) -> Result<ChatMessageResponseStream> {
         let Client::Ollama(client) = self else {
             return Err(Error::ServerError("server not connected"));
         };
 
-        let messages = vec![
-            ChatMessage::system(SYSTEM_PROMPT.to_string()),
-            ChatMessage::user(section),
-        ];
-
-        let request = ChatMessageRequest::new(model.clone(), messages).think(think);
-
         let stream = loop {
-            match client.send_chat_messages_stream(request.clone()).await {
+            match client
+                .send_chat_messages_with_history_stream(history.clone(), request.clone())
+                .await
+            {
                 Ok(stream) => break stream,
                 Err(OllamaError::Other(error)) if error.contains("503") => {
                     time::sleep(Duration::from_secs(10)).await

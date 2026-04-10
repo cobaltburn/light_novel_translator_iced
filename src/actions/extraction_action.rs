@@ -96,8 +96,8 @@ impl Extraction {
 
     fn extract(&mut self, page: usize) -> Result<Task<ExtractAction>> {
         match self.server_state.method {
-            Method::Chain => self.chain_extract(page),
             Method::Batch => self.batch_extract(page),
+            Method::History | Method::Chain => self.chain_extract(page),
         }
     }
 

@@ -53,6 +53,7 @@ impl Translator {
             View::Translation => traslation_view(&self.translations, self.active_tab),
             View::Format => format_view(&self.format).map(Into::into),
             View::Extraction => extraction_view(&self.extraction).map(Into::into),
+            View::Advanced => todo!(),
         }
     }
 }

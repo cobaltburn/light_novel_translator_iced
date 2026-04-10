@@ -185,28 +185,26 @@ impl Translation {
             return Err(Error::ServerError("No model selected"));
         };
 
-        let Some(current_page) = self.pages.get_mut(page) else {
+        let Some(pages) = self.pages.get_mut(..page + 1) else {
             let file_name = self.file_name.clone();
-            return Ok(Task::done(ServerAction::Abort.into()).chain(
+            self.server.abort();
+            return Ok(
                 Task::future(complete_dialog(file_name.clone())).then(move |x| match x {
-                    true => Task::done(TransAction::SaveTranslation(file_name.clone())),
+                    true => Task::done(TransAction::SaveTranslation(file_name.to_owned())),
                     false => Task::none(),
                 }),
-            ));
+            );
         };
 
+        let current_page = pages.last_mut().unwrap();
         current_page.activity = Activity::Active;
-
         current_page.clear_content();
 
-        let tasks = self.server.translation_tasks(current_page, &model, page)?;
-        let task = self.server.method.join_tasks(tasks);
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(TransAction::PageComplete(page)));
-        let next_task = self
-            .server
-            .bind_handle(Task::done(TransAction::Translate(page + 1)));
+        let server = &mut self.server;
+        let task = server.translation(pages, &model, page)?;
+
+        let complete_task = server.bind_handle(Task::done(TransAction::PageComplete(page)));
+        let next_task = server.bind_handle(Task::done(TransAction::Translate(page + 1)));
 
         Ok(task.chain(complete_task).chain(next_task))
     }
@@ -220,19 +218,17 @@ impl Translation {
             return Err(Error::ServerError("No model selected"));
         };
 
-        let Some(current_page) = self.pages.get_mut(page) else {
+        let Some(pages) = self.pages.get_mut(0..page + 1) else {
             return Ok(Task::done(ServerAction::Abort.into()));
         };
 
+        let current_page = pages.last_mut().unwrap();
         current_page.activity = Activity::Active;
-
         current_page.clear_content();
 
-        let tasks = self.server.translation_tasks(current_page, &model, page)?;
-        let task = self.server.method.join_tasks(tasks);
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(TransAction::PageComplete(page)));
+        let server = &mut self.server;
+        let task = server.translation(pages, &model, page)?;
+        let complete_task = server.bind_handle(Task::done(TransAction::PageComplete(page)));
 
         let task = task
             .chain(complete_task)
@@ -250,26 +246,17 @@ impl Translation {
             return Err(Error::ServerError("No model selected"));
         };
 
-        let Some(current_page) = self.pages.get_mut(page) else {
+        let Some(pages) = self.pages.get_mut(..page + 1) else {
             return Ok(Task::done(ServerAction::Abort.into()));
         };
 
-        let Some(section) = current_page.sections.get_mut(part) else {
-            log::error!("an invalid part was passed");
-            return Ok(Task::none());
-        };
+        let current = pages.last_mut().unwrap();
+        current.activity = Activity::Active;
+        current.text.get_mut(part).unwrap().clear();
 
-        current_page.activity = Activity::Active;
-
-        let text = current_page.text.get_mut(part).unwrap();
-        text.clear();
-
-        let task = self
-            .server
-            .translate_part(section.clone(), model, page, part)?;
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(TransAction::PageComplete(page)));
+        let server = &mut self.server;
+        let task = server.translate_part(pages, model, page, part)?;
+        let complete_task = server.bind_handle(Task::done(TransAction::PageComplete(page)));
 
         let task = task
             .chain(complete_task)

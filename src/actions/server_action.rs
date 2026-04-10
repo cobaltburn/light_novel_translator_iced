@@ -12,6 +12,7 @@ pub enum ServerAction {
     SetModels(Vec<String>),
     SetMethod(Method),
     SetThink(Think),
+    SetWindow(usize),
     Connect,
     Abort,
 }
@@ -23,6 +24,7 @@ impl Server {
             ServerAction::SetThink(think) => self.set_think(think).into(),
             ServerAction::SetMethod(method) => self.select_method(method).into(),
             ServerAction::SetModels(models) => self.set_models(models).into(),
+            ServerAction::SetWindow(window) => self.set_window(window).into(),
             ServerAction::Connect => self.connect(),
             ServerAction::Abort => self.abort().into(),
         }
@@ -50,6 +52,10 @@ impl Server {
     fn set_models(&mut self, models: Vec<String>) {
         self.current_model = models.first().cloned();
         self.models = models;
+    }
+
+    fn set_window(&mut self, window: usize) {
+        self.settings.context_window = window;
     }
 
     pub fn abort(&mut self) {

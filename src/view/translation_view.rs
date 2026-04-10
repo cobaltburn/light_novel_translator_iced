@@ -12,17 +12,13 @@ use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::Vertical,
     color,
-    widget::{
-        Button, Container, Row,
-        container::transparent,
-        space::{horizontal, vertical},
-    },
+    widget::{Button, Container, Row, container::transparent, space::vertical},
 };
 use iced::{
     border::Radius,
     widget::{button, column, container, radio, row, scrollable, span, text},
 };
-use iced_aw::{Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
+use iced_aw::{Menu, MenuBar, TabBar, TypedInput, card::Status, menu::Item, style::tab_bar};
 use std::collections::BTreeMap;
 
 pub fn traslation_view(
@@ -155,24 +151,25 @@ fn server_menu(state: &Server) -> Item<'_, TransAction, Theme, Renderer> {
         Menu::new(vec![
             Item::new(ollama_input(state).map(Into::into)),
             Item::new(think_selector(state).map(Into::into)),
+            Item::new(execution_selector(state).map(Into::into)),
+            Item::new(context_window_input(state).map(Into::into)),
         ])
+        .spacing(10)
         .width(400),
     )
 }
 
-fn ollama_input(state: &Server) -> Element<'_, ServerAction> {
+fn ollama_input(_: &Server) -> Element<'_, ServerAction> {
     container(
         row![
             text("Ollama: ").center(),
             button("connect").on_press(ServerAction::Connect),
-            horizontal(),
-            execution_selector(state)
         ]
         .align_y(Vertical::Center)
         .spacing(5),
     )
     .align_left(Length::Fill)
-    .padding(10)
+    .padding(Padding::default().top(5))
     .into()
 }
 
@@ -208,27 +205,49 @@ fn think_selector(state: &Server) -> Element<'_, ServerAction> {
         .spacing(10),
     )
     .align_left(Length::Fill)
-    .padding(10)
     .into()
 }
 
 fn execution_selector(state: &Server) -> Element<'_, ServerAction> {
-    row![
-        text("Excetion:"),
-        radio(
-            "Chain",
-            Method::Chain,
-            Some(state.method),
-            ServerAction::SetMethod
-        ),
-        radio(
-            "Batch",
-            Method::Batch,
-            Some(state.method),
-            ServerAction::SetMethod
-        )
-    ]
-    .spacing(10)
+    container(
+        row![
+            text("Execution:"),
+            radio(
+                "Chain",
+                Method::Chain,
+                Some(state.method),
+                ServerAction::SetMethod
+            ),
+            radio(
+                "Batch",
+                Method::Batch,
+                Some(state.method),
+                ServerAction::SetMethod
+            ),
+            radio(
+                "History",
+                Method::History,
+                Some(state.method),
+                ServerAction::SetMethod
+            ),
+        ]
+        .spacing(10),
+    )
+    .align_left(Length::Fill)
+    .into()
+}
+
+fn context_window_input(state: &Server) -> Element<'_, ServerAction> {
+    container(
+        row![
+            text("Context window:"),
+            TypedInput::new("", &state.settings.context_window).on_input(ServerAction::SetWindow)
+        ]
+        .align_y(Vertical::Center)
+        .spacing(10),
+    )
+    .align_left(Length::Fill)
+    .padding(Padding::default().bottom(5))
     .into()
 }
 
