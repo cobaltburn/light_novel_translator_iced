@@ -136,12 +136,12 @@ impl Consensus {
             return;
         };
 
-        page.activity = if page.sections.iter().any(|e| e.text.is_empty()) {
+        page.activity = if page.sections.iter().any(|e| e.content.is_empty()) {
             Activity::Incomplete
         } else if let Some(i) = page
             .sections
             .iter()
-            .position(|e| contains_japanese(&e.text))
+            .position(|e| contains_japanese(&e.content))
         {
             Activity::Error(i + 1)
         } else {
@@ -152,7 +152,7 @@ impl Consensus {
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {
         if let Some(page) = self.pages.get_mut(page) {
             if let Some(section) = page.sections.get_mut(part) {
-                section.text.push_str(&content);
+                section.content.push_str(&content);
             };
         };
     }
@@ -167,7 +167,7 @@ impl Consensus {
                     .sections
                     .iter()
                     .enumerate()
-                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.text))
+                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
                     .collect();
                 (name, remove_think_tags(&text))
             })
@@ -188,7 +188,7 @@ impl Consensus {
                     .sections
                     .iter()
                     .enumerate()
-                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.text))
+                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
                     .collect();
 
                 let name = format!("{name}.md");

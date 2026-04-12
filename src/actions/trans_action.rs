@@ -90,7 +90,7 @@ impl Translation {
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {
         if let Some(page) = self.pages.get_mut(page) {
             if let Some(section) = page.sections.get_mut(part) {
-                section.text.push_str(&content);
+                section.content.push_str(&content);
             };
         };
     }
@@ -112,12 +112,12 @@ impl Translation {
             return;
         };
 
-        page.activity = if page.sections.iter().any(|e| e.text.is_empty()) {
+        page.activity = if page.sections.iter().any(|e| e.content.is_empty()) {
             Activity::Incomplete
         } else if let Some(i) = page
             .sections
             .iter()
-            .position(|e| contains_japanese(&e.text))
+            .position(|e| contains_japanese(&e.content))
         {
             Activity::Error(i + 1)
         } else {
@@ -132,7 +132,7 @@ impl Translation {
                     .sections
                     .iter()
                     .enumerate()
-                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.text))
+                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
                     .collect();
 
                 let name = format!("{}.md", name);
@@ -153,7 +153,7 @@ impl Translation {
                     .sections
                     .iter()
                     .enumerate()
-                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.text))
+                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
                     .collect();
                 (name, remove_think_tags(&text))
             })
@@ -198,7 +198,7 @@ impl Translation {
         current_page.clear_content();
 
         let server = &mut self.server;
-        let task = server.translation(pages, &model, page)?;
+        let task = server.translate(pages, &model, page)?;
 
         let complete_task = server.bind_handle(Task::done(TransAction::PageComplete(page)));
         let next_task = server.bind_handle(Task::done(TransAction::Translate(page + 1)));
@@ -224,7 +224,7 @@ impl Translation {
         current_page.clear_content();
 
         let server = &mut self.server;
-        let task = server.translation(pages, &model, page)?;
+        let task = server.translate(pages, &model, page)?;
         let complete_task = server.bind_handle(Task::done(TransAction::PageComplete(page)));
 
         let task = task
@@ -249,7 +249,7 @@ impl Translation {
 
         let current = pages.last_mut().unwrap();
         current.activity = Activity::Active;
-        current.sections.get_mut(part).unwrap().text.clear();
+        current.sections.get_mut(part).unwrap().content.clear();
 
         let server = &mut self.server;
         let task = server.translate_part(pages, model, page, part)?;
@@ -271,7 +271,7 @@ impl Translation {
             return;
         };
 
-        section.text = clean_invisible_chars(&section.text);
+        section.content = clean_invisible_chars(&section.content);
     }
 }
 

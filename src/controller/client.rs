@@ -76,15 +76,15 @@ impl Client {
                 Err(error) => Task::done(Err(error)),
             })
             .then(move |response| match response {
-                Ok(msg) => Task::done(TransAction::UpdateContent {
+                Ok(msg) if !msg.done => Task::done(TransAction::UpdateContent {
                     content: msg.message.content,
                     page,
                     part,
                 }),
+                Ok(_) => Task::done(TransAction::CleanText(page, part)),
                 Err(error) => Task::done(TransAction::CancelTranslate)
                     .chain(Task::future(display_error(error)).discard()),
-            })
-            .chain(Task::done(TransAction::CleanText(page, part)));
+            });
 
         Ok(task)
     }
@@ -123,10 +123,9 @@ impl Client {
             return Err(Error::ServerError("server disconnected"));
         }
 
-        let request = ChatMessageRequest::new(model, Vec::new()).think(think);
-        history.lock().unwrap().push(ChatMessage::user(section));
+        let request = ChatMessageRequest::new(model, vec![ChatMessage::user(section)]).think(think);
 
-        let task = Task::future(self.stream_history(request, history))
+        let task = Task::future(self.stream_history(request, history.clone()))
             .then(move |stream| match stream {
                 Ok(stream) => {
                     Task::stream(stream).map_err(|_| Error::ServerError("Failed to read stream"))
@@ -134,15 +133,15 @@ impl Client {
                 Err(error) => Task::done(Err(error)),
             })
             .then(move |response| match response {
-                Ok(msg) => Task::done(TransAction::UpdateContent {
+                Ok(msg) if !msg.done => Task::done(TransAction::UpdateContent {
                     content: msg.message.content,
                     page,
                     part,
                 }),
+                Ok(_) => Task::done(TransAction::CleanText(page, part)),
                 Err(error) => Task::done(TransAction::CancelTranslate)
                     .chain(Task::future(display_error(error)).discard()),
-            })
-            .chain(Task::done(TransAction::CleanText(page, part)));
+            });
 
         Ok(task)
     }
@@ -156,21 +155,9 @@ impl Client {
             return Err(Error::ServerError("server not connected"));
         };
 
-        let stream = loop {
-            match client
-                .send_chat_messages_with_history_stream(history.clone(), request.clone())
-                .await
-            {
-                Ok(stream) => break stream,
-                Err(OllamaError::Other(error)) if error.contains("503") => {
-                    time::sleep(Duration::from_secs(10)).await
-                }
-                Err(OllamaError::Other(error)) if error.contains("429") => {
-                    time::sleep(Duration::from_secs(30)).await
-                }
-                Err(error) => return Err(Error::OllamaError(error)),
-            }
-        };
+        let stream = client
+            .send_chat_messages_with_history_stream(history.clone(), request.clone())
+            .await?;
 
         Ok(stream)
     }

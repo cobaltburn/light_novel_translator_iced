@@ -32,7 +32,7 @@ impl Translation {
             .get(self.current_page)?
             .sections
             .iter()
-            .map(|e| &e.text);
+            .map(|e| &e.content);
 
         Some(text)
     }

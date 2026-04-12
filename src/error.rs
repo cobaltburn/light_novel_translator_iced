@@ -22,6 +22,9 @@ pub enum Error {
     #[error("BuildError: {0}")]
     BuildError(&'static str),
 
+    #[error("GeneralError: {0}")]
+    GeneralError(String),
+
     #[error(transparent)]
     IOError(#[from] std::io::Error),
 

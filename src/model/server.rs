@@ -38,7 +38,7 @@ impl Server {
         }
     }
 
-    pub fn translation(
+    fn translation(
         &mut self,
         pages: &[Page],
         model: &String,
@@ -50,14 +50,12 @@ impl Server {
             .iter()
             .enumerate()
             .map(|(part, section)| {
-                let client = self.client.clone();
-                let settings = self.settings.clone();
-                client.translate(
+                self.client.clone().translate(
                     model.clone(),
                     section.japanese.clone(),
                     page,
                     part,
-                    settings,
+                    self.settings.clone(),
                 )
             })
             .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
@@ -66,7 +64,7 @@ impl Server {
         Ok(self.method.join_tasks(tasks?))
     }
 
-    pub fn translation_history(
+    fn translation_history(
         &mut self,
         pages: &[Page],
         model: &String,
@@ -78,20 +76,17 @@ impl Server {
             .into_iter()
             .map(|p| &p.sections)
             .flatten()
-            .filter(|e| !e.text.is_empty())
-            .map(|Section { japanese, text }| {
+            .filter(|e| !e.content.is_empty())
+            .map(|Section { japanese, content }| {
                 [
-                    ChatMessage::user(text.clone()),
-                    ChatMessage::assistant(japanese.clone()),
+                    ChatMessage::user(japanese.clone()),
+                    ChatMessage::assistant(content.clone()),
                 ]
             })
             .collect();
 
-        let len = history.len();
-        let history = history
-            .into_iter()
-            .skip(len.saturating_sub(self.settings.context_window))
-            .flatten();
+        let skip = history.len().saturating_sub(self.settings.context_window);
+        let history = history.into_iter().skip(skip).flatten();
 
         let history: Vec<_> = iter::once(ChatMessage::system(SYSTEM_PROMPT.to_owned()))
             .chain(history)
@@ -141,20 +136,17 @@ impl Server {
                     .map(|p| &p.sections)
                     .flatten()
                     .chain(&current.sections)
-                    .filter(|e| !e.text.is_empty())
-                    .map(|Section { japanese, text }| {
+                    .filter(|e| !e.content.is_empty())
+                    .map(|Section { japanese, content }| {
                         [
-                            ChatMessage::user(text.clone()),
-                            ChatMessage::assistant(japanese.clone()),
+                            ChatMessage::user(japanese.clone()),
+                            ChatMessage::assistant(content.clone()),
                         ]
                     })
                     .collect();
 
-                let len = history.len();
-                let history = history
-                    .into_iter()
-                    .skip(len.saturating_sub(self.settings.context_window))
-                    .flatten();
+                let skip = history.len().saturating_sub(self.settings.context_window);
+                let history = history.into_iter().skip(skip).flatten();
 
                 let history: Vec<_> = iter::once(ChatMessage::system(SYSTEM_PROMPT.to_owned()))
                     .chain(history)
@@ -209,7 +201,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             think: Default::default(),
-            context_window: 10,
+            context_window: 5,
         }
     }
 }

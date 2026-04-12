@@ -12,7 +12,7 @@ pub struct Page {
 #[derive(Debug, Clone)]
 pub struct Section {
     pub japanese: String,
-    pub text: String,
+    pub content: String,
 }
 
 impl Page {
@@ -21,7 +21,7 @@ impl Page {
             .into_iter()
             .map(|japanese| Section {
                 japanese,
-                text: String::new(),
+                content: String::new(),
             })
             .collect();
 
@@ -33,6 +33,6 @@ impl Page {
     }
 
     pub fn clear_content(&mut self) {
-        self.sections.iter_mut().for_each(|e| e.text.clear());
+        self.sections.iter_mut().for_each(|e| e.content.clear());
     }
 }
