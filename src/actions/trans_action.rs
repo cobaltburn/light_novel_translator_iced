@@ -6,7 +6,11 @@ use crate::{
     controller::{parse::remove_think_tags, part_tag},
     error::{Error, Result},
     message::{display_error, select_epub},
-    model::{Activity, page::Page, translation::Translation},
+    model::{
+        Activity,
+        page::{Page, Section},
+        translation::Translation,
+    },
 };
 use iced::Task;
 use std::path::PathBuf;
@@ -112,13 +116,11 @@ impl Translation {
             return;
         };
 
-        page.activity = if page.sections.iter().any(|e| e.content.is_empty()) {
+        page.activity = if page.check_incomplete() {
             Activity::Incomplete
-        } else if let Some(i) = page
-            .sections
-            .iter()
-            .position(|e| contains_japanese(&e.content))
-        {
+        } else if let Some(i) = page.check_size() {
+            Activity::Error(i + 1)
+        } else if let Some(i) = page.check_japanese() {
             Activity::Error(i + 1)
         } else {
             Activity::Complete

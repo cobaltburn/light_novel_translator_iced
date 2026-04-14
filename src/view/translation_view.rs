@@ -77,7 +77,13 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
         .map(|e| {
             e.into_iter()
                 .enumerate()
-                .map(|(i, t)| [span(part_tag(i + 1)).color(color!(0xff0000)), span(t)])
+                .map(|(i, t)| {
+                    [
+                        span(format!("{} Count: {}\n", part_tag(i + 1), t.len()))
+                            .color(color!(0xff0000)),
+                        span(t),
+                    ]
+                })
                 .flatten()
                 .collect()
         })
