@@ -3,7 +3,7 @@ use iced::{
     alignment::Vertical,
     widget::{button, container, radio, row, text},
 };
-use iced_aw::TypedInput;
+use iced_aw::NumberInput;
 
 use crate::{
     actions::server_action::ServerAction,
@@ -92,7 +92,11 @@ pub fn context_window_input(state: &Server) -> Element<'_, ServerAction> {
     container(
         row![
             text("Context window:"),
-            TypedInput::new("", &state.settings.context_window).on_input(ServerAction::SetWindow)
+            NumberInput::new(
+                &state.settings.context_window,
+                0..=50,
+                ServerAction::SetWindow
+            )
         ]
         .align_y(Vertical::Center)
         .spacing(10),

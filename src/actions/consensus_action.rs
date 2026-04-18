@@ -1,15 +1,23 @@
 use crate::{
     actions::{
-        complete_dialog, contains_japanese, get_pages, pick_save_folder, save_file,
-        server_action::ServerAction,
+        clean_invisible_chars, complete_dialog, contains_japanese, get_pages, pick_save_folder,
+        save_file, select_format_folder, server_action::ServerAction,
     },
     controller::{parse::remove_think_tags, part_tag},
     error::{Error, Result},
     message::{display_error, select_epub},
-    model::{Activity, consensus::Consensus, page::Page},
+    model::{
+        Activity,
+        consensus::{Candidate, Consensus},
+        page::Page,
+    },
 };
 use iced::Task;
-use std::path::PathBuf;
+use regex::Regex;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 use tokio::fs;
 
 #[derive(Debug, Clone)]
@@ -21,13 +29,13 @@ pub enum ConsensusAction {
         part: usize,
     },
     PageComplete(usize),
-    Translate(usize),
-    TranslatePage(usize),
-    TranslatePart {
+    Consensus(usize),
+    ConsensusPage(usize),
+    ConsensusPart {
         page: usize,
         part: usize,
     },
-    CancelTranslate,
+    CancelConsensus,
     SaveTranslation(String),
     SavePage {
         name: String,
@@ -36,19 +44,41 @@ pub enum ConsensusAction {
     SetPage(usize),
     SavePages(PathBuf),
     SetEpub {
-        name: String,
+        path: PathBuf,
         pages: Vec<Page>,
     },
     OpenEpub,
+    CleanText {
+        page: usize,
+        part: usize,
+    },
+    SelectCanidate(Option<usize>),
+    SetCanidate {
+        i: Option<usize>,
+        name: String,
+        pages: Vec<(PathBuf, String)>,
+    },
+    DropCanidate(usize),
 }
 
 impl Consensus {
     pub fn perform(&mut self, action: ConsensusAction) -> Task<ConsensusAction> {
         match action {
             ConsensusAction::ServerAction(action) => self.server.perform(action).map(Into::into),
-            ConsensusAction::Translate(_) => todo!(),
-            ConsensusAction::TranslatePage(_) => todo!(),
-            ConsensusAction::TranslatePart { page, part } => todo!(),
+            ConsensusAction::Consensus(page) => match self.consensus(page) {
+                Ok(task) => task,
+                Err(error) => Task::future(display_error(error)).discard(),
+            },
+            ConsensusAction::ConsensusPage(page) => match self.consensus_page(page) {
+                Ok(task) => task,
+                Err(error) => Task::future(display_error(error)).discard(),
+            },
+            ConsensusAction::ConsensusPart { page, part } => {
+                match self.consensus_part(page, part) {
+                    Ok(task) => task,
+                    Err(error) => Task::future(display_error(error)).discard(),
+                }
+            }
             ConsensusAction::SaveTranslation(file_name) => {
                 Task::future(pick_save_folder(file_name))
                     .and_then(|path| {
@@ -67,19 +97,30 @@ impl Consensus {
                 part,
             } => self.update_content(content, page, part).into(),
             ConsensusAction::PageComplete(page) => self.check_complete(page).into(),
-            ConsensusAction::SetEpub { name, pages } => self.set_epub(name, pages).into(),
+            ConsensusAction::SetEpub { path: name, pages } => self.set_epub(name, pages).into(),
             ConsensusAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .then(|doc| match doc {
-                    Ok((name, pages)) => Task::done(ConsensusAction::SetEpub { name, pages }),
+                    Ok((name, pages)) => Task::done(ConsensusAction::SetEpub { path: name, pages }),
                     Err(error) => Task::future(display_error(error)).discard(),
                 }),
-            ConsensusAction::CancelTranslate => self.cancel().into(),
+            ConsensusAction::CancelConsensus => self.cancel().into(),
             ConsensusAction::SetPage(page) => self.set_page(page).into(),
+            ConsensusAction::SelectCanidate(i) => Task::future(select_format_folder(
+                self.file_path.parent().unwrap_or(Path::new("")).into(),
+            ))
+            .and_then(move |(name, pages)| {
+                Task::done(ConsensusAction::SetCanidate { i, name, pages })
+            }),
+            ConsensusAction::SetCanidate { i, name, pages } => {
+                self.set_canidate(i, name, pages).into()
+            }
+            ConsensusAction::CleanText { page, part } => self.clean_text(page, part).into(),
+            ConsensusAction::DropCanidate(i) => self.drop_canidate(i).into(),
         }
     }
 
-    pub fn translate(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
+    pub fn consensus(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
         if !self.server.connected() {
             return Err(Error::ServerError("Not connected to a server"));
         }
@@ -89,7 +130,7 @@ impl Consensus {
         };
 
         let Some(pages) = self.pages.get_mut(..page + 1) else {
-            let file_name = self.file_name.clone();
+            let file_name = self.file_name();
             self.server.abort();
             return Ok(
                 Task::future(complete_dialog(file_name.clone())).then(move |x| match x {
@@ -99,18 +140,115 @@ impl Consensus {
             );
         };
 
+        let candidates = self
+            .candidates
+            .iter()
+            .map(|e| &e.pages[..page + 1])
+            .flatten();
+
+        let candidates = candidates.fold(HashMap::new(), |mut acc, (p, e)| {
+            let name = p.file_stem().unwrap().to_string_lossy();
+            acc.entry(name).or_insert_with(Vec::new).push(e);
+            acc
+        });
+
         let current_page = pages.last_mut().unwrap();
         current_page.activity = Activity::Active;
-        current_page.clear_content();
+        current_page.clear();
 
-        let server = &mut self.server;
-        // let task = server.translation(pages, &model, page)?;
+        let task = self.server.consensus(pages, candidates, &model, page)?;
 
-        let complete_task = server.bind_handle(Task::done(ConsensusAction::PageComplete(page)));
-        let next_task = server.bind_handle(Task::done(ConsensusAction::Translate(page + 1)));
+        let complete_task = self
+            .server
+            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
+        let next_task = self
+            .server
+            .bind_handle(Task::done(ConsensusAction::Consensus(page + 1)));
 
-        todo!()
-        // Ok(task.chain(complete_task).chain(next_task))
+        Ok(task.chain(complete_task).chain(next_task))
+    }
+
+    pub fn consensus_page(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
+        if !self.server.connected() {
+            return Err(Error::ServerError("Not connected to a server"));
+        }
+
+        let Some(model) = self.server.current_model.clone() else {
+            return Err(Error::ServerError("No model selected"));
+        };
+
+        let Some(pages) = self.pages.get_mut(0..page + 1) else {
+            return Ok(Task::done(ServerAction::Abort.into()));
+        };
+
+        let current_page = pages.last_mut().unwrap();
+        current_page.activity = Activity::Active;
+        current_page.clear();
+
+        let candidates = self
+            .candidates
+            .iter()
+            .map(|e| &e.pages[..page + 1])
+            .flatten();
+
+        let candidates = candidates.fold(HashMap::new(), |mut acc, (p, e)| {
+            let name = p.file_stem().unwrap().to_string_lossy();
+            acc.entry(name).or_insert_with(Vec::new).push(e);
+            acc
+        });
+
+        let task = self.server.consensus(pages, candidates, &model, page)?;
+        let complete_task = self
+            .server
+            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
+        let task = task
+            .chain(complete_task)
+            .chain(Task::done(ServerAction::Abort.into()));
+
+        Ok(task)
+    }
+
+    pub fn consensus_part(&mut self, page: usize, part: usize) -> Result<Task<ConsensusAction>> {
+        if !self.server.connected() {
+            return Err(Error::ServerError("Not connected to a server"));
+        }
+
+        let Some(model) = self.server.current_model.clone() else {
+            return Err(Error::ServerError("No model selected"));
+        };
+
+        let Some(pages) = self.pages.get_mut(..page + 1) else {
+            return Ok(Task::done(ServerAction::Abort.into()));
+        };
+
+        let current = pages.last_mut().unwrap();
+        current.activity = Activity::Active;
+        current.sections.get_mut(part).unwrap().content.clear();
+
+        let candidates = self
+            .candidates
+            .iter()
+            .map(|e| &e.pages[..page + 1])
+            .flatten();
+
+        let candidates = candidates.fold(HashMap::new(), |mut acc, (p, e)| {
+            let name = p.file_stem().unwrap().to_string_lossy();
+            acc.entry(name).or_insert_with(Vec::new).push(e);
+            acc
+        });
+
+        let task = self
+            .server
+            .consensus_part(pages, candidates, model, page, part)?;
+        let complete_task = self
+            .server
+            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
+
+        let task = task
+            .chain(complete_task)
+            .chain(Task::done(ServerAction::Abort.into()));
+
+        Ok(task)
     }
 
     fn set_page(&mut self, page: usize) {
@@ -125,9 +263,9 @@ impl Consensus {
         self.server.abort();
     }
 
-    pub fn set_epub(&mut self, name: String, pages: Vec<Page>) {
+    pub fn set_epub(&mut self, path: PathBuf, pages: Vec<Page>) {
         self.current_page = 0;
-        self.file_name = name;
+        self.file_path = path;
         self.pages = pages;
     }
 
@@ -197,6 +335,43 @@ impl Consensus {
             }
             None => Task::none(),
         }
+    }
+
+    fn clean_text(&mut self, page: usize, part: usize) {
+        let Some(current_page) = self.pages.get_mut(page) else {
+            return;
+        };
+
+        let Some(section) = current_page.sections.get_mut(part) else {
+            return;
+        };
+
+        section.content = clean_invisible_chars(&section.content);
+    }
+
+    fn set_canidate(&mut self, i: Option<usize>, name: String, pages: Vec<(PathBuf, String)>) {
+        let re = Regex::new(r"<part>\d+</part>").unwrap();
+        let pages = pages
+            .into_iter()
+            .map(|(path, text)| {
+                let parts = re
+                    .split(&text)
+                    .filter(|e| !e.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                (path, parts)
+            })
+            .collect();
+
+        if let Some(i) = i {
+            *self.candidates.get_mut(i).unwrap() = Candidate { name, pages };
+        } else {
+            self.candidates.push(Candidate { name, pages });
+        };
+    }
+
+    fn drop_canidate(&mut self, i: usize) {
+        self.candidates.remove(i);
     }
 }
 

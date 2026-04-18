@@ -22,8 +22,13 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
         .map(|e| {
             e.into_iter()
                 .enumerate()
-                .map(|(i, t)| [span(part_tag(i + 1)).color(color!(0xff0000)), span(t)])
-                .flatten()
+                .flat_map(|(i, t)| {
+                    [
+                        span(format!("{} Count: {}\n\n", part_tag(i + 1), t.len()))
+                            .color(color!(0xff0000)),
+                        span(t),
+                    ]
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -65,8 +70,13 @@ fn side_bar(model: &Consensus) -> Container<'_, ConsensusAction> {
 
 fn menu_bar(model @ Consensus { server, .. }: &Consensus) -> Element<'_, ConsensusAction> {
     row![
-        MenuBar::new(vec![epub_menu(model), server_menu(server),]).spacing(5),
-        translate_button(model),
+        MenuBar::new(vec![
+            epub_menu(model),
+            canidate_menu(model),
+            server_menu(server)
+        ])
+        .spacing(5),
+        consensus_button(model),
         server.model_pick_list().map(Into::into),
     ]
     .width(Length::Fill)
@@ -75,13 +85,16 @@ fn menu_bar(model @ Consensus { server, .. }: &Consensus) -> Element<'_, Consens
     .into()
 }
 
-fn translate_button(model: &Consensus) -> Element<'_, ConsensusAction> {
+fn consensus_button(model: &Consensus) -> Element<'_, ConsensusAction> {
     let (button_text, message) = if !model.server.handles.is_empty() {
-        ("cancel", Some(ConsensusAction::CancelTranslate))
-    } else if !model.server.connected() || model.file_name.is_empty() {
+        ("cancel", Some(ConsensusAction::CancelConsensus))
+    } else if !model.server.connected()
+        || model.file_name().is_empty()
+        || model.candidates.is_empty()
+    {
         ("translate", None)
     } else {
-        let msg = ConsensusAction::Translate(model.current_page);
+        let msg = ConsensusAction::Consensus(model.current_page);
         ("translate", Some(msg))
     };
 
@@ -109,15 +122,17 @@ fn epub_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {
         menu_button("epub"),
         Menu::new(vec![
             Item::new(epub_select(model)),
-            Item::new(file_menu_buttons(model)),
+            Item::new(save_button(model)),
         ])
         .spacing(10)
         .width(400),
     )
 }
-fn file_menu_buttons(Consensus { file_name, .. }: &Consensus) -> Element<'_, ConsensusAction> {
+
+fn save_button(model: &Consensus) -> Element<'_, ConsensusAction> {
+    let file_name = model.file_name();
     let not_empty = file_name.is_empty().not();
-    let save_message = not_empty.then_some(ConsensusAction::SaveTranslation(file_name.clone()));
+    let save_message = not_empty.then_some(ConsensusAction::SaveTranslation(file_name));
 
     button(text("save").center())
         .on_press_maybe(save_message)
@@ -128,7 +143,7 @@ fn file_menu_buttons(Consensus { file_name, .. }: &Consensus) -> Element<'_, Con
 fn epub_select(model: &Consensus) -> Element<'_, ConsensusAction> {
     row![
         button(text("epub").center()).on_press(ConsensusAction::OpenEpub),
-        container(text(&model.file_name))
+        container(text(model.file_name()))
             .width(Length::Fill)
             .padding(5)
             .style(|theme| container::transparent(theme).border(Border {
@@ -138,25 +153,17 @@ fn epub_select(model: &Consensus) -> Element<'_, ConsensusAction> {
             }))
     ]
     .align_y(Vertical::Center)
-    .padding(5)
     .spacing(10)
+    .padding(5)
     .into()
 }
 
-fn folder_select(model: &Consensus) -> Element<'_, ConsensusAction> {
-    row![
-        button(text("folder").center()).on_press(ConsensusAction::OpenEpub),
-        container(text(&model.file_name))
-            .width(Length::Fill)
-            .padding(5)
-            .style(|theme| container::transparent(theme).border(Border {
-                color: Color::WHITE,
-                width: 0.5,
-                radius: 5.into(),
-            }))
-    ]
-    .align_y(Vertical::Center)
-    .padding(5)
-    .spacing(10)
-    .into()
+fn canidate_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {
+    Item::with_menu(
+        menu_button("candiate"),
+        Menu::new(model.canidate_items())
+            .spacing(10)
+            .width(400)
+            .padding(10),
+    )
 }

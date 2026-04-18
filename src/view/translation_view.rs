@@ -10,9 +10,11 @@ use crate::{
 };
 use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
-    alignment::Vertical,
+    alignment::{Horizontal, Vertical},
     color,
-    widget::{Button, Container, Row, container::transparent, space::vertical},
+    widget::{
+        Button, Column, Container, Row, container::transparent, lazy, right, space::vertical, stack,
+    },
 };
 use iced::{
     border::Radius,
@@ -75,16 +77,14 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
     let content = model
         .current_content()
         .map(|e| {
-            e.into_iter()
-                .enumerate()
-                .map(|(i, t)| {
+            e.enumerate()
+                .flat_map(|(i, t)| {
                     [
-                        span(format!("{} Count: {}\n", part_tag(i + 1), t.len()))
+                        span(format!("{} Count: {}\n\n", part_tag(i + 1), t.len()))
                             .color(color!(0xff0000)),
                         span(t),
                     ]
                 })
-                .flatten()
                 .collect()
         })
         .unwrap_or_default();
@@ -93,7 +93,11 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
         vertical(),
         column![
             menu_bar(model),
-            row![side_bar(model), rich_text_scrollable(content)].spacing(10)
+            row![
+                side_bar(model),
+                stack![rich_text_scrollable(content), error_card(model)]
+            ]
+            .spacing(10)
         ]
         .height(Length::FillPortion(9))
         .padding(10),
@@ -104,6 +108,37 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
     .width(Length::Fill)
     .height(Length::Fill)
     .padding(10)
+    .into()
+}
+
+fn error_card(model: &Translation) -> Element<'_, TransAction> {
+    lazy(
+        (model.current_jap_errors(), model.current_size_errors()),
+        |(jap_errors, size_errors)| {
+            let errors = jap_errors
+                .unwrap_or_default()
+                .iter()
+                .map(|i| format!("japanese error: {:2}", i + 1));
+            let errors = size_errors
+                .unwrap_or_default()
+                .iter()
+                .map(|i| format!("size error: {:2}", i + 1))
+                .chain(errors)
+                .map(|e| {
+                    container(text(e))
+                        .padding(5)
+                        .style(container::primary)
+                        .into()
+                });
+
+            right(
+                Column::with_children(errors)
+                    .spacing(5)
+                    .align_x(Horizontal::Right),
+            )
+            .padding(20)
+        },
+    )
     .into()
 }
 
@@ -143,7 +178,7 @@ fn menu_bar(
 fn translate_button(model: &Translation) -> Button<'_, TransAction> {
     let (button_text, message) = if !model.server.handles.is_empty() {
         ("cancel", Some(TransAction::CancelTranslate))
-    } else if !model.server.connected() || model.file_name.is_empty() {
+    } else if !model.server.connected() || model.file_name().is_empty() {
         ("translate", None)
     } else {
         let msg = TransAction::Translate(model.current_page);
@@ -180,9 +215,10 @@ fn epub_menu(model: &Translation) -> Item<'_, TransAction, Theme, Renderer> {
     )
 }
 
-fn file_menu_buttons(Translation { file_name, .. }: &Translation) -> Element<'_, TransAction> {
+fn file_menu_buttons(model: &Translation) -> Element<'_, TransAction> {
+    let file_name = model.file_name();
     let not_empty = !file_name.is_empty();
-    let save_message = not_empty.then_some(TransAction::SaveTranslation(file_name.clone()));
+    let save_message = not_empty.then_some(TransAction::SaveTranslation(file_name));
 
     button(text("save").center())
         .on_press_maybe(save_message)
@@ -193,7 +229,7 @@ fn file_menu_buttons(Translation { file_name, .. }: &Translation) -> Element<'_,
 fn epub_select(model: &Translation) -> Row<'_, TransAction> {
     row![
         button(text("epub").center()).on_press(TransAction::OpenEpub),
-        container(text(&model.file_name))
+        container(text(model.file_name()))
             .width(Length::Fill)
             .padding(5)
             .style(|theme| transparent(theme).border(Border {

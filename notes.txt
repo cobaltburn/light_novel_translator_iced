@@ -1,0 +1,4 @@
+add check to end for to long of output
+put overlay tag into corner showing the error in the text
+check if output is to short
+

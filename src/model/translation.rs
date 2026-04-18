@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use crate::{
     actions::trans_action::TransAction,
     model::{Activity, page::Page, server::Server},
@@ -12,18 +14,25 @@ use iced_aw::{ContextMenu, TabLabel};
 #[derive(Default, Debug)]
 pub struct Translation {
     pub server: Server,
-    pub file_name: String,
+    pub file_path: PathBuf,
     pub current_page: usize,
     pub pages: Vec<Page>,
 }
 
 impl Translation {
     pub fn tab_label(&self) -> TabLabel {
-        let file_name = self.file_name.clone();
         match self.server.handles.is_empty() {
-            true => TabLabel::Text(file_name),
-            false => TabLabel::IconText('\u{25CF}', file_name),
+            true => TabLabel::Text(self.file_name()),
+            false => TabLabel::IconText('\u{25CF}', self.file_name()),
         }
+    }
+
+    pub fn file_name(&self) -> String {
+        self.file_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
     }
 
     pub fn current_content(&self) -> Option<impl Iterator<Item = &String>> {
@@ -35,6 +44,14 @@ impl Translation {
             .map(|e| &e.content);
 
         Some(text)
+    }
+
+    pub fn current_jap_errors(&self) -> Option<&[usize]> {
+        Some(&self.pages.get(self.current_page)?.jap_error)
+    }
+
+    pub fn current_size_errors(&self) -> Option<&[usize]> {
+        Some(&self.pages.get(self.current_page)?.size_error)
     }
 
     pub fn path_buttons(&self) -> Column<'_, TransAction> {

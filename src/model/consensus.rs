@@ -1,21 +1,22 @@
-use std::path::PathBuf;
-
 use crate::{
     actions::consensus_action::ConsensusAction,
     model::{Activity, page::Page, server::Server},
     widget::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
 };
 use iced::{
-    Color, Element, Length, Padding,
-    widget::{Column, column, container, row, scrollable, text},
+    Border, Color, Element, Length, Padding, Renderer, Theme,
+    alignment::Vertical,
+    widget::{Column, button, column, container, row, scrollable, text},
 };
-use iced_aw::ContextMenu;
+use iced_aw::{ContextMenu, menu::Item};
+use std::{iter::once, path::PathBuf};
 
 #[derive(Debug, Default)]
 pub struct Consensus {
     pub server: Server,
-    pub file_name: String,
+    pub file_path: PathBuf,
     pub current_page: usize,
+    pub candidates: Vec<Candidate>,
     pub pages: Vec<Page>,
     pub translations: Vec<Vec<String>>,
 }
@@ -30,6 +31,23 @@ impl Consensus {
             .map(|e| &e.content);
 
         Some(text)
+    }
+
+    pub fn file_name(&self) -> String {
+        self.file_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    }
+
+    pub fn canidate_items(&self) -> Vec<Item<'_, ConsensusAction, Theme, Renderer>> {
+        self.candidates
+            .iter()
+            .enumerate()
+            .map(|(i, Candidate { name, .. })| Item::new(canidate_select(Some(i), &name)))
+            .chain(once(Item::new(canidate_select(None, ""))))
+            .collect()
     }
 
     pub fn path_buttons(&self) -> Column<'_, ConsensusAction> {
@@ -81,7 +99,7 @@ fn path_button_overlay<'a>(
 ) -> Element<'a, ConsensusAction> {
     let part_buttons = (0..count).map(|part| {
         context_menu_button(text!("translate part {}", part + 1).color(Color::WHITE))
-            .on_press_maybe(active.then_some(ConsensusAction::TranslatePart { page, part }))
+            .on_press_maybe(active.then_some(ConsensusAction::ConsensusPart { page, part }))
             .into()
     });
 
@@ -89,9 +107,9 @@ fn path_button_overlay<'a>(
         context_menu_button(text("save").color(Color::WHITE))
             .on_press(ConsensusAction::SavePage { name, page }),
         context_menu_button(text("translate").color(Color::WHITE))
-            .on_press_maybe(active.then_some(ConsensusAction::Translate(page))),
+            .on_press_maybe(active.then_some(ConsensusAction::Consensus(page))),
         context_menu_button(text("translate page").color(Color::WHITE))
-            .on_press_maybe(active.then_some(ConsensusAction::TranslatePage(page)))
+            .on_press_maybe(active.then_some(ConsensusAction::ConsensusPage(page)))
     ]
     .extend(part_buttons)
     .padding(5)
@@ -104,7 +122,37 @@ fn path_button_overlay<'a>(
         .into()
 }
 
-pub struct Folder {
-    pub path: PathBuf,
-    pub text: Vec<(PathBuf, String)>,
+fn canidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusAction> {
+    let x_button = i.map(|i| {
+        button(text("x").center())
+            .style(button::text)
+            .on_press(ConsensusAction::DropCanidate(i))
+    });
+
+    row![
+        button(text("canidate").center()).on_press(ConsensusAction::SelectCanidate(i)),
+        container(
+            row![text(folder).width(Length::Fill)]
+                .push(x_button)
+                .align_y(Vertical::Center)
+        )
+        .width(Length::Fill)
+        .padding(5)
+        .style(|theme| {
+            container::transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 0.5,
+                radius: 5.into(),
+            })
+        }),
+    ]
+    .align_y(Vertical::Center)
+    .spacing(10)
+    .into()
+}
+
+#[derive(Debug, Default)]
+pub struct Candidate {
+    pub name: String,
+    pub pages: Vec<(PathBuf, Vec<String>)>,
 }

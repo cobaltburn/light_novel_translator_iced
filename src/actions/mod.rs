@@ -1,6 +1,6 @@
 use epub::doc::EpubDoc;
 use htmd::HtmlToMarkdown;
-use tokio::fs;
+use tokio::fs::{self, read_dir, read_to_string};
 
 use crate::{
     controller::{get_ordered_path, parse::partition_text, xml::strip_data_tags},
@@ -8,6 +8,7 @@ use crate::{
     model::page::Page,
 };
 use std::{
+    ffi::OsStr,
     io::Cursor,
     path::{Path, PathBuf},
 };
@@ -60,7 +61,7 @@ pub async fn load_folder_markdown() -> Option<Vec<(PathBuf, String)>> {
     Some(pages)
 }
 
-pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, Vec<Page>)> {
+pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<Page>)> {
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 
     let paths = get_ordered_path(&epub);
@@ -96,11 +97,11 @@ pub async fn get_pages(file_name: PathBuf, buffer: Vec<u8>) -> Result<(String, V
         .filter(|p| !p.sections.is_empty())
         .collect();
 
-    let file_name = file_name
-        .file_name()
-        .map(|e| e.to_string_lossy().to_string())
-        .unwrap_or_default();
-    Ok((file_name, pages))
+    /* let file_name = file_name
+    .file_name()
+    .map(|e| e.to_string_lossy().to_string())
+    .unwrap_or_default(); */
+    Ok((file_path, pages))
 }
 
 pub async fn complete_dialog(file_name: String) -> bool {
@@ -117,6 +118,27 @@ pub async fn complete_dialog(file_name: String) -> bool {
         .await;
 
     matches!(dialog, rfd::MessageDialogResult::Yes)
+}
+
+pub async fn select_format_folder(dir: PathBuf) -> Option<(String, Vec<(PathBuf, String)>)> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("select translated folder")
+        .set_directory(dir)
+        .pick_folder()
+        .await?;
+
+    let mut dirs = read_dir(handle.path()).await.ok()?;
+    let mut pages = Vec::new();
+    while let Ok(Some(entry)) = dirs.next_entry().await {
+        let path = entry.path();
+        let path = path.is_file().then_some(path)?;
+        if path.extension().is_some_and(|e| e == OsStr::new("md")) {
+            let content = read_to_string(&path).await.ok()?;
+            pages.push((path, content));
+        }
+    }
+
+    Some((handle.file_name(), pages))
 }
 
 pub fn contains_japanese(text: &str) -> bool {

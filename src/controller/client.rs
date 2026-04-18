@@ -1,6 +1,7 @@
 use crate::{
     actions::{
-        extraction_action::ExtractAction, server_action::ServerAction, trans_action::TransAction,
+        consensus_action::ConsensusAction, extraction_action::ExtractAction,
+        server_action::ServerAction, trans_action::TransAction,
     },
     error::{Error, Result},
     message::display_error,
@@ -22,6 +23,7 @@ use std::{
     time::Duration,
 };
 use tokio::time;
+use tokio_stream::StreamExt;
 
 #[non_exhaustive]
 #[derive(Debug, Default, Clone)]
@@ -51,40 +53,73 @@ impl Client {
 
     pub fn translate(
         self,
-        model: String,
-        section: String,
+        request: ChatMessageRequest,
         page: usize,
         part: usize,
-        Settings { think, .. }: Settings,
     ) -> Result<Task<TransAction>> {
         if let Client::Disconnected = self {
             return Err(Error::ServerError("server disconnected"));
         }
 
-        let messages = vec![
-            ChatMessage::system(SYSTEM_PROMPT.to_string()),
-            ChatMessage::user(section),
-        ];
-
-        let request = ChatMessageRequest::new(model, messages).think(think);
-
         let task = Task::future(self.stream(request))
             .then(move |stream| match stream {
-                Ok(stream) => {
-                    Task::stream(stream).map_err(|_| Error::ServerError("Failed to read stream"))
-                }
+                Ok(stream) => Task::run(
+                    stream.chunks_timeout(10, Duration::from_millis(250)),
+                    |res| res.into_iter().collect::<std::result::Result<Vec<_>, ()>>(),
+                )
+                .map_err(|_| Error::ServerError("Failed to read stream")),
                 Err(error) => Task::done(Err(error)),
             })
-            .then(move |response| match response {
-                Ok(msg) if !msg.done => Task::done(TransAction::UpdateContent {
-                    content: msg.message.content,
+            .then(move |resp| match resp {
+                Ok(msg) => Task::done(TransAction::UpdateContent {
+                    content: msg
+                        .into_iter()
+                        .map_while(|e| (!e.done).then_some(e.message.content))
+                        .collect(),
                     page,
                     part,
                 }),
-                Ok(_) => Task::done(TransAction::CleanText(page, part)),
                 Err(error) => Task::done(TransAction::CancelTranslate)
                     .chain(Task::future(display_error(error)).discard()),
-            });
+            })
+            .chain(Task::done(TransAction::CleanText { page, part }));
+
+        Ok(task)
+    }
+
+    pub fn translate_history(
+        self,
+        request: ChatMessageRequest,
+        history: Arc<Mutex<Vec<ChatMessage>>>,
+        page: usize,
+        part: usize,
+    ) -> Result<Task<TransAction>> {
+        if let Client::Disconnected = self {
+            return Err(Error::ServerError("server disconnected"));
+        }
+
+        let task = Task::future(self.stream_history(request, history.clone()))
+            .then(move |stream| match stream {
+                Ok(stream) => Task::run(
+                    stream.chunks_timeout(10, Duration::from_millis(250)),
+                    |res| res.into_iter().collect::<std::result::Result<Vec<_>, ()>>(),
+                )
+                .map_err(|_| Error::ServerError("Failed to read stream")),
+                Err(error) => Task::done(Err(error)),
+            })
+            .then(move |resp| match resp {
+                Ok(msg) => Task::done(TransAction::UpdateContent {
+                    content: msg
+                        .into_iter()
+                        .map_while(|e| (!e.done).then_some(e.message.content))
+                        .collect(),
+                    page,
+                    part,
+                }),
+                Err(error) => Task::done(TransAction::CancelTranslate)
+                    .chain(Task::future(display_error(error)).discard()),
+            })
+            .chain(Task::done(TransAction::CleanText { page, part }));
 
         Ok(task)
     }
@@ -101,49 +136,13 @@ impl Client {
                     time::sleep(Duration::from_secs(10)).await
                 }
                 Err(OllamaError::Other(error)) if error.contains("429") => {
-                    time::sleep(Duration::from_secs(30)).await
+                    time::sleep(Duration::from_secs(10)).await
                 }
                 Err(error) => return Err(Error::OllamaError(error)),
             }
         };
 
         Ok(stream)
-    }
-
-    pub fn translate_history(
-        self,
-        model: String,
-        section: String,
-        history: Arc<Mutex<Vec<ChatMessage>>>,
-        page: usize,
-        part: usize,
-        Settings { think, .. }: Settings,
-    ) -> Result<Task<TransAction>> {
-        if let Client::Disconnected = self {
-            return Err(Error::ServerError("server disconnected"));
-        }
-
-        let request = ChatMessageRequest::new(model, vec![ChatMessage::user(section)]).think(think);
-
-        let task = Task::future(self.stream_history(request, history.clone()))
-            .then(move |stream| match stream {
-                Ok(stream) => {
-                    Task::stream(stream).map_err(|_| Error::ServerError("Failed to read stream"))
-                }
-                Err(error) => Task::done(Err(error)),
-            })
-            .then(move |response| match response {
-                Ok(msg) if !msg.done => Task::done(TransAction::UpdateContent {
-                    content: msg.message.content,
-                    page,
-                    part,
-                }),
-                Ok(_) => Task::done(TransAction::CleanText(page, part)),
-                Err(error) => Task::done(TransAction::CancelTranslate)
-                    .chain(Task::future(display_error(error)).discard()),
-            });
-
-        Ok(task)
     }
 
     async fn stream_history(
@@ -161,7 +160,84 @@ impl Client {
 
         Ok(stream)
     }
+}
 
+impl Client {
+    pub fn consensus(
+        self,
+        request: ChatMessageRequest,
+        page: usize,
+        part: usize,
+    ) -> Result<Task<ConsensusAction>> {
+        if let Client::Disconnected = self {
+            return Err(Error::ServerError("server disconnected"));
+        }
+
+        let task = Task::future(self.stream(request))
+            .then(move |stream| match stream {
+                Ok(stream) => Task::run(
+                    stream.chunks_timeout(10, Duration::from_millis(250)),
+                    |res| res.into_iter().collect::<std::result::Result<Vec<_>, ()>>(),
+                )
+                .map_err(|_| Error::ServerError("Failed to read stream")),
+                Err(error) => Task::done(Err(error)),
+            })
+            .then(move |resp| match resp {
+                Ok(msg) => Task::done(ConsensusAction::UpdateContent {
+                    content: msg
+                        .into_iter()
+                        .map_while(|e| (!e.done).then_some(e.message.content))
+                        .collect(),
+                    page,
+                    part,
+                }),
+                Err(error) => Task::done(ConsensusAction::CancelConsensus)
+                    .chain(Task::future(display_error(error)).discard()),
+            })
+            .chain(Task::done(ConsensusAction::CleanText { page, part }));
+
+        Ok(task)
+    }
+
+    pub fn consensus_history(
+        self,
+        request: ChatMessageRequest,
+        history: Arc<Mutex<Vec<ChatMessage>>>,
+        page: usize,
+        part: usize,
+    ) -> Result<Task<ConsensusAction>> {
+        if let Client::Disconnected = self {
+            return Err(Error::ServerError("server disconnected"));
+        }
+
+        let task = Task::future(self.stream_history(request, history.clone()))
+            .then(move |stream| match stream {
+                Ok(stream) => Task::run(
+                    stream.chunks_timeout(10, Duration::from_millis(250)),
+                    |res| res.into_iter().collect::<std::result::Result<Vec<_>, ()>>(),
+                )
+                .map_err(|_| Error::ServerError("Failed to read stream")),
+                Err(error) => Task::done(Err(error)),
+            })
+            .then(move |resp| match resp {
+                Ok(msg) => Task::done(ConsensusAction::UpdateContent {
+                    content: msg
+                        .into_iter()
+                        .map_while(|e| (!e.done).then_some(e.message.content))
+                        .collect(),
+                    page,
+                    part,
+                }),
+                Err(error) => Task::done(ConsensusAction::CancelConsensus)
+                    .chain(Task::future(display_error(error)).discard()),
+            })
+            .chain(Task::done(ConsensusAction::CleanText { page, part }));
+
+        Ok(task)
+    }
+}
+
+impl Client {
     pub fn extract_text(
         self,
         model: String,
@@ -218,7 +294,7 @@ impl Client {
     }
 }
 
-pub const SYSTEM_PROMPT: &str = r#"
+pub const TRANSLATION_PROMPT: &str = r#"
 You are an expert Japanese-to-English light novel translator. Translate the provided text completely and naturally.
 
 ## Core Requirements
@@ -268,6 +344,62 @@ All output must be in English. Never include Japanese characters in your respons
 If any passage is ambiguous, translate it based on context and light novel genre conventions. Never skip content, never leave Japanese text untranslated, never insert translator notes. Your output should read as if it were originally written in English.
 
 Do not summarize. Do not describe what happens. Translate the actual words on the page.
+"#;
+
+pub const CONSENSUS_PROMPT: &str = r#"
+You are an expert literary translator specializing in Japanese light novels. Your task is NOT to translate from scratch—you will receive a Japanese source passage and multiple candidate English translations from different models. Your job is to synthesize a single final translation that represents the best possible rendering of the source, drawing selectively from the candidates and correcting them where needed.
+
+# Inputs
+
+You will receive:
+1. JAPANESE SOURCE: The original passage.
+2. CANDIDATES: Numbered English translations (CANDIDATE 1, CANDIDATE 2, etc.) from different translation models.
+
+# Your Process
+
+Work through these steps internally before producing output:
+
+1. **Read the Japanese source carefully.** Identify sentence boundaries, speakers, tense, register (formal/casual/archaic), and any culturally specific elements (honorifics, sound effects, wordplay, names).
+
+2. **Compare candidates sentence by sentence.** For each sentence in the source, identify what each candidate did and where they agree or disagree.
+
+3. **Resolve disagreements using this priority order:**
+   a. **Fidelity to the source** — which candidate most accurately conveys the literal meaning, including subtle nuances of the Japanese?
+   b. **Completeness** — which candidate preserves all information without summarizing, condensing, or omitting? Reject any candidate that has clearly shortened the source.
+   c. **Natural English prose** — among accurate candidates, which reads most naturally as English literary fiction?
+   d. **Voice and register consistency** — does the choice fit the speaker's established voice and the scene's tone?
+
+4. **Synthesize, don't just pick.** You may take sentence A from CANDIDATE 1, sentence B from CANDIDATE 3, and rewrite sentence C entirely if all candidates failed it. The final output should be coherent and consistent in voice across the synthesis points.
+
+5. **Correct shared errors.** If all candidates make the same mistake (mistranslation, wrong subject, dropped nuance), fix it based on the source. Consensus among candidates is a signal, not a mandate.
+
+# Hard Rules
+
+- **Name order:** Keep Japanese name order (family name first) unless the STYLE GUIDE says otherwise.
+- **No summarization or condensation.** The output must reflect the full content and length of the source. If candidates have shortened things, restore the missing material from the source. Light novel prose is often deliberately verbose, repetitive, or meandering—preserve that.
+- **No additions.** Do not insert explanatory phrases, cultural notes, or content not present in the source.
+- **Sound effects and onomatopoeia:** Render naturally in English where possible; otherwise transliterate. Be consistent with whatever convention the candidates establish if it's reasonable.
+- **Dialogue formatting:** Match the source's quotation/bracket style as rendered in the candidates (typically 「」 → "" for English).
+- **Internal monologue, italics, emphasis:** Preserve formatting cues from the source.
+
+# When Candidates Conflict
+
+- If candidates disagree on **who is speaking or acting**, return to the Japanese source and determine the correct subject. Japanese frequently drops subjects—use context.
+- If candidates disagree on **tense**, default to what the Japanese grammar indicates, not what sounds smoother in English.
+- If candidates disagree on a **specific word or term**, prefer the more precise or evocative choice that fits the register. Avoid generic substitutions.
+- If one candidate is clearly an outlier (much shorter, missing sentences, hallucinated content), discount it heavily but still check if it caught something the others missed.
+- If all candidates are poor for a given sentence, translate it yourself directly from the Japanese.
+
+# Output Format
+
+Output ONLY the final synthesized English translation. Do not include:
+- Commentary on your choices
+- Notes about which candidate you drew from
+- Confidence scores
+- The Japanese source
+- Any preamble or explanation
+
+The output should be ready to drop directly into the final manuscript.
 "#;
 
 pub const EXTRACT_PROMPT: &str = r#"

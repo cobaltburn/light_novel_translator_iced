@@ -1,12 +1,19 @@
 use crate::{
-    actions::{server_action::ServerAction, trans_action::TransAction},
-    controller::client::{Client, SYSTEM_PROMPT},
+    actions::{
+        consensus_action::ConsensusAction, server_action::ServerAction, trans_action::TransAction,
+    },
+    controller::client::{CONSENSUS_PROMPT, Client, TRANSLATION_PROMPT},
     error::Result,
     model::page::{Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
-use ollama_rs::generation::{chat::ChatMessage, parameters::ThinkType};
+use ollama_rs::generation::{
+    chat::{ChatMessage, request::ChatMessageRequest},
+    parameters::ThinkType,
+};
 use std::{
+    borrow::Cow,
+    collections::HashMap,
     iter,
     sync::{Arc, Mutex},
 };
@@ -51,11 +58,16 @@ impl Server {
             .enumerate()
             .map(|(part, section)| {
                 self.client.clone().translate(
-                    model.clone(),
-                    section.japanese.clone(),
+                    ChatMessageRequest::new(
+                        model.clone(),
+                        vec![
+                            ChatMessage::system(TRANSLATION_PROMPT.to_string()),
+                            ChatMessage::user(section.japanese.clone()),
+                        ],
+                    )
+                    .think(self.settings.think),
                     page,
                     part,
-                    self.settings.clone(),
                 )
             })
             .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
@@ -70,13 +82,12 @@ impl Server {
         model: &String,
         page: usize,
     ) -> Result<Task<TransAction>> {
-        let current = pages.last().expect("dont pass an empty array");
-        let pages = pages.get(..pages.len()).unwrap_or_default();
-        let history: Vec<_> = pages
-            .into_iter()
-            .map(|p| &p.sections)
-            .flatten()
-            .filter(|e| !e.content.is_empty())
+        let (current, history_pages) = pages.split_last().expect("dont pass an empty array");
+
+        let pairs: Vec<_> = history_pages
+            .iter()
+            .flat_map(|p| &p.sections)
+            .filter(|s| !s.content.is_empty())
             .map(|Section { japanese, content }| {
                 [
                     ChatMessage::user(japanese.clone()),
@@ -85,11 +96,9 @@ impl Server {
             })
             .collect();
 
-        let skip = history.len().saturating_sub(self.settings.context_window);
-        let history = history.into_iter().skip(skip).flatten();
-
-        let history: Vec<_> = iter::once(ChatMessage::system(SYSTEM_PROMPT.to_owned()))
-            .chain(history)
+        let skip = pairs.len().saturating_sub(self.settings.context_window);
+        let history: Vec<_> = iter::once(ChatMessage::system(TRANSLATION_PROMPT.to_owned()))
+            .chain(pairs.into_iter().skip(skip).flatten())
             .collect();
 
         let history = Arc::new(Mutex::new(history));
@@ -100,12 +109,14 @@ impl Server {
             .enumerate()
             .map(|(part, section)| {
                 self.client.clone().translate_history(
-                    model.clone(),
-                    section.japanese.clone(),
+                    ChatMessageRequest::new(
+                        model.clone(),
+                        vec![ChatMessage::user(section.japanese.clone())],
+                    )
+                    .think(self.settings.think),
                     history.clone(),
                     page,
                     part,
-                    self.settings.clone(),
                 )
             })
             .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
@@ -123,20 +134,26 @@ impl Server {
     ) -> Result<Task<TransAction>> {
         let current = pages.last().expect("dont pass an empty array");
         let section = current.sections.get(part).unwrap().clone();
-
         let client = self.client.clone();
-        let settings = self.settings.clone();
+
+        let messages = match self.method {
+            Method::History => vec![ChatMessage::user(section.japanese.clone())],
+            _ => vec![
+                ChatMessage::system(TRANSLATION_PROMPT.to_string()),
+                ChatMessage::user(section.japanese.clone()),
+            ],
+        };
+        let request = ChatMessageRequest::new(model, messages).think(self.settings.think);
 
         let task = match self.method {
             Method::History => {
-                let pages = pages.get(..pages.len()).unwrap_or_default();
+                let (_, history_pages) = pages.split_last().expect("dont pass an empty array");
 
-                let history: Vec<_> = pages
-                    .into_iter()
-                    .map(|p| &p.sections)
-                    .flatten()
+                let pairs: Vec<_> = history_pages
+                    .iter()
+                    .flat_map(|p| &p.sections)
                     .chain(&current.sections)
-                    .filter(|e| !e.content.is_empty())
+                    .filter(|s| !s.content.is_empty())
                     .map(|Section { japanese, content }| {
                         [
                             ChatMessage::user(japanese.clone()),
@@ -145,26 +162,211 @@ impl Server {
                     })
                     .collect();
 
-                let skip = history.len().saturating_sub(self.settings.context_window);
-                let history = history.into_iter().skip(skip).flatten();
+                let skip = pairs.len().saturating_sub(self.settings.context_window);
+                let history: Vec<_> =
+                    iter::once(ChatMessage::system(TRANSLATION_PROMPT.to_owned()))
+                        .chain(pairs.into_iter().skip(skip).flatten())
+                        .collect();
 
-                let history: Vec<_> = iter::once(ChatMessage::system(SYSTEM_PROMPT.to_owned()))
-                    .chain(history)
-                    .collect();
-
-                let history = Arc::new(Mutex::new(history));
-                client.translate_history(model, section.japanese, history, page, part, settings)?
+                client.translate_history(request, Arc::new(Mutex::new(history)), page, part)?
             }
-            _ => client.translate(model, section.japanese, page, part, settings)?,
+            _ => client.translate(request, page, part)?,
         };
 
-        let task = add_handle(&mut self.handles, task);
-
-        Ok(task)
+        Ok(add_handle(&mut self.handles, task))
     }
 }
 
-pub fn add_handle(handles: &mut Vec<Handle>, task: Task<TransAction>) -> Task<TransAction> {
+impl Server {
+    pub fn consensus(
+        &mut self,
+        pages: &[Page],
+        candidates: HashMap<Cow<str>, Vec<&Vec<String>>>,
+        model: &String,
+        page: usize,
+    ) -> Result<Task<ConsensusAction>> {
+        match self.method {
+            Method::History => self.consensus_history(pages, candidates, model, page),
+            _ => self.consensus_single(pages, candidates, model, page),
+        }
+    }
+
+    fn consensus_single(
+        &mut self,
+        pages: &[Page],
+        candidates: HashMap<Cow<str>, Vec<&Vec<String>>>,
+        model: &String,
+        page: usize,
+    ) -> Result<Task<ConsensusAction>> {
+        let current = pages.last().expect("dont pass an empty array");
+        let candidates = candidates
+            .get(&current.path.file_name().unwrap().to_string_lossy())
+            .unwrap();
+        let tasks: Result<Vec<_>> = current
+            .sections
+            .iter()
+            .enumerate()
+            .map(|(part, section)| {
+                let candidates: Vec<_> = candidates.iter().flat_map(|e| e.get(part)).collect();
+                let prompt = consensus_prompt(&section.japanese, &candidates);
+                let request = ChatMessageRequest::new(
+                    model.clone(),
+                    vec![
+                        ChatMessage::system(CONSENSUS_PROMPT.to_string()),
+                        ChatMessage::user(prompt),
+                    ],
+                )
+                .think(self.settings.think);
+                self.client.clone().consensus(request, page, part)
+            })
+            .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
+            .collect();
+
+        Ok(self.method.join_tasks(tasks?))
+    }
+
+    fn consensus_history(
+        &mut self,
+        pages: &[Page],
+        candidates: HashMap<Cow<str>, Vec<&Vec<String>>>,
+        model: &String,
+        page: usize,
+    ) -> Result<Task<ConsensusAction>> {
+        let (current, history_pages) = pages.split_last().expect("dont pass an empty array");
+        let pairs: Vec<_> = history_pages
+            .iter()
+            .flat_map(|p| {
+                let filename = p.path.file_name().unwrap().to_string_lossy();
+                let page_candidates = candidates.get(&filename).unwrap();
+                p.sections
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, s)| !s.content.is_empty())
+                    .map(move |(i, s)| {
+                        let translations: Vec<_> =
+                            page_candidates.iter().filter_map(|c| c.get(i)).collect();
+                        let prompt = consensus_prompt(&s.japanese, &translations);
+                        [
+                            ChatMessage::user(prompt),
+                            ChatMessage::assistant(s.content.clone()),
+                        ]
+                    })
+            })
+            .collect();
+
+        let skip = pairs.len().saturating_sub(self.settings.context_window);
+        let history: Vec<_> = iter::once(ChatMessage::system(CONSENSUS_PROMPT.to_owned()))
+            .chain(pairs.into_iter().skip(skip).flatten())
+            .collect();
+        let history = Arc::new(Mutex::new(history));
+
+        let candidates = candidates
+            .get(&current.path.file_name().unwrap().to_string_lossy())
+            .unwrap();
+
+        let tasks: Result<Vec<_>> = current
+            .sections
+            .iter()
+            .enumerate()
+            .map(|(part, section)| {
+                let candidates: Vec<_> = candidates.iter().flat_map(|e| e.get(part)).collect();
+                let prompt = consensus_prompt(&section.japanese, &candidates);
+                self.client.clone().consensus_history(
+                    ChatMessageRequest::new(model.clone(), vec![ChatMessage::user(prompt)])
+                        .think(self.settings.think),
+                    history.clone(),
+                    page,
+                    part,
+                )
+            })
+            .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
+            .collect();
+
+        Ok(self.method.join_tasks(tasks?))
+    }
+
+    pub fn consensus_part(
+        &mut self,
+        pages: &[Page],
+        candidates: HashMap<Cow<str>, Vec<&Vec<String>>>,
+        model: String,
+        page: usize,
+        part: usize,
+    ) -> Result<Task<ConsensusAction>> {
+        let current = pages.last().expect("dont pass an empty array");
+        let section = current.sections.get(part).unwrap().clone();
+        let page_candidates = candidates
+            .get(&current.path.file_name().unwrap().to_string_lossy())
+            .unwrap();
+        let page_candidates: Vec<_> = page_candidates.iter().flat_map(|e| e.get(part)).collect();
+        let prompt = consensus_prompt(&section.japanese, &page_candidates);
+
+        let messages = match self.method {
+            Method::History => vec![ChatMessage::user(prompt)],
+            _ => vec![
+                ChatMessage::system(CONSENSUS_PROMPT.to_string()),
+                ChatMessage::user(prompt),
+            ],
+        };
+        let request = ChatMessageRequest::new(model, messages).think(self.settings.think);
+
+        let task = match self.method {
+            Method::History => {
+                let (_, history_pages) = pages.split_last().expect("dont pass an empty array");
+
+                let pairs: Vec<_> = history_pages
+                    .iter()
+                    .flat_map(|p| {
+                        let filename = p.path.file_name().unwrap().to_string_lossy();
+                        let page_candidates = candidates.get(&filename).unwrap();
+                        p.sections
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, s)| !s.content.is_empty())
+                            .map(move |(i, s)| {
+                                let translations: Vec<_> =
+                                    page_candidates.iter().filter_map(|c| c.get(i)).collect();
+                                let prompt = consensus_prompt(&s.japanese, &translations);
+                                [
+                                    ChatMessage::user(prompt),
+                                    ChatMessage::assistant(s.content.clone()),
+                                ]
+                            })
+                    })
+                    .collect();
+
+                let skip = pairs.len().saturating_sub(self.settings.context_window);
+                let history: Vec<_> = iter::once(ChatMessage::system(CONSENSUS_PROMPT.to_owned()))
+                    .chain(pairs.into_iter().skip(skip).flatten())
+                    .collect();
+
+                self.client.clone().consensus_history(
+                    request,
+                    Arc::new(Mutex::new(history)),
+                    page,
+                    part,
+                )?
+            }
+            _ => self.client.clone().consensus(request, page, part)?,
+        };
+
+        Ok(add_handle(&mut self.handles, task))
+    }
+}
+
+pub fn consensus_prompt(section: &str, candidates: &[&String]) -> String {
+    let source = format!("<source lang=\"ja\">\n{}\n</source>", section);
+
+    let candidates: String = candidates
+        .into_iter()
+        .enumerate()
+        .map(|(i, e)| format!("<candidate id=\"{}\">\n{}\n</candidate>\n", i, e))
+        .collect();
+
+    format!("{}\n<candidates>\n{}</candidates>", source, candidates)
+}
+
+pub fn add_handle<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
     let (task, handle) = task.abortable();
     handles.push(handle.abort_on_drop());
     task
@@ -235,31 +437,20 @@ pub enum Method {
 }
 
 impl Method {
-    pub fn join_tasks(&self, tasks: Vec<Task<TransAction>>) -> Task<TransAction> {
+    pub fn join_tasks<T: 'static>(&self, tasks: Vec<Task<T>>) -> Task<T> {
+        const BATCH_SIZE: usize = 6;
+
         match self {
             Method::Batch => {
-                let mut batch = Task::none();
-                let mut tasks = tasks.into_iter();
-
-                while let Some(task) = tasks.next() {
-                    let mut chunk = vec![task];
-                    for _ in 1..=5 {
-                        if let Some(task) = tasks.next() {
-                            chunk.push(task);
-                        };
-                    }
-                    batch = batch.chain(Task::batch(chunk))
-                }
-
-                batch
+                let mut iter = tasks.into_iter();
+                std::iter::from_fn(|| {
+                    let chunk: Vec<_> = iter.by_ref().take(BATCH_SIZE).collect();
+                    (!chunk.is_empty()).then_some(chunk)
+                })
+                .map(Task::batch)
+                .fold(Task::none(), Task::chain)
             }
-            Method::History | Method::Chain => {
-                let mut chain = Task::none();
-                for task in tasks {
-                    chain = chain.chain(task);
-                }
-                chain
-            }
+            Method::History | Method::Chain => tasks.into_iter().fold(Task::none(), Task::chain),
         }
     }
 }
