@@ -25,6 +25,8 @@ use std::{
 use tokio::time;
 use tokio_stream::StreamExt;
 
+const MAX_WAIT: Duration = Duration::from_millis(500);
+
 #[non_exhaustive]
 #[derive(Debug, Default, Clone)]
 pub enum Client {
@@ -63,14 +65,13 @@ impl Client {
 
         let task = Task::future(self.stream(request))
             .then(move |stream| match stream {
-                Ok(stream) => Task::run(
-                    stream.chunks_timeout(10, Duration::from_millis(250)),
-                    |res| res.into_iter().collect::<std::result::Result<Vec<_>, ()>>(),
-                )
+                Ok(stream) => Task::run(stream.chunks_timeout(10, MAX_WAIT), |res| {
+                    res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
+                })
                 .map_err(|_| Error::ServerError("Failed to read stream")),
                 Err(error) => Task::done(Err(error)),
             })
-            .then(move |resp| match resp {
+            .then(move |response| match response {
                 Ok(msg) => Task::done(TransAction::UpdateContent {
                     content: msg
                         .into_iter()
@@ -100,14 +101,13 @@ impl Client {
 
         let task = Task::future(self.stream_history(request, history.clone()))
             .then(move |stream| match stream {
-                Ok(stream) => Task::run(
-                    stream.chunks_timeout(10, Duration::from_millis(250)),
-                    |res| res.into_iter().collect::<std::result::Result<Vec<_>, ()>>(),
-                )
+                Ok(stream) => Task::run(stream.chunks_timeout(10, MAX_WAIT), |res| {
+                    res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
+                })
                 .map_err(|_| Error::ServerError("Failed to read stream")),
                 Err(error) => Task::done(Err(error)),
             })
-            .then(move |resp| match resp {
+            .then(move |response| match response {
                 Ok(msg) => Task::done(TransAction::UpdateContent {
                     content: msg
                         .into_iter()
@@ -175,14 +175,13 @@ impl Client {
 
         let task = Task::future(self.stream(request))
             .then(move |stream| match stream {
-                Ok(stream) => Task::run(
-                    stream.chunks_timeout(10, Duration::from_millis(250)),
-                    |res| res.into_iter().collect::<std::result::Result<Vec<_>, ()>>(),
-                )
+                Ok(stream) => Task::run(stream.chunks_timeout(10, MAX_WAIT), |res| {
+                    res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
+                })
                 .map_err(|_| Error::ServerError("Failed to read stream")),
                 Err(error) => Task::done(Err(error)),
             })
-            .then(move |resp| match resp {
+            .then(move |response| match response {
                 Ok(msg) => Task::done(ConsensusAction::UpdateContent {
                     content: msg
                         .into_iter()
@@ -212,14 +211,13 @@ impl Client {
 
         let task = Task::future(self.stream_history(request, history.clone()))
             .then(move |stream| match stream {
-                Ok(stream) => Task::run(
-                    stream.chunks_timeout(10, Duration::from_millis(250)),
-                    |res| res.into_iter().collect::<std::result::Result<Vec<_>, ()>>(),
-                )
+                Ok(stream) => Task::run(stream.chunks_timeout(10, MAX_WAIT), |res| {
+                    res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
+                })
                 .map_err(|_| Error::ServerError("Failed to read stream")),
                 Err(error) => Task::done(Err(error)),
             })
-            .then(move |resp| match resp {
+            .then(move |response| match response {
                 Ok(msg) => Task::done(ConsensusAction::UpdateContent {
                     content: msg
                         .into_iter()
@@ -382,6 +380,14 @@ Work through these steps internally before producing output:
 - **Dialogue formatting:** Match the source's quotation/bracket style as rendered in the candidates (typically 「」 → "" for English).
 - **Internal monologue, italics, emphasis:** Preserve formatting cues from the source.
 
+# Pronoun and Subject Handling
+
+You must NOT introduce pronouns or subjects that do not appear in any of the candidate translations. If all candidates use "she," you use "she." If candidates disagree on a pronoun (e.g., "he" vs "she" vs "they"), resolve it by checking the Japanese source. If the source is ambiguous (dropped subject), prefer whichever pronoun the majority of candidates used. Never substitute a pronoun based on your own interpretation of the source if the candidates already agree.
+
+# Scope
+
+You are translating ONE passage at a time. Each request contains a single source passage and its candidate translations. Your output must contain ONLY the translation of the current passage—never include or repeat translations from prior passages. That context exists solely to help you maintain consistency in voice, terminology, and pronouns. Do not reproduce it.
+
 # When Candidates Conflict
 
 - If candidates disagree on **who is speaking or acting**, return to the Japanese source and determine the correct subject. Japanese frequently drops subjects—use context.
@@ -393,6 +399,7 @@ Work through these steps internally before producing output:
 # Output Format
 
 Output ONLY the final synthesized English translation. Do not include:
+- Translations of prior passages
 - Commentary on your choices
 - Notes about which candidate you drew from
 - Confidence scores

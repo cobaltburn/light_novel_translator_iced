@@ -4,7 +4,7 @@ use crate::{
     model::translator::Translator,
     view::{
         View, consensus_view::consensus_view, doc_view::doc_view, extraction_view::extraction_view,
-        format_view::format_view, translation_view::traslation_view,
+        format_view::format_view, translation_view::translation_view,
     },
     widget::side_bar::side_bar_container,
 };
@@ -50,7 +50,7 @@ impl Translator {
     pub fn view_select(&self) -> Element<'_, Message> {
         match self.view {
             View::Doc => doc_view(&self.doc).map(Into::into),
-            View::Translation => traslation_view(&self.translations, self.active_tab),
+            View::Translation => translation_view(&self.translations, self.active_tab),
             View::Format => format_view(&self.format).map(Into::into),
             View::Extraction => extraction_view(&self.extraction).map(Into::into),
             View::Consensus => consensus_view(&self.consensus).map(Into::into),

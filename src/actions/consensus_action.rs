@@ -1,7 +1,7 @@
 use crate::{
     actions::{
-        clean_invisible_chars, complete_dialog, contains_japanese, get_pages, pick_save_folder,
-        save_file, select_format_folder, server_action::ServerAction,
+        clean_invisible_chars, complete_dialog, get_pages, pick_save_folder, save_file,
+        select_format_folder, server_action::ServerAction,
     },
     controller::{parse::remove_think_tags, part_tag},
     error::{Error, Result},
@@ -16,6 +16,7 @@ use iced::Task;
 use regex::Regex;
 use std::{
     collections::HashMap,
+    ffi::OsStr,
     path::{Path, PathBuf},
 };
 use tokio::fs;
@@ -52,33 +53,28 @@ pub enum ConsensusAction {
         page: usize,
         part: usize,
     },
-    SelectCanidate(Option<usize>),
-    SetCanidate {
+    SelectCandidate(Option<usize>),
+    SetCandidate {
         i: Option<usize>,
         name: String,
         pages: Vec<(PathBuf, String)>,
     },
-    DropCanidate(usize),
+    DropCandidate(usize),
 }
 
 impl Consensus {
     pub fn perform(&mut self, action: ConsensusAction) -> Task<ConsensusAction> {
         match action {
             ConsensusAction::ServerAction(action) => self.server.perform(action).map(Into::into),
-            ConsensusAction::Consensus(page) => match self.consensus(page) {
-                Ok(task) => task,
-                Err(error) => Task::future(display_error(error)).discard(),
-            },
-            ConsensusAction::ConsensusPage(page) => match self.consensus_page(page) {
-                Ok(task) => task,
-                Err(error) => Task::future(display_error(error)).discard(),
-            },
-            ConsensusAction::ConsensusPart { page, part } => {
-                match self.consensus_part(page, part) {
-                    Ok(task) => task,
-                    Err(error) => Task::future(display_error(error)).discard(),
-                }
-            }
+            ConsensusAction::Consensus(page) => self
+                .consensus(page)
+                .unwrap_or_else(|error| Task::future(display_error(error)).discard()),
+            ConsensusAction::ConsensusPage(page) => self
+                .consensus_page(page)
+                .unwrap_or_else(|error| Task::future(display_error(error)).discard()),
+            ConsensusAction::ConsensusPart { page, part } => self
+                .consensus_part(page, part)
+                .unwrap_or_else(|error| Task::future(display_error(error)).discard()),
             ConsensusAction::SaveTranslation(file_name) => {
                 Task::future(pick_save_folder(file_name))
                     .and_then(|path| {
@@ -106,17 +102,17 @@ impl Consensus {
                 }),
             ConsensusAction::CancelConsensus => self.cancel().into(),
             ConsensusAction::SetPage(page) => self.set_page(page).into(),
-            ConsensusAction::SelectCanidate(i) => Task::future(select_format_folder(
+            ConsensusAction::SelectCandidate(i) => Task::future(select_format_folder(
                 self.file_path.parent().unwrap_or(Path::new("")).into(),
             ))
             .and_then(move |(name, pages)| {
-                Task::done(ConsensusAction::SetCanidate { i, name, pages })
+                Task::done(ConsensusAction::SetCandidate { i, name, pages })
             }),
-            ConsensusAction::SetCanidate { i, name, pages } => {
-                self.set_canidate(i, name, pages).into()
+            ConsensusAction::SetCandidate { i, name, pages } => {
+                self.set_candidate(i, name, pages).into()
             }
             ConsensusAction::CleanText { page, part } => self.clean_text(page, part).into(),
-            ConsensusAction::DropCanidate(i) => self.drop_canidate(i).into(),
+            ConsensusAction::DropCandidate(i) => self.drop_candidate(i).into(),
         }
     }
 
@@ -128,8 +124,12 @@ impl Consensus {
         let Some(model) = self.server.current_model.clone() else {
             return Err(Error::ServerError("No model selected"));
         };
+        if let Some(page) = self.pages.get_mut(page) {
+            page.activity = Activity::Active;
+            page.clear();
+        }
 
-        let Some(pages) = self.pages.get_mut(..page + 1) else {
+        let Some(pages) = self.pages.get(..page + 1) else {
             let file_name = self.file_name();
             self.server.abort();
             return Ok(
@@ -140,32 +140,19 @@ impl Consensus {
             );
         };
 
-        let candidates = self
-            .candidates
-            .iter()
-            .map(|e| &e.pages[..page + 1])
-            .flatten();
-
-        let candidates = candidates.fold(HashMap::new(), |mut acc, (p, e)| {
-            let name = p.file_stem().unwrap().to_string_lossy();
-            acc.entry(name).or_insert_with(Vec::new).push(e);
-            acc
-        });
-
-        let current_page = pages.last_mut().unwrap();
-        current_page.activity = Activity::Active;
-        current_page.clear();
+        let candidates = candidates_map(&self.candidates, page);
 
         let task = self.server.consensus(pages, candidates, &model, page)?;
 
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
-        let next_task = self
-            .server
-            .bind_handle(Task::done(ConsensusAction::Consensus(page + 1)));
-
-        Ok(task.chain(complete_task).chain(next_task))
+        Ok(task
+            .chain(
+                self.server
+                    .bind_handle(Task::done(ConsensusAction::PageComplete(page))),
+            )
+            .chain(
+                self.server
+                    .bind_handle(Task::done(ConsensusAction::Consensus(page + 1))),
+            ))
     }
 
     pub fn consensus_page(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
@@ -177,35 +164,24 @@ impl Consensus {
             return Err(Error::ServerError("No model selected"));
         };
 
-        let Some(pages) = self.pages.get_mut(0..page + 1) else {
+        if let Some(page) = self.pages.get_mut(page) {
+            page.activity = Activity::Active;
+            page.clear();
+        }
+
+        let Some(pages) = self.pages.get(0..page + 1) else {
             return Ok(Task::done(ServerAction::Abort.into()));
         };
 
-        let current_page = pages.last_mut().unwrap();
-        current_page.activity = Activity::Active;
-        current_page.clear();
-
-        let candidates = self
-            .candidates
-            .iter()
-            .map(|e| &e.pages[..page + 1])
-            .flatten();
-
-        let candidates = candidates.fold(HashMap::new(), |mut acc, (p, e)| {
-            let name = p.file_stem().unwrap().to_string_lossy();
-            acc.entry(name).or_insert_with(Vec::new).push(e);
-            acc
-        });
+        let candidates = candidates_map(&self.candidates, page);
 
         let task = self.server.consensus(pages, candidates, &model, page)?;
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
-        let task = task
-            .chain(complete_task)
-            .chain(Task::done(ServerAction::Abort.into()));
-
-        Ok(task)
+        Ok(task
+            .chain(
+                self.server
+                    .bind_handle(Task::done(ConsensusAction::PageComplete(page))),
+            )
+            .chain(Task::done(ServerAction::Abort.into())))
     }
 
     pub fn consensus_part(&mut self, page: usize, part: usize) -> Result<Task<ConsensusAction>> {
@@ -217,38 +193,29 @@ impl Consensus {
             return Err(Error::ServerError("No model selected"));
         };
 
-        let Some(pages) = self.pages.get_mut(..page + 1) else {
+        if let Some(page) = self.pages.get_mut(page) {
+            page.activity = Activity::Active;
+            page.sections.get_mut(part).unwrap().content.clear();
+            page.jap_error.clear();
+            page.size_error.clear();
+        }
+
+        let Some(pages) = self.pages.get(0..page + 1) else {
             return Ok(Task::done(ServerAction::Abort.into()));
         };
 
-        let current = pages.last_mut().unwrap();
-        current.activity = Activity::Active;
-        current.sections.get_mut(part).unwrap().content.clear();
-
-        let candidates = self
-            .candidates
-            .iter()
-            .map(|e| &e.pages[..page + 1])
-            .flatten();
-
-        let candidates = candidates.fold(HashMap::new(), |mut acc, (p, e)| {
-            let name = p.file_stem().unwrap().to_string_lossy();
-            acc.entry(name).or_insert_with(Vec::new).push(e);
-            acc
-        });
+        let candidates = candidates_map(&self.candidates, page);
 
         let task = self
             .server
             .consensus_part(pages, candidates, model, page, part)?;
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
 
-        let task = task
-            .chain(complete_task)
-            .chain(Task::done(ServerAction::Abort.into()));
-
-        Ok(task)
+        Ok(task
+            .chain(
+                self.server
+                    .bind_handle(Task::done(ConsensusAction::PageComplete(page))),
+            )
+            .chain(Task::done(ServerAction::Abort.into())))
     }
 
     fn set_page(&mut self, page: usize) {
@@ -274,13 +241,14 @@ impl Consensus {
             return;
         };
 
-        page.activity = if page.sections.iter().any(|e| e.content.is_empty()) {
+        page.size_error = page.check_size();
+        page.jap_error = page.check_japanese();
+
+        page.activity = if page.check_incomplete() {
             Activity::Incomplete
-        } else if let Some(i) = page
-            .sections
-            .iter()
-            .position(|e| contains_japanese(&e.content))
-        {
+        } else if let Some(i) = page.size_error.first() {
+            Activity::Error(i + 1)
+        } else if let Some(i) = page.jap_error.first() {
             Activity::Error(i + 1)
         } else {
             Activity::Complete
@@ -296,26 +264,25 @@ impl Consensus {
     }
 
     pub fn save_pages(&mut self, path: PathBuf) -> Task<ConsensusAction> {
-        let tasks = self
-            .pages
-            .iter()
-            .map(|page| {
-                let name = page.path.file_stem().unwrap().to_os_string();
-                let text: String = page
-                    .sections
-                    .iter()
-                    .enumerate()
-                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
-                    .collect();
-                (name, remove_think_tags(&text))
+        let tasks = self.pages.iter().map(|page| {
+            let file_path = path
+                .join(page.path.file_name().unwrap())
+                .with_extension("md");
+
+            let text: String = page
+                .sections
+                .iter()
+                .enumerate()
+                .map(|(i, s)| format!("{}{}\n", part_tag(i + 1), s.content))
+                .collect();
+            let contents = remove_think_tags(&text);
+
+            Task::future(fs::write(file_path, contents)).then(|r| match r {
+                Ok(()) => Task::none(),
+                Err(e) => Task::future(display_error(e)),
             })
-            .map(|(name, contents)| {
-                let file_path = path.join(name).with_extension("md");
-                Task::future(fs::write(file_path, contents)).then(|r| match r {
-                    Ok(_) => Task::none(),
-                    Err(error) => Task::future(display_error(error)),
-                })
-            });
+        });
+
         Task::batch(tasks).discard()
     }
 
@@ -338,18 +305,14 @@ impl Consensus {
     }
 
     fn clean_text(&mut self, page: usize, part: usize) {
-        let Some(current_page) = self.pages.get_mut(page) else {
-            return;
+        if let Some(page) = self.pages.get_mut(page) {
+            if let Some(section) = page.sections.get_mut(part) {
+                section.content = clean_invisible_chars(&section.content)
+            }
         };
-
-        let Some(section) = current_page.sections.get_mut(part) else {
-            return;
-        };
-
-        section.content = clean_invisible_chars(&section.content);
     }
 
-    fn set_canidate(&mut self, i: Option<usize>, name: String, pages: Vec<(PathBuf, String)>) {
+    fn set_candidate(&mut self, i: Option<usize>, name: String, pages: Vec<(PathBuf, String)>) {
         let re = Regex::new(r"<part>\d+</part>").unwrap();
         let pages = pages
             .into_iter()
@@ -370,9 +333,19 @@ impl Consensus {
         };
     }
 
-    fn drop_canidate(&mut self, i: usize) {
+    fn drop_candidate(&mut self, i: usize) {
         self.candidates.remove(i);
     }
+}
+
+pub fn candidates_map(candidates: &Vec<Candidate>, page: usize) -> HashMap<&OsStr, Vec<&[String]>> {
+    let candidates = candidates.iter().map(|e| &e.pages[..page + 1]).flatten();
+
+    candidates.fold(HashMap::new(), |mut acc, (p, e)| {
+        let name = p.file_stem().unwrap();
+        acc.entry(name).or_insert_with(Vec::new).push(e);
+        acc
+    })
 }
 
 impl From<ServerAction> for ConsensusAction {

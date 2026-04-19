@@ -23,7 +23,7 @@ use iced::{
 use iced_aw::{Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
 use std::collections::BTreeMap;
 
-pub fn traslation_view(
+pub fn translation_view(
     models: &BTreeMap<usize, Translation>,
     tab_id: usize,
 ) -> Element<'_, Message> {

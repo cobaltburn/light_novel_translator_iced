@@ -1,17 +1,21 @@
 use crate::{
-    actions::consensus_action::ConsensusAction,
+    actions::{consensus_action::ConsensusAction, server_action::ServerAction},
     controller::part_tag,
-    model::{consensus::Consensus, server::Server},
-    view::{menu_button, rich_text_scrollable},
-    widget::server_widget::{
-        context_window_input, execution_selector, ollama_input, think_selector,
+    model::{
+        consensus::Consensus,
+        server::{Method, Server},
     },
+    view::{menu_button, rich_text_scrollable},
+    widget::server_widget::{ollama_input, think_selector},
 };
 use iced::{
     Border, Color, Element, Length, Padding, Renderer, Theme,
-    alignment::Vertical,
+    alignment::{Horizontal, Vertical},
     color,
-    widget::{Container, button, column, container, row, scrollable, space::vertical, span, text},
+    widget::{
+        Column, Container, button, column, container, lazy, radio, right, row, scrollable,
+        space::vertical, span, stack, text,
+    },
 };
 use iced_aw::{Menu, MenuBar, menu::Item};
 use std::ops::Not;
@@ -37,7 +41,11 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
         vertical(),
         column![
             menu_bar(model),
-            row![side_bar(model), rich_text_scrollable(content)].spacing(10)
+            row![
+                side_bar(model),
+                stack![rich_text_scrollable(content), error_card(model)]
+            ]
+            .spacing(10)
         ]
         .height(Length::FillPortion(9))
         .padding(10),
@@ -48,6 +56,37 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
     .width(Length::Fill)
     .height(Length::Fill)
     .padding(10)
+    .into()
+}
+
+fn error_card(model: &Consensus) -> Element<'_, ConsensusAction> {
+    lazy(
+        (model.current_jap_errors(), model.current_size_errors()),
+        |(jap_errors, size_errors)| {
+            let errors = jap_errors
+                .unwrap_or_default()
+                .iter()
+                .map(|i| format!("japanese error: {:2}", i + 1));
+            let errors = size_errors
+                .unwrap_or_default()
+                .iter()
+                .map(|i| format!("size error: {:2}", i + 1))
+                .chain(errors)
+                .map(|e| {
+                    container(text(e))
+                        .padding(5)
+                        .style(container::primary)
+                        .into()
+                });
+
+            right(
+                Column::with_children(errors)
+                    .spacing(5)
+                    .align_x(Horizontal::Right),
+            )
+            .padding(20)
+        },
+    )
     .into()
 }
 
@@ -110,11 +149,33 @@ fn server_menu(state: &Server) -> Item<'_, ConsensusAction, Theme, Renderer> {
             Item::new(ollama_input().map(Into::into)),
             Item::new(think_selector(state).map(Into::into)),
             Item::new(execution_selector(state).map(Into::into)),
-            Item::new(context_window_input(state).map(Into::into)),
         ])
         .spacing(10)
         .width(400),
     )
+}
+
+pub fn execution_selector(state: &Server) -> Element<'_, ServerAction> {
+    container(
+        row![
+            text("Execution:"),
+            radio(
+                "Chain",
+                Method::Chain,
+                Some(state.method),
+                ServerAction::SetMethod
+            ),
+            radio(
+                "Batch",
+                Method::Batch,
+                Some(state.method),
+                ServerAction::SetMethod
+            ),
+        ]
+        .spacing(10),
+    )
+    .align_left(Length::Fill)
+    .into()
 }
 
 fn epub_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {

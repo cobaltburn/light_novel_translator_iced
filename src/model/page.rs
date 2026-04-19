@@ -1,5 +1,5 @@
 use crate::{actions::contains_japanese, model::Activity};
-use std::{iter, path::PathBuf};
+use std::{ffi::OsStr, iter, path::PathBuf};
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
@@ -31,6 +31,10 @@ impl Page {
         self.sections.iter_mut().for_each(|e| e.content.clear());
         self.jap_error.clear();
         self.size_error.clear();
+    }
+
+    pub fn file_stem(&self) -> Option<&OsStr> {
+        self.path.file_stem()
     }
 
     pub fn check_incomplete(&self) -> bool {

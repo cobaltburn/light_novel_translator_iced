@@ -74,7 +74,6 @@ pub fn rich_text_scrollable<'a, E: 'a>(content: Vec<Span<'a>>) -> Element<'a, E>
             .align_y(Vertical::Center)
             .font(NOTO_SANS),
     )
-    .auto_scroll(true)
     .spacing(5)
     .anchor_top()
     .width(Length::Fill);

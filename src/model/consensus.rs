@@ -41,6 +41,14 @@ impl Consensus {
             .to_string()
     }
 
+    pub fn current_jap_errors(&self) -> Option<&[usize]> {
+        Some(&self.pages.get(self.current_page)?.jap_error)
+    }
+
+    pub fn current_size_errors(&self) -> Option<&[usize]> {
+        Some(&self.pages.get(self.current_page)?.size_error)
+    }
+
     pub fn canidate_items(&self) -> Vec<Item<'_, ConsensusAction, Theme, Renderer>> {
         self.candidates
             .iter()
@@ -126,11 +134,11 @@ fn canidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusActio
     let x_button = i.map(|i| {
         button(text("x").center())
             .style(button::text)
-            .on_press(ConsensusAction::DropCanidate(i))
+            .on_press(ConsensusAction::DropCandidate(i))
     });
 
     row![
-        button(text("canidate").center()).on_press(ConsensusAction::SelectCanidate(i)),
+        button(text("canidate").center()).on_press(ConsensusAction::SelectCandidate(i)),
         container(
             row![text(folder).width(Length::Fill)]
                 .push(x_button)

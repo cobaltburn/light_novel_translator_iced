@@ -277,15 +277,11 @@ impl Translation {
     }
 
     fn clean_text(&mut self, page: usize, part: usize) {
-        let Some(current_page) = self.pages.get_mut(page) else {
-            return;
+        if let Some(page) = self.pages.get_mut(page) {
+            if let Some(section) = page.sections.get_mut(part) {
+                section.content = clean_invisible_chars(&section.content)
+            }
         };
-
-        let Some(section) = current_page.sections.get_mut(part) else {
-            return;
-        };
-
-        section.content = clean_invisible_chars(&section.content);
     }
 }
 
