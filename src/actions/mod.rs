@@ -1,17 +1,16 @@
-use epub::doc::EpubDoc;
-use htmd::HtmlToMarkdown;
-use tokio::fs::{self, read_dir, read_to_string};
-
 use crate::{
     controller::{get_ordered_path, parse::partition_text, xml::strip_data_tags},
     error::Result,
     model::page::Page,
 };
+use epub::doc::EpubDoc;
+use htmd::HtmlToMarkdown;
 use std::{
     ffi::OsStr,
     io::Cursor,
     path::{Path, PathBuf},
 };
+use tokio::fs::{self, read_dir, read_to_string};
 
 pub mod consensus_action;
 pub mod doc_action;
@@ -97,10 +96,6 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
         .filter(|p| !p.sections.is_empty())
         .collect();
 
-    /* let file_name = file_name
-    .file_name()
-    .map(|e| e.to_string_lossy().to_string())
-    .unwrap_or_default(); */
     Ok((file_path, pages))
 }
 

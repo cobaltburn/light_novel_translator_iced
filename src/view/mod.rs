@@ -1,7 +1,6 @@
-use iced::Element;
 use iced::widget::container::transparent;
-use iced::widget::text::Span;
-use iced::widget::{button, container, rich_text, scrollable, text};
+use iced::widget::text::{Span, Wrapping};
+use iced::widget::{button, container, rich_text, scrollable, span, text};
 use iced::{
     Border, Color, Font, Length, Padding,
     alignment::{Horizontal, Vertical},
@@ -10,7 +9,10 @@ use iced::{
         button::{Status, primary},
     },
 };
+use iced::{Element, color};
 use std::fmt;
+
+use crate::controller::part_tag;
 
 pub mod consensus_view;
 pub mod doc_view;
@@ -49,6 +51,7 @@ pub fn text_scrollable<'a, T: fmt::Display, E: 'a>(content: T) -> Container<'a, 
             .width(Length::Fill)
             .align_x(Horizontal::Left)
             .align_y(Vertical::Center)
+            .wrapping(Wrapping::WordOrGlyph)
             .font(NOTO_SANS),
     )
     .anchor_top()
@@ -89,6 +92,13 @@ pub fn rich_text_scrollable<'a, E: 'a>(content: Vec<Span<'a>>) -> Element<'a, E>
         .width(Length::Fill)
         .padding(Padding::new(10.0).right(5))
         .into()
+}
+
+pub fn part_span(i: usize, t: &str) -> [Span<'_>; 2] {
+    [
+        span(format!("{} Count: {}\n\n", part_tag(i + 1), t.len())).color(color!(0xff0000)),
+        span(t),
+    ]
 }
 
 pub fn menu_button<'a, T: 'a>(button_text: &'_ str) -> Button<'_, T> {

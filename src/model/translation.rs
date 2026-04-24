@@ -1,15 +1,15 @@
-use std::path::PathBuf;
-
 use crate::{
     actions::trans_action::TransAction,
     model::{Activity, page::Page, server::Server},
     widget::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
 };
+use async_tempfile::TempFile;
 use iced::{
     Color, Element, Length, Padding,
     widget::{Column, column, container, row, scrollable, text},
 };
 use iced_aw::{ContextMenu, TabLabel};
+use std::path::PathBuf;
 
 #[derive(Default, Debug)]
 pub struct Translation {
@@ -17,6 +17,7 @@ pub struct Translation {
     pub file_path: PathBuf,
     pub current_page: usize,
     pub pages: Vec<Page>,
+    pub recovery_file: Option<TempFile>,
 }
 
 impl Translation {
@@ -35,13 +36,14 @@ impl Translation {
             .to_string()
     }
 
-    pub fn current_content(&self) -> Option<impl Iterator<Item = &String>> {
+    pub fn current_content(&self) -> Option<Vec<&String>> {
         let text = self
             .pages
             .get(self.current_page)?
             .sections
             .iter()
-            .map(|e| &e.content);
+            .map(|e| &e.content)
+            .collect();
 
         Some(text)
     }
@@ -99,6 +101,15 @@ impl From<Server> for Translation {
     fn from(server: Server) -> Self {
         Self {
             server,
+            ..Default::default()
+        }
+    }
+}
+
+impl From<TempFile> for Translation {
+    fn from(file: TempFile) -> Self {
+        Self {
+            recovery_file: Some(file),
             ..Default::default()
         }
     }

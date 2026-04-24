@@ -25,7 +25,8 @@ use std::{
 use tokio::time;
 use tokio_stream::StreamExt;
 
-const MAX_WAIT: Duration = Duration::from_millis(500);
+const MAX_WAIT: Duration = Duration::from_millis(250);
+const CHUNK_SIZE: usize = 25;
 
 #[non_exhaustive]
 #[derive(Debug, Default, Clone)]
@@ -63,29 +64,16 @@ impl Client {
             return Err(Error::ServerError("server disconnected"));
         }
 
-        let task = Task::future(self.stream(request))
-            .then(move |stream| match stream {
-                Ok(stream) => Task::run(stream.chunks_timeout(10, MAX_WAIT), |res| {
-                    res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
-                })
-                .map_err(|_| Error::ServerError("Failed to read stream")),
-                Err(error) => Task::done(Err(error)),
-            })
-            .then(move |response| match response {
-                Ok(msg) => Task::done(TransAction::UpdateContent {
-                    content: msg
-                        .into_iter()
-                        .map_while(|e| (!e.done).then_some(e.message.content))
-                        .collect(),
-                    page,
-                    part,
-                }),
-                Err(error) => Task::done(TransAction::CancelTranslate)
-                    .chain(Task::future(display_error(error)).discard()),
-            })
-            .chain(Task::done(TransAction::CleanText { page, part }));
-
-        Ok(task)
+        Ok(Self::run_chat_task(
+            self.stream(request),
+            move |content| TransAction::UpdateContent {
+                content,
+                page,
+                part,
+            },
+            TransAction::CancelTranslate,
+            TransAction::CleanText { page, part },
+        ))
     }
 
     pub fn translate_history(
@@ -99,29 +87,97 @@ impl Client {
             return Err(Error::ServerError("server disconnected"));
         }
 
-        let task = Task::future(self.stream_history(request, history.clone()))
-            .then(move |stream| match stream {
-                Ok(stream) => Task::run(stream.chunks_timeout(10, MAX_WAIT), |res| {
+        Ok(Self::run_chat_task(
+            self.stream_history(request, history),
+            move |content| TransAction::UpdateContent {
+                content,
+                page,
+                part,
+            },
+            TransAction::CancelTranslate,
+            TransAction::CleanText { page, part },
+        ))
+    }
+
+    pub fn consensus(
+        self,
+        request: ChatMessageRequest,
+        page: usize,
+        part: usize,
+    ) -> Result<Task<ConsensusAction>> {
+        if let Client::Disconnected = self {
+            return Err(Error::ServerError("server disconnected"));
+        }
+
+        Ok(Self::run_chat_task(
+            self.stream(request),
+            move |content| ConsensusAction::UpdateContent {
+                content,
+                page,
+                part,
+            },
+            ConsensusAction::CancelConsensus,
+            ConsensusAction::CleanText { page, part },
+        ))
+    }
+
+    pub fn consensus_history(
+        self,
+        request: ChatMessageRequest,
+        history: Arc<Mutex<Vec<ChatMessage>>>,
+        page: usize,
+        part: usize,
+    ) -> Result<Task<ConsensusAction>> {
+        if let Client::Disconnected = self {
+            return Err(Error::ServerError("server disconnected"));
+        }
+
+        Ok(Self::run_chat_task(
+            self.stream_history(request, history),
+            move |content| ConsensusAction::UpdateContent {
+                content,
+                page,
+                part,
+            },
+            ConsensusAction::CancelConsensus,
+            ConsensusAction::CleanText { page, part },
+        ))
+    }
+
+    fn run_chat_task<A>(
+        stream_future: impl Future<Output = Result<ChatMessageResponseStream>> + Send + 'static,
+        mut on_content: impl FnMut(String) -> A + Send + 'static,
+        cancel: A,
+        clean: A,
+    ) -> Task<A>
+    where
+        A: Send + Clone + 'static,
+    {
+        Task::future(stream_future)
+            .then(|stream| match stream {
+                Ok(stream) => Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |res| {
                     res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
                 })
                 .map_err(|_| Error::ServerError("Failed to read stream")),
                 Err(error) => Task::done(Err(error)),
             })
             .then(move |response| match response {
-                Ok(msg) => Task::done(TransAction::UpdateContent {
-                    content: msg
+                Ok(msg) => {
+                    let content: String = msg
                         .into_iter()
                         .map_while(|e| (!e.done).then_some(e.message.content))
-                        .collect(),
-                    page,
-                    part,
-                }),
-                Err(error) => Task::done(TransAction::CancelTranslate)
-                    .chain(Task::future(display_error(error)).discard()),
+                        .collect();
+                    if content.is_empty() {
+                        Task::none()
+                    } else {
+                        Task::done(on_content(content))
+                    }
+                }
+                Err(error) => {
+                    Task::done(cancel.clone()).chain(Task::future(display_error(error)).discard())
+                }
             })
-            .chain(Task::done(TransAction::CleanText { page, part }));
-
-        Ok(task)
+            .chain(Task::done(clean))
     }
 
     async fn stream(self, request: ChatMessageRequest) -> Result<ChatMessageResponseStream> {
@@ -159,79 +215,6 @@ impl Client {
             .await?;
 
         Ok(stream)
-    }
-}
-
-impl Client {
-    pub fn consensus(
-        self,
-        request: ChatMessageRequest,
-        page: usize,
-        part: usize,
-    ) -> Result<Task<ConsensusAction>> {
-        if let Client::Disconnected = self {
-            return Err(Error::ServerError("server disconnected"));
-        }
-
-        let task = Task::future(self.stream(request))
-            .then(move |stream| match stream {
-                Ok(stream) => Task::run(stream.chunks_timeout(10, MAX_WAIT), |res| {
-                    res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
-                })
-                .map_err(|_| Error::ServerError("Failed to read stream")),
-                Err(error) => Task::done(Err(error)),
-            })
-            .then(move |response| match response {
-                Ok(msg) => Task::done(ConsensusAction::UpdateContent {
-                    content: msg
-                        .into_iter()
-                        .map_while(|e| (!e.done).then_some(e.message.content))
-                        .collect(),
-                    page,
-                    part,
-                }),
-                Err(error) => Task::done(ConsensusAction::CancelConsensus)
-                    .chain(Task::future(display_error(error)).discard()),
-            })
-            .chain(Task::done(ConsensusAction::CleanText { page, part }));
-
-        Ok(task)
-    }
-
-    pub fn consensus_history(
-        self,
-        request: ChatMessageRequest,
-        history: Arc<Mutex<Vec<ChatMessage>>>,
-        page: usize,
-        part: usize,
-    ) -> Result<Task<ConsensusAction>> {
-        if let Client::Disconnected = self {
-            return Err(Error::ServerError("server disconnected"));
-        }
-
-        let task = Task::future(self.stream_history(request, history.clone()))
-            .then(move |stream| match stream {
-                Ok(stream) => Task::run(stream.chunks_timeout(10, MAX_WAIT), |res| {
-                    res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
-                })
-                .map_err(|_| Error::ServerError("Failed to read stream")),
-                Err(error) => Task::done(Err(error)),
-            })
-            .then(move |response| match response {
-                Ok(msg) => Task::done(ConsensusAction::UpdateContent {
-                    content: msg
-                        .into_iter()
-                        .map_while(|e| (!e.done).then_some(e.message.content))
-                        .collect(),
-                    page,
-                    part,
-                }),
-                Err(error) => Task::done(ConsensusAction::CancelConsensus)
-                    .chain(Task::future(display_error(error)).discard()),
-            })
-            .chain(Task::done(ConsensusAction::CleanText { page, part }));
-
-        Ok(task)
     }
 }
 

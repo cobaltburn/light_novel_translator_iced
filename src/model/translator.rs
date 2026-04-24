@@ -2,7 +2,7 @@ use crate::{
     actions::trans_action::TransAction,
     message::Message,
     model::{
-        consensus::Consensus, doc::Doc, extraction::Extraction, format::Format, server::Server,
+        consensus::Consensus, doc::Doc, extraction::Extraction, format::Format,
         translation::Translation,
     },
     view::View,
@@ -55,17 +55,8 @@ impl Translator {
         if let Some(key) = self.translations.keys().max() {
             let key = key + 1;
             let server = &self.translations.get(&self.active_tab).unwrap().server;
-            self.translations.insert(
-                key,
-                Translation::from(Server {
-                    client: server.client.clone(),
-                    models: server.models.clone(),
-                    current_model: server.current_model.clone(),
-                    settings: server.settings.clone(),
-                    method: server.method.clone(),
-                    handles: Vec::new(),
-                }),
-            );
+            self.translations
+                .insert(key, Translation::from(server.copy()));
             self.active_tab = key
         }
     }

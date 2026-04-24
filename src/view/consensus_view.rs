@@ -5,7 +5,7 @@ use crate::{
         consensus::Consensus,
         server::{Method, Server},
     },
-    view::{menu_button, rich_text_scrollable},
+    view::{menu_button, part_span, rich_text_scrollable},
     widget::server_widget::{ollama_input, think_selector},
 };
 use iced::{
@@ -23,32 +23,23 @@ use std::ops::Not;
 pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
     let content = model
         .current_content()
-        .map(|e| {
-            e.into_iter()
-                .enumerate()
-                .flat_map(|(i, t)| {
-                    [
-                        span(format!("{} Count: {}\n\n", part_tag(i + 1), t.len()))
-                            .color(color!(0xff0000)),
-                        span(t),
-                    ]
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .flat_map(|(i, t)| part_span(i, t))
+        .collect();
+
+    let body: Element<'_, _> = if model.server.handles.is_empty() {
+        stack![rich_text_scrollable(content), error_card(model)].into()
+    } else {
+        rich_text_scrollable(content).into()
+    };
 
     container(column![
         vertical(),
-        column![
-            menu_bar(model),
-            row![
-                side_bar(model),
-                stack![rich_text_scrollable(content), error_card(model)]
-            ]
-            .spacing(10)
-        ]
-        .height(Length::FillPortion(9))
-        .padding(10),
+        column![menu_bar(model), row![side_bar(model), body].spacing(10)]
+            .height(Length::FillPortion(9))
+            .padding(10),
         vertical(),
     ])
     .center_x(Length::Fill)
@@ -60,34 +51,23 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
 }
 
 fn error_card(model: &Consensus) -> Element<'_, ConsensusAction> {
-    lazy(
-        (model.current_jap_errors(), model.current_size_errors()),
-        |(jap_errors, size_errors)| {
-            let errors = jap_errors
-                .unwrap_or_default()
-                .iter()
-                .map(|i| format!("japanese error: {:2}", i + 1));
-            let errors = size_errors
-                .unwrap_or_default()
-                .iter()
-                .map(|i| format!("size error: {:2}", i + 1))
-                .chain(errors)
-                .map(|e| {
-                    container(text(e))
-                        .padding(5)
-                        .style(container::primary)
-                        .into()
-                });
+    let jap_errors = model.current_jap_errors();
+    let size_errors = model.current_size_errors();
+    let errors = jap_errors
+        .unwrap_or_default()
+        .iter()
+        .map(|i| text!("Japanese error: {:2}", i + 1));
+    let errors = size_errors
+        .unwrap_or_default()
+        .iter()
+        .map(|i| text!("Size error: {:2}", i + 1))
+        .chain(errors)
+        .map(|e| container(e).padding(5).style(container::primary).into())
+        .collect::<Column<_>>();
 
-            right(
-                Column::with_children(errors)
-                    .spacing(5)
-                    .align_x(Horizontal::Right),
-            )
-            .padding(20)
-        },
-    )
-    .into()
+    right(errors.spacing(5).align_x(Horizontal::Right))
+        .padding(20)
+        .into()
 }
 
 fn side_bar(model: &Consensus) -> Container<'_, ConsensusAction> {
@@ -111,7 +91,7 @@ fn menu_bar(model @ Consensus { server, .. }: &Consensus) -> Element<'_, Consens
     row![
         MenuBar::new(vec![
             epub_menu(model),
-            canidate_menu(model),
+            candidate_menu(model),
             server_menu(server)
         ])
         .spacing(5),
@@ -219,9 +199,9 @@ fn epub_select(model: &Consensus) -> Element<'_, ConsensusAction> {
     .into()
 }
 
-fn canidate_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {
+fn candidate_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {
     Item::with_menu(
-        menu_button("candiate"),
+        menu_button("candidate"),
         Menu::new(model.canidate_items())
             .spacing(10)
             .width(400)

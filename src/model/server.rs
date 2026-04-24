@@ -7,9 +7,12 @@ use crate::{
     model::page::{Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
-use ollama_rs::generation::{
-    chat::{ChatMessage, request::ChatMessageRequest},
-    parameters::ThinkType,
+use ollama_rs::{
+    generation::{
+        chat::{ChatMessage, request::ChatMessageRequest},
+        parameters::ThinkType,
+    },
+    models::ModelOptions,
 };
 use quick_xml::{Writer, events::BytesText};
 use std::{
@@ -19,6 +22,8 @@ use std::{
     iter,
     sync::{Arc, Mutex},
 };
+
+const REPEAT_PENALTY: f32 = 1.5;
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -67,6 +72,7 @@ impl Server {
                             ChatMessage::user(section.japanese.clone()),
                         ],
                     )
+                    .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
                     .think(self.settings.think),
                     page,
                     part,
@@ -115,6 +121,7 @@ impl Server {
                         model.to_string(),
                         vec![ChatMessage::user(section.japanese.clone())],
                     )
+                    .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
                     .think(self.settings.think),
                     history.clone(),
                     page,
@@ -206,6 +213,11 @@ impl Server {
                         ChatMessage::system(CONSENSUS_PROMPT.to_string()),
                         ChatMessage::user(prompt),
                     ],
+                )
+                .options(
+                    ModelOptions::default()
+                        .repeat_penalty(REPEAT_PENALTY)
+                        .num_predict(6000),
                 )
                 .think(self.settings.think);
                 self.client.clone().consensus(request, page, part)
@@ -303,6 +315,17 @@ impl Server {
         let (task, handle) = task.abortable();
         self.handles.push(handle.abort_on_drop());
         task
+    }
+
+    pub fn copy(&self) -> Self {
+        Self {
+            client: self.client.clone(),
+            models: self.models.clone(),
+            current_model: self.current_model.clone(),
+            settings: self.settings.clone(),
+            method: self.method.clone(),
+            handles: Vec::new(),
+        }
     }
 }
 

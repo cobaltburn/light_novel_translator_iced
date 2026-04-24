@@ -4,6 +4,7 @@ use std::{io::Cursor, path::PathBuf};
 pub mod builder;
 pub mod client;
 pub mod parse;
+pub mod recovery;
 pub mod xml;
 
 pub fn get_ordered_path(epub: &EpubDoc<Cursor<Vec<u8>>>) -> Vec<PathBuf> {

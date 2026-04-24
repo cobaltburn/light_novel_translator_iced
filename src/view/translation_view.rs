@@ -1,9 +1,8 @@
 use crate::{
     actions::trans_action::TransAction,
-    controller::part_tag,
     message::Message,
     model::{server::Server, translation::Translation},
-    view::{menu_button, rich_text_scrollable},
+    view::{menu_button, part_span, rich_text_scrollable},
     widget::server_widget::{
         context_window_input, execution_selector, ollama_input, think_selector,
     },
@@ -11,14 +10,13 @@ use crate::{
 use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::{Horizontal, Vertical},
-    color,
     widget::{
-        Button, Column, Container, Row, container::transparent, lazy, right, space::vertical, stack,
+        Button, Column, Container, Row, container::transparent, right, space::vertical, stack,
     },
 };
 use iced::{
     border::Radius,
-    widget::{button, column, container, row, scrollable, span, text},
+    widget::{button, column, container, row, scrollable, text},
 };
 use iced_aw::{Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
 use std::collections::BTreeMap;
@@ -76,31 +74,23 @@ fn new_tab_button(_model: &Translation) -> Element<'_, Message> {
 fn tab(model: &Translation) -> Element<'_, TransAction> {
     let content = model
         .current_content()
-        .map(|e| {
-            e.enumerate()
-                .flat_map(|(i, t)| {
-                    [
-                        span(format!("{} Count: {}\n\n", part_tag(i + 1), t.len()))
-                            .color(color!(0xff0000)),
-                        span(t),
-                    ]
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .flat_map(|(i, t)| part_span(i, t))
+        .collect();
+
+    let body: Element<'_, _> = if model.server.handles.is_empty() {
+        stack![rich_text_scrollable(content), error_card(model)].into()
+    } else {
+        rich_text_scrollable(content).into()
+    };
 
     container(column![
         vertical(),
-        column![
-            menu_bar(model),
-            row![
-                side_bar(model),
-                stack![rich_text_scrollable(content), error_card(model)]
-            ]
-            .spacing(10)
-        ]
-        .height(Length::FillPortion(9))
-        .padding(10),
+        column![menu_bar(model), row![side_bar(model), body].spacing(10)]
+            .height(Length::FillPortion(9))
+            .padding(10),
         vertical(),
     ])
     .center_x(Length::Fill)
@@ -112,34 +102,23 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
 }
 
 fn error_card(model: &Translation) -> Element<'_, TransAction> {
-    lazy(
-        (model.current_jap_errors(), model.current_size_errors()),
-        |(jap_errors, size_errors)| {
-            let errors = jap_errors
-                .unwrap_or_default()
-                .iter()
-                .map(|i| format!("japanese error: {:2}", i + 1));
-            let errors = size_errors
-                .unwrap_or_default()
-                .iter()
-                .map(|i| format!("size error: {:2}", i + 1))
-                .chain(errors)
-                .map(|e| {
-                    container(text(e))
-                        .padding(5)
-                        .style(container::primary)
-                        .into()
-                });
+    let jap_errors = model.current_jap_errors();
+    let size_errors = model.current_size_errors();
+    let errors = jap_errors
+        .into_iter()
+        .flatten()
+        .map(|i| text!("Japanese error: {:2}", i + 1));
+    let errors = size_errors
+        .into_iter()
+        .flatten()
+        .map(|i| text!("Size error: {:2}", i + 1))
+        .chain(errors)
+        .map(|e| container(e).padding(5).style(container::primary).into())
+        .collect::<Column<_>>();
 
-            right(
-                Column::with_children(errors)
-                    .spacing(5)
-                    .align_x(Horizontal::Right),
-            )
-            .padding(20)
-        },
-    )
-    .into()
+    right(errors.spacing(5).align_x(Horizontal::Right))
+        .padding(20)
+        .into()
 }
 
 fn side_bar(model: &Translation) -> Container<'_, TransAction> {

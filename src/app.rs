@@ -9,26 +9,27 @@ use crate::{
     widget::side_bar::side_bar_container,
 };
 use iced::{
-    Element, Length, Theme,
+    Element, Length, Task, Theme,
     alignment::Horizontal,
     widget::{column, container, row},
 };
 use iced_aw::ICED_AW_FONT_BYTES;
-use std::{cell::LazyCell, path::PathBuf};
+use std::{cell::LazyCell, fs, path::PathBuf};
 
 pub const ICONS: LazyCell<PathBuf> = LazyCell::new(|| {
-    let mut path = std::env::current_exe()
+    std::env::current_exe()
         .expect("Failed to get executable path")
         .parent()
         .expect("Failed to get parent directory")
-        .to_path_buf();
-
-    path.push("icons");
-    path
+        .to_path_buf()
+        .join("icons")
 });
 
+pub const RECOVERY_DIR: LazyCell<PathBuf> =
+    LazyCell::new(|| std::env::temp_dir().join("light_novel_translator"));
+
 pub fn app() -> Result<()> {
-    iced::application(Translator::default, Translator::update, Translator::view)
+    iced::application(Translator::new, Translator::update, Translator::view)
         .title("light novel translator")
         .theme(Theme::TokyoNightStorm)
         .font(ICED_AW_FONT_BYTES)
@@ -37,10 +38,26 @@ pub fn app() -> Result<()> {
 }
 
 impl Translator {
+    fn new() -> (Self, Task<Message>) {
+        fs::create_dir_all(&*RECOVERY_DIR).expect("Unable to create temp directory");
+        let read_dir = fs::read_dir(&*RECOVERY_DIR).unwrap();
+        let files: Vec<_> = read_dir
+            .flatten()
+            .filter_map(|e| e.file_type().ok()?.is_file().then_some(e.path()))
+            .collect();
+
+        (
+            Translator {
+                ..Default::default()
+            },
+            Task::none(),
+        )
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         container(row![
             side_bar_container(self),
-            column![Self::view_select(&self)]
+            column![self.view_select()]
                 .width(Length::Fill)
                 .align_x(Horizontal::Center),
         ])

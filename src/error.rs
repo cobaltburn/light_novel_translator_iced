@@ -51,4 +51,7 @@ pub enum Error {
 
     #[error(transparent)]
     IcedError(#[from] iced::Error),
+
+    #[error(transparent)]
+    SerdeError(#[from] serde_json::Error),
 }

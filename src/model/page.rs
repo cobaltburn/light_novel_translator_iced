@@ -1,8 +1,10 @@
-use crate::{actions::contains_japanese, model::Activity};
+use serde::{Deserialize, Serialize};
+
+use crate::{actions::contains_japanese, controller::recovery::RecoveryPage, model::Activity};
 use std::{ffi::OsStr, iter, path::PathBuf};
 
 #[non_exhaustive]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Page {
     pub path: PathBuf,
     pub sections: Vec<Section>,
@@ -83,7 +85,17 @@ impl Page {
     }
 }
 
-#[derive(Debug, Clone)]
+impl From<RecoveryPage> for Page {
+    fn from(RecoveryPage { path, sections }: RecoveryPage) -> Self {
+        Self {
+            path,
+            sections,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Section {
     pub japanese: String,
     pub content: String,
