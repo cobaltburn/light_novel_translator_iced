@@ -80,17 +80,18 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
         .flat_map(|(i, t)| part_span(i, t))
         .collect();
 
-    let body: Element<'_, _> = if model.server.handles.is_empty() {
-        stack![rich_text_scrollable(content), error_card(model)].into()
-    } else {
-        rich_text_scrollable(content).into()
-    };
-
     container(column![
         vertical(),
-        column![menu_bar(model), row![side_bar(model), body].spacing(10)]
-            .height(Length::FillPortion(9))
-            .padding(10),
+        column![
+            menu_bar(model),
+            row![
+                side_bar(model),
+                stack![rich_text_scrollable(content), error_card(model)]
+            ]
+            .spacing(10)
+        ]
+        .height(Length::FillPortion(9))
+        .padding(10),
         vertical(),
     ])
     .center_x(Length::Fill)
@@ -145,7 +146,7 @@ fn menu_bar(
     }: &Translation,
 ) -> Row<'_, TransAction> {
     row![
-        MenuBar::new(vec![epub_menu(model), server_menu(server_state),]).spacing(5),
+        MenuBar::new(vec![epub_menu(model), server_menu(server_state)]).spacing(5),
         translate_button(model),
         server_state.model_pick_list().map(Into::into),
     ]

@@ -1,14 +1,13 @@
+use crate::{
+    actions::server_action::ServerAction,
+    model::server::{Method, Server, Think},
+};
 use iced::{
     Element, Length, Padding,
     alignment::Vertical,
     widget::{button, container, radio, row, text},
 };
 use iced_aw::NumberInput;
-
-use crate::{
-    actions::server_action::ServerAction,
-    model::server::{Method, Server, Think},
-};
 
 pub fn ollama_input() -> Element<'static, ServerAction> {
     container(
@@ -25,67 +24,33 @@ pub fn ollama_input() -> Element<'static, ServerAction> {
 }
 
 pub fn think_selector(state: &Server) -> Element<'_, ServerAction> {
-    container(
-        row![
-            text("Think:"),
-            radio(
-                "None",
-                Think::None,
-                Some(state.settings.think),
-                ServerAction::SetThink
-            ),
-            radio(
-                "Low",
-                Think::Low,
-                Some(state.settings.think),
-                ServerAction::SetThink
-            ),
-            radio(
-                "Medium",
-                Think::Medium,
-                Some(state.settings.think),
-                ServerAction::SetThink
-            ),
-            radio(
-                "High",
-                Think::High,
-                Some(state.settings.think),
-                ServerAction::SetThink
-            ),
-        ]
-        .spacing(10),
-    )
-    .align_left(Length::Fill)
-    .into()
+    let selection = [
+        ("None", Think::None),
+        ("Low", Think::Low),
+        ("Medium", Think::Medium),
+        ("High", Think::High),
+    ];
+    let radio_buttons = selection
+        .into_iter()
+        .map(|(l, t)| radio(l, t, Some(state.settings.think), ServerAction::SetThink).into());
+    container(row![text("Think:")].extend(radio_buttons).spacing(10))
+        .align_left(Length::Fill)
+        .into()
 }
 
 pub fn execution_selector(state: &Server) -> Element<'_, ServerAction> {
-    container(
-        row![
-            text("Execution:"),
-            radio(
-                "Chain",
-                Method::Chain,
-                Some(state.method),
-                ServerAction::SetMethod
-            ),
-            radio(
-                "Batch",
-                Method::Batch,
-                Some(state.method),
-                ServerAction::SetMethod
-            ),
-            radio(
-                "History",
-                Method::History,
-                Some(state.method),
-                ServerAction::SetMethod
-            ),
-        ]
-        .spacing(10),
-    )
-    .align_left(Length::Fill)
-    .into()
+    let selection = [
+        ("Chain", Method::Chain),
+        ("Batch", Method::Batch),
+        ("History", Method::History),
+    ];
+    let radio_buttons = selection
+        .into_iter()
+        .map(|(l, t)| radio(l, t, Some(state.method), ServerAction::SetMethod).into());
+
+    container(row![text("Execution:")].extend(radio_buttons).spacing(10))
+        .align_left(Length::Fill)
+        .into()
 }
 
 pub fn context_window_input(state: &Server) -> Element<'_, ServerAction> {

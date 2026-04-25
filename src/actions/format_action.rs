@@ -17,9 +17,15 @@ use std::{
 #[derive(Debug, Clone)]
 pub enum FormatAction {
     SelectFolder,
-    SetPages(String, Vec<(PathBuf, String)>),
+    SetPages {
+        name: String,
+        pages: Vec<(PathBuf, String)>,
+    },
     SelectEpub,
-    SetEpub((PathBuf, Vec<u8>)),
+    SetEpub {
+        path: PathBuf,
+        buffer: Vec<u8>,
+    },
     SetTitle(String),
     SetAuthors(String),
     Build,
@@ -30,17 +36,20 @@ impl Format {
         match action {
             FormatAction::SetTitle(title) => (self.metadata.title = title).into(),
             FormatAction::SetAuthors(authors) => (self.metadata.authors = authors).into(),
-            FormatAction::SetPages(folder, pages) => self.set_pages(folder, pages).into(),
-            FormatAction::SelectEpub => Task::future(select_epub())
-                .and_then(|doc| Task::done(FormatAction::SetEpub(doc).into())),
+            FormatAction::SetPages { name, pages } => self.set_pages(name, pages).into(),
+            FormatAction::SelectEpub => Task::future(select_epub()).and_then(|(path, buffer)| {
+                Task::done(FormatAction::SetEpub { path, buffer }.into())
+            }),
             FormatAction::SelectFolder => Task::future(select_format_folder(
                 self.epub_path.parent().unwrap_or(Path::new("")).into(),
             ))
-            .and_then(|(f, p)| Task::done(FormatAction::SetPages(f, p).into())),
-            FormatAction::SetEpub(doc) => Task::done(self.set_epub(doc)).then(|r| match r {
-                Ok(_) => Task::none(),
-                Err(error) => Task::future(display_error(error)).discard(),
-            }),
+            .and_then(|(name, pages)| Task::done(FormatAction::SetPages { name, pages }.into())),
+            FormatAction::SetEpub { path, buffer } => {
+                Task::done(self.set_epub(path, buffer)).then(|r| match r {
+                    Ok(_) => Task::none(),
+                    Err(error) => Task::future(display_error(error)).discard(),
+                })
+            }
             FormatAction::Build => Task::done(self.get_build_content())
                 .then(|builder| match builder {
                     Ok(builder) => Task::done(builder.build()),
@@ -58,12 +67,12 @@ impl Format {
         }
     }
 
-    fn set_pages(&mut self, folder: String, pages: Vec<(PathBuf, String)>) {
+    fn set_pages(&mut self, name: String, pages: Vec<(PathBuf, String)>) {
         self.pages = pages.into_iter().map(|e| FormatPage::from(e)).collect();
-        self.source_folder = folder;
+        self.source_folder = name;
     }
 
-    fn set_epub(&mut self, (name, buffer): (PathBuf, Vec<u8>)) -> Result<()> {
+    fn set_epub(&mut self, path: PathBuf, buffer: Vec<u8>) -> Result<()> {
         let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
         let cover = epub.get_cover().map(|e| Handle::from_bytes(e.0));
         let authors = epub
@@ -73,14 +82,14 @@ impl Format {
             .map(|e| e.value.to_owned())
             .unwrap_or_default();
 
-        let title = name
+        let title = path
             .file_stem()
             .map(|e| e.to_string_lossy().to_string())
             .unwrap_or_default();
 
         self.metadata.title = title;
         self.metadata.authors = authors;
-        self.epub_path = name;
+        self.epub_path = path;
         self.epub = Some(epub);
         self.cover = cover;
 

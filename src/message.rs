@@ -1,10 +1,12 @@
-use crate::actions::consensus_action::ConsensusAction;
-use crate::actions::extraction_action::ExtractAction;
-use crate::actions::{
-    doc_action::DocAction, format_action::FormatAction, trans_action::TransAction,
+use crate::{
+    actions::{
+        consensus_action::ConsensusAction, doc_action::DocAction, extraction_action::ExtractAction,
+        format_action::FormatAction, trans_action::TransAction,
+    },
+    error::Error,
+    model::translator::Translator,
+    view::View,
 };
-use crate::controller::recovery::recover_files;
-use crate::{error::Error, model::translator::Translator, view::View};
 use iced::Task;
 use std::path::PathBuf;
 
@@ -17,7 +19,6 @@ pub enum Message {
     ExtractAction(ExtractAction),
     ConsensusAction(ConsensusAction),
     SetView(View),
-    RecoveryCheck(Vec<PathBuf>),
     ToggleSideBar,
     SelectTab(usize),
     CloseTab(usize),
@@ -39,9 +40,6 @@ impl Translator {
             Message::CloseTab(tab) => self.close_tab(tab).into(),
             Message::AddTab => self.add_tab().into(),
             Message::Log(message) => log::info!("test message: {}", message).into(),
-            Message::RecoveryCheck(files) => {
-                Task::future(recover_files(files)).then(|_| Task::none())
-            }
         }
     }
 }

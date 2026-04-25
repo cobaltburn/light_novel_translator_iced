@@ -1,6 +1,5 @@
 use crate::{
     actions::{consensus_action::ConsensusAction, server_action::ServerAction},
-    controller::part_tag,
     model::{
         consensus::Consensus,
         server::{Method, Server},
@@ -11,10 +10,9 @@ use crate::{
 use iced::{
     Border, Color, Element, Length, Padding, Renderer, Theme,
     alignment::{Horizontal, Vertical},
-    color,
     widget::{
-        Column, Container, button, column, container, lazy, radio, right, row, scrollable,
-        space::vertical, span, stack, text,
+        Column, Container, button, column, container, radio, right, row, scrollable,
+        space::vertical, stack, text,
     },
 };
 use iced_aw::{Menu, MenuBar, menu::Item};
@@ -29,17 +27,18 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
         .flat_map(|(i, t)| part_span(i, t))
         .collect();
 
-    let body: Element<'_, _> = if model.server.handles.is_empty() {
-        stack![rich_text_scrollable(content), error_card(model)].into()
-    } else {
-        rich_text_scrollable(content).into()
-    };
-
     container(column![
         vertical(),
-        column![menu_bar(model), row![side_bar(model), body].spacing(10)]
-            .height(Length::FillPortion(9))
-            .padding(10),
+        column![
+            menu_bar(model),
+            row![
+                side_bar(model),
+                stack![rich_text_scrollable(content), error_card(model)]
+            ]
+            .spacing(10)
+        ]
+        .height(Length::FillPortion(9))
+        .padding(10),
         vertical(),
     ])
     .center_x(Length::Fill)

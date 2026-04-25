@@ -78,7 +78,7 @@ impl Server {
                     part,
                 )
             })
-            .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
+            .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
             .collect();
 
         Ok(self.method.join_tasks(tasks?))
@@ -124,11 +124,12 @@ impl Server {
                     .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
                     .think(self.settings.think),
                     history.clone(),
+                    self.settings.context_window,
                     page,
                     part,
                 )
             })
-            .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
+            .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
             .collect();
 
         Ok(self.method.join_tasks(tasks?))
@@ -153,7 +154,9 @@ impl Server {
             ],
         };
 
-        let request = ChatMessageRequest::new(model, messages).think(self.settings.think);
+        let request = ChatMessageRequest::new(model, messages)
+            .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
+            .think(self.settings.think);
 
         let task = match self.method {
             Method::History => {
@@ -178,12 +181,18 @@ impl Server {
                         .chain(pairs.into_iter().skip(skip).flatten())
                         .collect();
 
-                client.translate_history(request, Arc::new(Mutex::new(history)), page, part)?
+                client.translate_history(
+                    request,
+                    Arc::new(Mutex::new(history)),
+                    self.settings.context_window,
+                    page,
+                    part,
+                )?
             }
             _ => client.translate(request, page, part)?,
         };
 
-        Ok(add_handle(&mut self.handles, task))
+        Ok(Self::add_handle(&mut self.handles, task))
     }
 }
 
@@ -214,15 +223,11 @@ impl Server {
                         ChatMessage::user(prompt),
                     ],
                 )
-                .options(
-                    ModelOptions::default()
-                        .repeat_penalty(REPEAT_PENALTY)
-                        .num_predict(6000),
-                )
+                .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
                 .think(self.settings.think);
                 self.client.clone().consensus(request, page, part)
             })
-            .map(|task| task.map(|task| add_handle(&mut self.handles, task)))
+            .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
             .collect();
 
         Ok(self.method.join_tasks(tasks?))
@@ -252,12 +257,13 @@ impl Server {
                     ChatMessage::user(prompt),
                 ],
             )
+            .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
             .think(self.settings.think),
             page,
             part,
         )?;
 
-        Ok(add_handle(&mut self.handles, task))
+        Ok(Self::add_handle(&mut self.handles, task))
     }
 }
 
@@ -291,12 +297,6 @@ pub fn consensus_prompt(section: &str, candidates: &[&String]) -> Result<String>
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-pub fn add_handle<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
-    let (task, handle) = task.abortable();
-    handles.push(handle.abort_on_drop());
-    task
-}
-
 impl Server {
     pub fn model_pick_list(&self) -> Element<'_, ServerAction> {
         pick_list(
@@ -314,6 +314,12 @@ impl Server {
     {
         let (task, handle) = task.abortable();
         self.handles.push(handle.abort_on_drop());
+        task
+    }
+
+    pub fn add_handle<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
+        let (task, handle) = task.abortable();
+        handles.push(handle.abort_on_drop());
         task
     }
 

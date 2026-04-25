@@ -18,6 +18,7 @@ use ollama_rs::{
     },
 };
 use std::{
+    iter,
     ops::Not,
     sync::{Arc, Mutex},
     time::Duration,
@@ -42,16 +43,15 @@ impl Client {
     }
 
     pub async fn get_models(self) -> Result<Vec<String>> {
-        let model = match self {
+        match self {
             Client::Ollama(client) => {
                 let models = client.list_local_models().await?;
-                models.into_iter().map(|model| model.name).collect()
+                let mut models: Vec<_> = models.into_iter().map(|model| model.name).collect();
+                models.sort();
+                Ok(models)
             }
-            Client::Disconnected => {
-                return Err(Error::ServerError("server not connected"));
-            }
-        };
-        Ok(model)
+            Client::Disconnected => Err(Error::ServerError("server not connected")),
+        }
     }
 
     pub fn translate(
@@ -72,14 +72,15 @@ impl Client {
                 part,
             },
             TransAction::CancelTranslate,
-            TransAction::CleanText { page, part },
-        ))
+        )
+        .chain(Task::done(TransAction::CleanText { page, part })))
     }
 
     pub fn translate_history(
         self,
         request: ChatMessageRequest,
         history: Arc<Mutex<Vec<ChatMessage>>>,
+        context_window: usize,
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
@@ -88,15 +89,18 @@ impl Client {
         }
 
         Ok(Self::run_chat_task(
-            self.stream_history(request, history),
+            self.stream_history(request, history.clone()),
             move |content| TransAction::UpdateContent {
                 content,
                 page,
                 part,
             },
             TransAction::CancelTranslate,
-            TransAction::CleanText { page, part },
-        ))
+        )
+        .chain(Task::future(async move {
+            Self::shift_history(history, context_window, TRANSLATION_PROMPT);
+            TransAction::CleanText { page, part }
+        })))
     }
 
     pub fn consensus(
@@ -117,14 +121,15 @@ impl Client {
                 part,
             },
             ConsensusAction::CancelConsensus,
-            ConsensusAction::CleanText { page, part },
-        ))
+        )
+        .chain(Task::done(ConsensusAction::CleanText { page, part })))
     }
 
     pub fn consensus_history(
         self,
         request: ChatMessageRequest,
         history: Arc<Mutex<Vec<ChatMessage>>>,
+        context_window: usize,
         page: usize,
         part: usize,
     ) -> Result<Task<ConsensusAction>> {
@@ -133,22 +138,24 @@ impl Client {
         }
 
         Ok(Self::run_chat_task(
-            self.stream_history(request, history),
+            self.stream_history(request, history.clone()),
             move |content| ConsensusAction::UpdateContent {
                 content,
                 page,
                 part,
             },
             ConsensusAction::CancelConsensus,
-            ConsensusAction::CleanText { page, part },
-        ))
+        )
+        .chain(Task::future(async move {
+            Self::shift_history(history, context_window, CONSENSUS_PROMPT);
+            ConsensusAction::CleanText { page, part }
+        })))
     }
 
     fn run_chat_task<A>(
         stream_future: impl Future<Output = Result<ChatMessageResponseStream>> + Send + 'static,
         mut on_content: impl FnMut(String) -> A + Send + 'static,
         cancel: A,
-        clean: A,
     ) -> Task<A>
     where
         A: Send + Clone + 'static,
@@ -177,7 +184,26 @@ impl Client {
                     Task::done(cancel.clone()).chain(Task::future(display_error(error)).discard())
                 }
             })
-            .chain(Task::done(clean))
+    }
+
+    fn shift_history(
+        history: Arc<Mutex<Vec<ChatMessage>>>,
+        context_window: usize,
+        system_prompt: &str,
+    ) {
+        let mut history = history.lock().unwrap();
+        let context_window = context_window * 2;
+
+        if history.len() < context_window {
+            return;
+        }
+
+        let skip = history.len().saturating_sub(context_window);
+
+        let window = history[1..].chunks(2).skip(skip).flatten().cloned();
+        *history = iter::once(ChatMessage::system(system_prompt.to_string()))
+            .chain(window)
+            .collect();
     }
 
     async fn stream(self, request: ChatMessageRequest) -> Result<ChatMessageResponseStream> {
@@ -203,22 +229,38 @@ impl Client {
 
     async fn stream_history(
         self,
-        request: ChatMessageRequest,
+        mut request: ChatMessageRequest,
         history: Arc<Mutex<Vec<ChatMessage>>>,
     ) -> Result<ChatMessageResponseStream> {
         let Client::Ollama(client) = self else {
             return Err(Error::ServerError("server not connected"));
         };
 
-        let stream = client
+        let stream = match client
             .send_chat_messages_with_history_stream(history.clone(), request.clone())
-            .await?;
+            .await
+        {
+            Ok(stream) => stream,
+            Err(OllamaError::Other(error)) if error.contains("503") => {
+                time::sleep(Duration::from_secs(10)).await;
+                request.messages.clear();
+                client
+                    .send_chat_messages_with_history_stream(history, request)
+                    .await?
+            }
+            Err(OllamaError::Other(error)) if error.contains("429") => {
+                time::sleep(Duration::from_secs(10)).await;
+                request.messages.clear();
+                client
+                    .send_chat_messages_with_history_stream(history, request)
+                    .await?
+            }
+            Err(error) => return Err(Error::OllamaError(error)),
+        };
 
         Ok(stream)
     }
-}
 
-impl Client {
     pub fn extract_text(
         self,
         model: String,

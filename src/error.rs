@@ -1,6 +1,5 @@
-use std::path::PathBuf;
-
 use quick_xml::events::attributes::AttrError;
+use std::path::PathBuf;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -51,7 +50,4 @@ pub enum Error {
 
     #[error(transparent)]
     IcedError(#[from] iced::Error),
-
-    #[error(transparent)]
-    SerdeError(#[from] serde_json::Error),
 }

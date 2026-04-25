@@ -3,7 +3,6 @@ use crate::{
     model::{Activity, page::Page, server::Server},
     widget::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
 };
-use async_tempfile::TempFile;
 use iced::{
     Color, Element, Length, Padding,
     widget::{Column, column, container, row, scrollable, text},
@@ -17,7 +16,6 @@ pub struct Translation {
     pub file_path: PathBuf,
     pub current_page: usize,
     pub pages: Vec<Page>,
-    pub recovery_file: Option<TempFile>,
 }
 
 impl Translation {
@@ -84,13 +82,11 @@ impl Translation {
                     .push(mark)
                     .padding(Padding::default().right(10));
 
-                let count = page.sections.len();
                 let active = self.server.connected() && self.server.handles.is_empty();
-                let underlay = text_button(button_content).on_press(TransAction::SetPage(i));
-
-                ContextMenu::new(underlay, move || {
-                    path_button_overlay(count, name.to_string(), i, active)
-                })
+                ContextMenu::new(
+                    text_button(button_content).on_press(TransAction::SetPage(i)),
+                    move || path_button_overlay(page.sections.len(), name.to_string(), i, active),
+                )
                 .into()
             })
             .collect()
@@ -101,15 +97,6 @@ impl From<Server> for Translation {
     fn from(server: Server) -> Self {
         Self {
             server,
-            ..Default::default()
-        }
-    }
-}
-
-impl From<TempFile> for Translation {
-    fn from(file: TempFile) -> Self {
-        Self {
-            recovery_file: Some(file),
             ..Default::default()
         }
     }

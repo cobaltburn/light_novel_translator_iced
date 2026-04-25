@@ -320,15 +320,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b75356056920673b02621b35afd0f7dda9306d03c79a30f5c56c44cf256e3de"
 
 [[package]]
-name = "async-tempfile"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8a57b75c36e16f4d015e60e6a177552976a99b6947724403c551bcfa7cb1207"
-dependencies = [
- "tokio",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1271,17 +1262,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
 dependencies = [
  "percent-encoding",
-]
-
-[[package]]
-name = "fs4"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b6586049770567845c3091bca401cf6f70d418dcd3d01a1e897db0da7765429"
-dependencies = [
- "rustix 1.1.4",
- "tokio",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2409,11 +2389,9 @@ name = "light_novel_translator_iced"
 version = "1.0.0"
 dependencies = [
  "async-stream",
- "async-tempfile",
  "base64",
  "epub",
  "epub-builder",
- "fs4",
  "htmd",
  "iced",
  "iced_aw",
@@ -2423,8 +2401,6 @@ dependencies = [
  "quick-xml 0.39.2",
  "regex",
  "rfd",
- "serde",
- "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",

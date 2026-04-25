@@ -226,7 +226,7 @@ fn think_selector(state: &Server) -> Element<'_, ServerAction> {
 
 fn execution_selector(model: &Server) -> Element<'_, ServerAction> {
     row![
-        text("Excetion:"),
+        text("Execution:"),
         radio(
             "Chain",
             Method::Chain,
