@@ -1,3 +1,5 @@
+use ollama_rs::generation::chat::ChatMessage;
+
 use crate::{actions::contains_japanese, model::Activity};
 use std::{ffi::OsStr, iter, path::PathBuf};
 
@@ -95,5 +97,12 @@ impl Section {
             japanese,
             content: String::new(),
         }
+    }
+
+    pub fn history_message(&self) -> [ChatMessage; 2] {
+        [
+            ChatMessage::user(self.japanese.clone()),
+            ChatMessage::assistant(self.content.clone()),
+        ]
     }
 }

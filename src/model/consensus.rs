@@ -49,7 +49,7 @@ impl Consensus {
         Some(&self.pages.get(self.current_page)?.size_error)
     }
 
-    pub fn canidate_items(&self) -> Vec<Item<'_, ConsensusAction, Theme, Renderer>> {
+    pub fn candidate_items(&self) -> Vec<Item<'_, ConsensusAction, Theme, Renderer>> {
         self.candidates
             .iter()
             .enumerate()
@@ -75,24 +75,20 @@ impl Consensus {
                             }
                         });
 
-                let mark = match page.activity {
-                    Activity::Incomplete => None,
-                    Activity::Complete => Some(check_mark()),
-                    Activity::Error(i) => Some(row![text(i), cross_mark()].spacing(5).into()),
-                    Activity::Active => Some(active_mark()),
-                };
-
                 let button_content = row![button_text]
-                    .push(mark)
+                    .push(match page.activity {
+                        Activity::Incomplete => None,
+                        Activity::Complete => Some(check_mark()),
+                        Activity::Error(i) => Some(row![text(i), cross_mark()].spacing(5).into()),
+                        Activity::Active => Some(active_mark()),
+                    })
                     .padding(Padding::default().right(10));
 
-                let count = page.sections.len();
                 let active = self.server.connected() && self.server.handles.is_empty();
-                let underlay = text_button(button_content).on_press(ConsensusAction::SetPage(i));
-
-                ContextMenu::new(underlay, move || {
-                    path_button_overlay(count, name.to_string(), i, active)
-                })
+                ContextMenu::new(
+                    text_button(button_content).on_press(ConsensusAction::SetPage(i)),
+                    move || path_button_overlay(page.sections.len(), name.to_string(), i, active),
+                )
                 .into()
             })
             .collect()
@@ -105,12 +101,6 @@ fn path_button_overlay<'a>(
     page: usize,
     active: bool,
 ) -> Element<'a, ConsensusAction> {
-    let part_buttons = (0..count).map(|part| {
-        context_menu_button(text!("translate part {}", part + 1).color(Color::WHITE))
-            .on_press_maybe(active.then_some(ConsensusAction::ConsensusPart { page, part }))
-            .into()
-    });
-
     let overlay = column![
         context_menu_button(text("save").color(Color::WHITE))
             .on_press(ConsensusAction::SavePage { name, page }),
@@ -119,7 +109,11 @@ fn path_button_overlay<'a>(
         context_menu_button(text("translate page").color(Color::WHITE))
             .on_press_maybe(active.then_some(ConsensusAction::ConsensusPage(page)))
     ]
-    .extend(part_buttons)
+    .extend((0..count).map(|part| {
+        context_menu_button(text!("translate part {}", part + 1).color(Color::WHITE))
+            .on_press_maybe(active.then_some(ConsensusAction::ConsensusPart { page, part }))
+            .into()
+    }))
     .padding(5)
     .spacing(5);
 

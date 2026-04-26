@@ -23,7 +23,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-const REPEAT_PENALTY: f32 = 1.5;
+const REPEAT_PENALTY: f32 = 1.3;
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -96,12 +96,7 @@ impl Server {
             .iter()
             .flat_map(|p| &p.sections)
             .filter(|s| !s.content.is_empty())
-            .map(|Section { japanese, content }| {
-                [
-                    ChatMessage::user(japanese.clone()),
-                    ChatMessage::assistant(content.clone()),
-                ]
-            })
+            .map(Section::history_message)
             .collect();
 
         let skip = pairs.len().saturating_sub(self.settings.context_window);
@@ -142,10 +137,8 @@ impl Server {
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
-        let current = pages.last().expect("dont pass an empty array");
+        let current = pages.last().unwrap();
         let section = current.sections.get(part).unwrap().clone();
-        let client = self.client.clone();
-
         let messages = match self.method {
             Method::History => vec![ChatMessage::user(section.japanese.clone())],
             _ => vec![
@@ -167,12 +160,7 @@ impl Server {
                     .flat_map(|p| &p.sections)
                     .chain(&current.sections)
                     .filter(|s| !s.content.is_empty())
-                    .map(|Section { japanese, content }| {
-                        [
-                            ChatMessage::user(japanese.clone()),
-                            ChatMessage::assistant(content.clone()),
-                        ]
-                    })
+                    .map(Section::history_message)
                     .collect();
 
                 let skip = pairs.len().saturating_sub(self.settings.context_window);
@@ -181,7 +169,7 @@ impl Server {
                         .chain(pairs.into_iter().skip(skip).flatten())
                         .collect();
 
-                client.translate_history(
+                self.client.clone().translate_history(
                     request,
                     Arc::new(Mutex::new(history)),
                     self.settings.context_window,
@@ -189,14 +177,12 @@ impl Server {
                     part,
                 )?
             }
-            _ => client.translate(request, page, part)?,
+            _ => self.client.clone().translate(request, page, part)?,
         };
 
         Ok(Self::add_handle(&mut self.handles, task))
     }
-}
 
-impl Server {
     pub fn consensus(
         &mut self,
         pages: &[Page],
@@ -206,7 +192,7 @@ impl Server {
     ) -> Result<Task<ConsensusAction>> {
         let current = pages.last().expect("dont pass an empty array");
         let candidates = candidates
-            .get(current.file_stem().unwrap())
+            .get(current.file_stem().unwrap_or_default())
             .ok_or(Error::GeneralError(String::from("missing candidate files")))?;
 
         let tasks: Result<Vec<_>> = current
@@ -244,7 +230,7 @@ impl Server {
         let current = pages.last().expect("dont pass an empty array");
         let section = current.sections.get(part).unwrap();
         let page_candidates = candidates
-            .get(&current.file_stem().unwrap())
+            .get(&current.file_stem().unwrap_or_default())
             .ok_or(Error::GeneralError(String::from("missing candidate file")))?;
         let page_candidates: Vec<_> = page_candidates.iter().flat_map(|e| e.get(part)).collect();
         let prompt = consensus_prompt(&section.japanese, &page_candidates)?;

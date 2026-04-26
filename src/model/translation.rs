@@ -35,15 +35,14 @@ impl Translation {
     }
 
     pub fn current_content(&self) -> Option<Vec<&String>> {
-        let text = self
-            .pages
-            .get(self.current_page)?
-            .sections
-            .iter()
-            .map(|e| &e.content)
-            .collect();
-
-        Some(text)
+        Some(
+            self.pages
+                .get(self.current_page)?
+                .sections
+                .iter()
+                .map(|e| &e.content)
+                .collect(),
+        )
     }
 
     pub fn current_jap_errors(&self) -> Option<&[usize]> {
@@ -71,21 +70,19 @@ impl Translation {
                             }
                         });
 
-                let mark = match page.activity {
-                    Activity::Incomplete => None,
-                    Activity::Complete => Some(check_mark()),
-                    Activity::Error(i) => Some(row![text(i), cross_mark()].spacing(5).into()),
-                    Activity::Active => Some(active_mark()),
-                };
-
                 let button_content = row![button_text]
-                    .push(mark)
+                    .push(match page.activity {
+                        Activity::Incomplete => None,
+                        Activity::Complete => Some(check_mark()),
+                        Activity::Error(i) => Some(row![text(i), cross_mark()].spacing(5).into()),
+                        Activity::Active => Some(active_mark()),
+                    })
                     .padding(Padding::default().right(10));
 
-                let active = self.server.connected() && self.server.handles.is_empty();
+                let inactive = self.server.connected() && self.server.handles.is_empty();
                 ContextMenu::new(
                     text_button(button_content).on_press(TransAction::SetPage(i)),
-                    move || path_button_overlay(page.sections.len(), name.to_string(), i, active),
+                    move || path_button_overlay(page.sections.len(), name.to_string(), i, inactive),
                 )
                 .into()
             })
@@ -106,23 +103,21 @@ fn path_button_overlay<'a>(
     count: usize,
     name: String,
     page: usize,
-    active: bool,
+    inactive: bool,
 ) -> Element<'a, TransAction> {
-    let part_buttons = (0..count).map(|part| {
-        context_menu_button(text!("translate part {}", part + 1).color(Color::WHITE))
-            .on_press_maybe(active.then_some(TransAction::TranslatePart { page, part }))
-            .into()
-    });
-
     let overlay = column![
         context_menu_button(text("save").color(Color::WHITE))
             .on_press(TransAction::SavePage { name, page }),
         context_menu_button(text("translate").color(Color::WHITE))
-            .on_press_maybe(active.then_some(TransAction::Translate(page))),
+            .on_press_maybe(inactive.then_some(TransAction::Translate(page))),
         context_menu_button(text("translate page").color(Color::WHITE))
-            .on_press_maybe(active.then_some(TransAction::TranslatePage(page)))
+            .on_press_maybe(inactive.then_some(TransAction::TranslatePage(page)))
     ]
-    .extend(part_buttons)
+    .extend((0..count).map(|part| {
+        context_menu_button(text!("translate part {}", part + 1).color(Color::WHITE))
+            .on_press_maybe(inactive.then_some(TransAction::TranslatePart { page, part }))
+            .into()
+    }))
     .padding(5)
     .spacing(5);
 

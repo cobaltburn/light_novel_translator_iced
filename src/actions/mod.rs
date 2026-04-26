@@ -42,11 +42,12 @@ pub async fn save_file(file_name: String, content: String) -> Result<()> {
     Ok(())
 }
 
-pub async fn load_folder_markdown() -> Option<Vec<(PathBuf, String)>> {
+pub async fn load_markdown_folder() -> Option<Vec<(PathBuf, String)>> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("load folder")
         .pick_folder()
         .await?;
+
     let mut dirs = fs::read_dir(handle.path()).await.ok()?;
     let mut pages = Vec::new();
     while let Ok(Some(entry)) = dirs.next_entry().await {
@@ -126,8 +127,7 @@ pub async fn select_format_folder(dir: PathBuf) -> Option<(String, Vec<(PathBuf,
     let mut pages = Vec::new();
     while let Ok(Some(entry)) = dirs.next_entry().await {
         let path = entry.path();
-        let path = path.is_file().then_some(path)?;
-        if path.extension().is_some_and(|e| e == OsStr::new("md")) {
+        if path.is_file() && path.extension().is_some_and(|e| e == OsStr::new("md")) {
             let content = read_to_string(&path).await.ok()?;
             pages.push((path, content));
         }

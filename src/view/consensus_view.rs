@@ -201,7 +201,7 @@ fn epub_select(model: &Consensus) -> Element<'_, ConsensusAction> {
 fn candidate_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {
     Item::with_menu(
         menu_button("candidate"),
-        Menu::new(model.canidate_items())
+        Menu::new(model.candidate_items())
             .spacing(10)
             .width(400)
             .padding(10),
