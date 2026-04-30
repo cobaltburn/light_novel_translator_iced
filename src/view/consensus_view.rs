@@ -1,7 +1,7 @@
 use crate::{
     actions::{consensus_action::ConsensusAction, server_action::ServerAction},
     model::{
-        consensus::Consensus,
+        consensus::{Consensus, build_path_buttons},
         server::{Method, Server},
     },
     view::{menu_button, part_span, rich_text_scrollable},
@@ -11,7 +11,7 @@ use iced::{
     Border, Color, Element, Length, Padding, Renderer, Theme,
     alignment::{Horizontal, Vertical},
     widget::{
-        Column, Container, button, column, container, radio, right, row, scrollable,
+        Column, Container, button, column, container, lazy, radio, right, row, scrollable,
         space::vertical, stack, text,
     },
 };
@@ -70,20 +70,19 @@ fn error_card(model: &Consensus) -> Element<'_, ConsensusAction> {
 }
 
 fn side_bar(model: &Consensus) -> Container<'_, ConsensusAction> {
-    container(
-        scrollable(model.path_buttons().width(250).spacing(10))
-            .spacing(5)
-            .height(Length::Fill),
-    )
-    .height(Length::Fill)
-    .padding(Padding::new(10.0).left(0).right(5))
-    .style(|theme| {
-        container::transparent(theme).border(Border {
-            color: Color::WHITE,
-            width: 1.0,
-            radius: 8.into(),
+    let buttons = lazy(model.sidebar_deps(), |deps| {
+        build_path_buttons(deps).width(250).spacing(10)
+    });
+    container(scrollable(buttons).spacing(5).height(Length::Fill))
+        .height(Length::Fill)
+        .padding(Padding::new(10.0).left(0).right(5))
+        .style(|theme| {
+            container::transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 1.0,
+                radius: 8.into(),
+            })
         })
-    })
 }
 
 fn menu_bar(model @ Consensus { server, .. }: &Consensus) -> Element<'_, ConsensusAction> {

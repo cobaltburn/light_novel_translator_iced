@@ -293,8 +293,8 @@ pub fn consensus_prompt(section: &str, candidates: &[&String]) -> Result<String>
 impl Server {
     pub fn model_pick_list(&self) -> Element<'_, ServerAction> {
         pick_list(
-            self.models.clone(),
-            self.current_model.clone(),
+            self.models.as_slice(),
+            self.current_model.as_ref(),
             ServerAction::SelectModel,
         )
         .width(250)

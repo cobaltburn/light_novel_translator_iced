@@ -8,7 +8,7 @@ pub mod translation;
 pub mod translator;
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Hash, PartialEq, Eq)]
 pub enum Activity {
     #[default]
     Incomplete,

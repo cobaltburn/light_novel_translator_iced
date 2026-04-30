@@ -58,41 +58,82 @@ impl Consensus {
             .collect()
     }
 
-    pub fn path_buttons(&self) -> Column<'_, ConsensusAction> {
-        self.pages
+    pub fn sidebar_deps(&self) -> SidebarDeps {
+        let active = self.server.connected() && self.server.handles.is_empty();
+        let rows = self
+            .pages
             .iter()
-            .enumerate()
-            .map(|(i, page)| {
-                let name = page.path.file_stem().unwrap().to_string_lossy();
-                let button_text =
-                    text!("{}. {}", i + 1, &name)
-                        .width(Length::Fill)
-                        .style(move |theme| {
-                            if self.current_page == i {
-                                text::primary(theme)
-                            } else {
-                                text::default(theme)
-                            }
-                        });
-
-                let button_content = row![button_text]
-                    .push(match page.activity {
-                        Activity::Incomplete => None,
-                        Activity::Complete => Some(check_mark()),
-                        Activity::Error(i) => Some(row![text(i), cross_mark()].spacing(5).into()),
-                        Activity::Active => Some(active_mark()),
-                    })
-                    .padding(Padding::default().right(10));
-
-                let active = self.server.connected() && self.server.handles.is_empty();
-                ContextMenu::new(
-                    text_button(button_content).on_press(ConsensusAction::SetPage(i)),
-                    move || path_button_overlay(page.sections.len(), name.to_string(), i, active),
-                )
-                .into()
+            .map(|p| SidebarRow {
+                name: p
+                    .path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned(),
+                activity: p.activity.clone(),
+                section_count: p.sections.len(),
             })
-            .collect()
+            .collect();
+        SidebarDeps {
+            current_page: self.current_page,
+            active,
+            rows,
+        }
     }
+}
+
+#[derive(Hash)]
+pub struct SidebarDeps {
+    pub current_page: usize,
+    pub active: bool,
+    pub rows: Vec<SidebarRow>,
+}
+
+#[derive(Hash)]
+pub struct SidebarRow {
+    pub name: String,
+    pub activity: Activity,
+    pub section_count: usize,
+}
+
+pub fn build_path_buttons(deps: &SidebarDeps) -> Column<'static, ConsensusAction> {
+    let current = deps.current_page;
+    let active = deps.active;
+
+    deps.rows
+        .iter()
+        .enumerate()
+        .map(|(i, entry)| {
+            let name = entry.name.clone();
+            let activity = entry.activity.clone();
+            let section_count = entry.section_count;
+
+            let button_text = text!("{}. {}", i + 1, &name)
+                .width(Length::Fill)
+                .style(move |theme| {
+                    if current == i {
+                        text::primary(theme)
+                    } else {
+                        text::default(theme)
+                    }
+                });
+
+            let button_content = row![button_text]
+                .push(match activity {
+                    Activity::Incomplete => None,
+                    Activity::Complete => Some(check_mark()),
+                    Activity::Error(e) => Some(row![text(e), cross_mark()].spacing(5).into()),
+                    Activity::Active => Some(active_mark()),
+                })
+                .padding(Padding::default().right(10));
+
+            ContextMenu::new(
+                text_button(button_content).on_press(ConsensusAction::SetPage(i)),
+                move || path_button_overlay(section_count, name.clone(), i, active),
+            )
+            .into()
+        })
+        .collect()
 }
 
 fn path_button_overlay<'a>(

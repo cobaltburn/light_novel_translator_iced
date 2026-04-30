@@ -18,8 +18,12 @@ use std::{
     collections::HashMap,
     ffi::OsStr,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 use tokio::fs;
+
+static PART_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<part>\d+</part>").unwrap());
 
 #[derive(Debug, Clone)]
 pub enum ConsensusAction {
@@ -313,11 +317,10 @@ impl Consensus {
     }
 
     fn set_candidate(&mut self, i: Option<usize>, name: String, pages: Vec<(PathBuf, String)>) {
-        let re = Regex::new(r"<part>\d+</part>").unwrap();
         let pages = pages
             .into_iter()
             .map(|(path, text)| {
-                let parts = re
+                let parts = PART_RE
                     .split(&text)
                     .filter(|e| !e.is_empty())
                     .map(str::to_owned)

@@ -26,8 +26,8 @@ use std::{
 use tokio::time;
 use tokio_stream::StreamExt;
 
-const MAX_WAIT: Duration = Duration::from_millis(250);
-const CHUNK_SIZE: usize = 25;
+const MAX_WAIT: Duration = Duration::from_millis(500);
+const CHUNK_SIZE: usize = 50;
 
 #[non_exhaustive]
 #[derive(Debug, Default, Clone)]
@@ -204,10 +204,7 @@ impl Client {
             })
             .then(move |response| match response {
                 Ok(msg) => {
-                    let content: String = msg
-                        .into_iter()
-                        .map_while(|e| (!e.done).then_some(e.message.content))
-                        .collect();
+                    let content: String = msg.into_iter().map(|e| e.message.content).collect();
                     if content.is_empty() {
                         Task::none()
                     } else {
@@ -226,17 +223,21 @@ impl Client {
         system_prompt: &str,
     ) {
         let mut history = history.lock().unwrap();
-        let context_window = context_window * 2;
 
-        if history.len() < context_window {
+        let pair_count = history.len().saturating_sub(1) / 2;
+        if pair_count <= context_window {
             return;
         }
 
-        let skip = history.len().saturating_sub(context_window);
+        let skip_pairs = pair_count - context_window;
+        let kept = history[1..]
+            .chunks(2)
+            .skip(skip_pairs)
+            .flatten()
+            .cloned();
 
-        let window = history[1..].chunks(2).skip(skip).flatten().cloned();
         *history = iter::once(ChatMessage::system(system_prompt.to_string()))
-            .chain(window)
+            .chain(kept)
             .collect();
     }
 

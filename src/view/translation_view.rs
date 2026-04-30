@@ -1,7 +1,10 @@
 use crate::{
     actions::trans_action::TransAction,
     message::Message,
-    model::{server::Server, translation::Translation},
+    model::{
+        server::Server,
+        translation::{Translation, build_path_buttons},
+    },
     view::{menu_button, part_span, rich_text_scrollable},
     widget::server_widget::{
         context_window_input, execution_selector, ollama_input, think_selector,
@@ -11,7 +14,8 @@ use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::{Horizontal, Vertical},
     widget::{
-        Button, Column, Container, Row, container::transparent, right, space::vertical, stack,
+        Button, Column, Container, Row, container::transparent, lazy, right, space::vertical,
+        stack,
     },
 };
 use iced::{
@@ -132,20 +136,19 @@ fn error_card(model: &Translation) -> Element<'_, TransAction> {
 }
 
 fn side_bar(model: &Translation) -> Container<'_, TransAction> {
-    container(
-        scrollable(model.path_buttons().width(250).spacing(10))
-            .spacing(5)
-            .height(Length::Fill),
-    )
-    .height(Length::Fill)
-    .padding(Padding::new(10.0).left(0).right(5))
-    .style(|theme| {
-        transparent(theme).border(Border {
-            color: Color::WHITE,
-            width: 1.0,
-            radius: 8.into(),
+    let buttons = lazy(model.sidebar_deps(), |deps| {
+        build_path_buttons(deps).width(250).spacing(10)
+    });
+    container(scrollable(buttons).spacing(5).height(Length::Fill))
+        .height(Length::Fill)
+        .padding(Padding::new(10.0).left(0).right(5))
+        .style(|theme| {
+            transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 1.0,
+                radius: 8.into(),
+            })
         })
-    })
 }
 
 fn menu_bar(
