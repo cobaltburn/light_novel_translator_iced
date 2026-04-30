@@ -1,6 +1,10 @@
 use crate::{
     actions::trans_action::TransAction,
-    model::{Activity, page::Page, server::Server},
+    model::{
+        Activity,
+        page::{Page, Section},
+        server::Server,
+    },
     widget::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
 };
 use iced::{
@@ -51,6 +55,10 @@ impl Translation {
 
     pub fn current_size_errors(&self) -> Option<&[usize]> {
         Some(&self.pages.get(self.current_page)?.size_error)
+    }
+
+    pub fn current_sections(&self) -> Option<&[Section]> {
+        Some(&self.pages.get(self.current_page)?.sections)
     }
 
     pub fn path_buttons(&self) -> Column<'_, TransAction> {

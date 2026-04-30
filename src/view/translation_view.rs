@@ -103,17 +103,26 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
 }
 
 fn error_card(model: &Translation) -> Element<'_, TransAction> {
-    let jap_errors = model.current_jap_errors();
-    let size_errors = model.current_size_errors();
-    let errors = jap_errors
+    let current_sections = model
+        .current_sections()
+        .into_iter()
+        .flatten()
+        .enumerate()
+        .filter(|(_, s)| s.content.is_empty())
+        .map(|(i, _)| text!("Empty part: {:2}", i + 1));
+    let errors = model
+        .current_jap_errors()
         .into_iter()
         .flatten()
         .map(|i| text!("Japanese error: {:2}", i + 1));
-    let errors = size_errors
+
+    let errors = model
+        .current_size_errors()
         .into_iter()
         .flatten()
         .map(|i| text!("Size error: {:2}", i + 1))
         .chain(errors)
+        .chain(current_sections)
         .map(|e| container(e).padding(5).style(container::primary).into())
         .collect::<Column<_>>();
 

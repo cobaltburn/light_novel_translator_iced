@@ -53,8 +53,8 @@ impl Consensus {
         self.candidates
             .iter()
             .enumerate()
-            .map(|(i, Candidate { name, .. })| Item::new(canidate_select(Some(i), &name)))
-            .chain(once(Item::new(canidate_select(None, ""))))
+            .map(|(i, Candidate { name, .. })| Item::new(candidate_select(Some(i), &name)))
+            .chain(once(Item::new(candidate_select(None, ""))))
             .collect()
     }
 
@@ -124,7 +124,7 @@ fn path_button_overlay<'a>(
         .into()
 }
 
-fn canidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusAction> {
+fn candidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusAction> {
     let x_button = i.map(|i| {
         button(text("x").center())
             .style(button::text)

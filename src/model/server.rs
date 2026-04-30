@@ -92,16 +92,17 @@ impl Server {
     ) -> Result<Task<TransAction>> {
         let (current, history_pages) = pages.split_last().expect("dont pass an empty array");
 
-        let pairs: Vec<_> = history_pages
+        let mut recent: Vec<&Section> = history_pages
             .iter()
-            .flat_map(|p| &p.sections)
+            .rev()
+            .flat_map(|p| p.sections.iter().rev())
             .filter(|s| !s.content.is_empty())
-            .map(Section::history_message)
+            .take(self.settings.context_window)
             .collect();
+        recent.reverse();
 
-        let skip = pairs.len().saturating_sub(self.settings.context_window);
         let history: Vec<_> = iter::once(ChatMessage::system(TRANSLATION_PROMPT.to_owned()))
-            .chain(pairs.into_iter().skip(skip).flatten())
+            .chain(recent.into_iter().flat_map(Section::history_message))
             .collect();
 
         let history = Arc::new(Mutex::new(history));
@@ -155,18 +156,24 @@ impl Server {
             Method::History => {
                 let (_, history_pages) = pages.split_last().expect("dont pass an empty array");
 
-                let pairs: Vec<_> = history_pages
+                let mut recent: Vec<&Section> = current
+                    .sections
                     .iter()
-                    .flat_map(|p| &p.sections)
-                    .chain(&current.sections)
+                    .rev()
+                    .chain(
+                        history_pages
+                            .iter()
+                            .rev()
+                            .flat_map(|p| p.sections.iter().rev()),
+                    )
                     .filter(|s| !s.content.is_empty())
-                    .map(Section::history_message)
+                    .take(self.settings.context_window)
                     .collect();
+                recent.reverse();
 
-                let skip = pairs.len().saturating_sub(self.settings.context_window);
                 let history: Vec<_> =
                     iter::once(ChatMessage::system(TRANSLATION_PROMPT.to_owned()))
-                        .chain(pairs.into_iter().skip(skip).flatten())
+                        .chain(recent.into_iter().flat_map(Section::history_message))
                         .collect();
 
                 self.client.clone().translate_history(

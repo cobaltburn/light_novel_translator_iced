@@ -59,7 +59,7 @@ pub fn context_window_input(state: &Server) -> Element<'_, ServerAction> {
             text("Context window:"),
             NumberInput::new(
                 &state.settings.context_window,
-                0..=50,
+                2..=10,
                 ServerAction::SetWindow
             )
         ]

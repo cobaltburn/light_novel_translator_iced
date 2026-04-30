@@ -59,7 +59,7 @@ impl DocBuilder {
         self.builder
             .epub_version(EpubVersion::V30)
             .stylesheet(DEFAULT_STYLESHEET)?
-            .set_lang("en");
+            .add_language("en");
 
         self.builder.set_title(mem::take(&mut self.metadata.title));
 

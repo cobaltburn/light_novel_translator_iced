@@ -88,16 +88,33 @@ impl Client {
             return Err(Error::ServerError("server disconnected"));
         }
 
+        let user_msg = request
+            .messages
+            .last()
+            .cloned()
+            .ok_or(Error::ServerError("missing user message"))?;
+        let acc = Arc::new(Mutex::new(String::new()));
+        let acc_for_stream = acc.clone();
+
         Ok(Self::run_chat_task(
             self.stream_history(request, history.clone()),
-            move |content| TransAction::UpdateContent {
-                content,
-                page,
-                part,
+            move |content| {
+                acc_for_stream.lock().unwrap().push_str(&content);
+                TransAction::UpdateContent {
+                    content,
+                    page,
+                    part,
+                }
             },
             TransAction::CancelTranslate,
         )
         .chain(Task::future(async move {
+            let assistant = std::mem::take(&mut *acc.lock().unwrap());
+            if !assistant.is_empty() {
+                let mut hist = history.lock().unwrap();
+                hist.push(user_msg);
+                hist.push(ChatMessage::assistant(assistant));
+            }
             Self::shift_history(history, context_window, TRANSLATION_PROMPT);
             TransAction::CleanText { page, part }
         })))
@@ -137,16 +154,33 @@ impl Client {
             return Err(Error::ServerError("server disconnected"));
         }
 
+        let user_msg = request
+            .messages
+            .last()
+            .cloned()
+            .ok_or(Error::ServerError("missing user message"))?;
+        let acc = Arc::new(Mutex::new(String::new()));
+        let acc_for_stream = acc.clone();
+
         Ok(Self::run_chat_task(
             self.stream_history(request, history.clone()),
-            move |content| ConsensusAction::UpdateContent {
-                content,
-                page,
-                part,
+            move |content| {
+                acc_for_stream.lock().unwrap().push_str(&content);
+                ConsensusAction::UpdateContent {
+                    content,
+                    page,
+                    part,
+                }
             },
             ConsensusAction::CancelConsensus,
         )
         .chain(Task::future(async move {
+            let assistant = std::mem::take(&mut *acc.lock().unwrap());
+            if !assistant.is_empty() {
+                let mut hist = history.lock().unwrap();
+                hist.push(user_msg);
+                hist.push(ChatMessage::assistant(assistant));
+            }
             Self::shift_history(history, context_window, CONSENSUS_PROMPT);
             ConsensusAction::CleanText { page, part }
         })))
@@ -236,26 +270,23 @@ impl Client {
             return Err(Error::ServerError("server not connected"));
         };
 
-        let stream = match client
-            .send_chat_messages_with_history_stream(history.clone(), request.clone())
-            .await
-        {
-            Ok(stream) => stream,
-            Err(OllamaError::Other(error)) if error.contains("503") => {
-                time::sleep(Duration::from_secs(10)).await;
-                request.messages.clear();
-                client
-                    .send_chat_messages_with_history_stream(history, request)
-                    .await?
+        let user_msgs = std::mem::take(&mut request.messages);
+        request.messages = {
+            let hist = history.lock().unwrap();
+            hist.iter().cloned().chain(user_msgs).collect()
+        };
+
+        let stream = loop {
+            match client.send_chat_messages_stream(request.clone()).await {
+                Ok(stream) => break stream,
+                Err(OllamaError::Other(error)) if error.contains("503") => {
+                    time::sleep(Duration::from_secs(10)).await
+                }
+                Err(OllamaError::Other(error)) if error.contains("429") => {
+                    time::sleep(Duration::from_secs(10)).await
+                }
+                Err(error) => return Err(Error::OllamaError(error)),
             }
-            Err(OllamaError::Other(error)) if error.contains("429") => {
-                time::sleep(Duration::from_secs(10)).await;
-                request.messages.clear();
-                client
-                    .send_chat_messages_with_history_stream(history, request)
-                    .await?
-            }
-            Err(error) => return Err(Error::OllamaError(error)),
         };
 
         Ok(stream)
