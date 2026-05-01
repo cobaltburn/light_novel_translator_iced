@@ -5,6 +5,7 @@ use crate::{
 };
 use epub::doc::EpubDoc;
 use htmd::HtmlToMarkdown;
+use iced::{Task, advanced::graphics::futures::MaybeSend};
 use std::{
     ffi::OsStr,
     io::Cursor,
@@ -134,6 +135,13 @@ pub async fn select_format_folder(dir: PathBuf) -> Option<(String, Vec<(PathBuf,
     }
 
     Some((handle.file_name(), pages))
+}
+
+pub fn handle_error<T: MaybeSend + 'static>(task: Result<Task<T>>) -> Task<T> {
+    match task {
+        Ok(task) => task,
+        Err(error) => error.display_error(),
+    }
 }
 
 pub fn contains_japanese(text: &str) -> bool {

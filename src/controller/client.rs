@@ -21,6 +21,7 @@ use reqwest::StatusCode;
 use std::{
     iter,
     ops::Not,
+    result,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -212,25 +213,18 @@ impl Client {
         A: Send + Clone + 'static,
     {
         Task::future(stream_future)
-            .then(|stream| match stream {
-                Ok(stream) => Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |res| {
-                    res.into_iter().collect::<std::result::Result<Vec<_>, ()>>()
+            .and_then(|stream| {
+                Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |res| {
+                    res.into_iter()
+                        .map(|e| e.map(|e| e.message.content))
+                        .collect::<result::Result<String, ()>>()
                 })
-                .map_err(|_| Error::ServerError("Failed to read stream")),
-                Err(error) => Task::done(Err(error)),
+                .map_err(|_| Error::ServerError("Failed to read stream"))
             })
             .then(move |response| match response {
-                Ok(msg) => {
-                    let content: String = msg.into_iter().map(|e| e.message.content).collect();
-                    if content.is_empty() {
-                        Task::none()
-                    } else {
-                        Task::done(on_content(content))
-                    }
-                }
-                Err(error) => {
-                    Task::done(cancel.clone()).chain(Task::future(display_error(error)).discard())
-                }
+                Ok(content) if content.is_empty() => Task::none(),
+                Ok(content) => Task::done(on_content(content)),
+                Err(error) => Task::done(cancel.to_owned()).chain(error.display_error()),
             })
     }
 
@@ -288,11 +282,8 @@ impl Client {
         Settings { think, .. }: Settings,
     ) -> Task<ExtractAction> {
         Task::future(self.extract_stream(model, image_base64, think))
-            .then(move |stream| match stream {
-                Ok(stream) => {
-                    Task::stream(stream).map_err(|_| Error::ServerError("Failed to read stream"))
-                }
-                Err(error) => Task::done(Err(error)),
+            .and_then(|stream| {
+                Task::stream(stream).map_err(|_| Error::ServerError("Failed to read stream"))
             })
             .then(move |response| match response {
                 Ok(responses) => {

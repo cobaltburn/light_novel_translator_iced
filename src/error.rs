@@ -1,3 +1,5 @@
+use crate::message::display_error;
+use iced::{Task, advanced::graphics::futures::MaybeSend};
 use quick_xml::events::attributes::AttrError;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -50,4 +52,10 @@ pub enum Error {
 
     #[error(transparent)]
     IcedError(#[from] iced::Error),
+}
+
+impl Error {
+    pub fn display_error<T: MaybeSend + 'static>(self) -> Task<T> {
+        Task::future(display_error(self)).discard()
+    }
 }

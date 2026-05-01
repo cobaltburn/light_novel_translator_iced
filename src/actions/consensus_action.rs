@@ -22,8 +22,7 @@ use std::{
 };
 use tokio::fs;
 
-static PART_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"<part>\d+</part>").unwrap());
+static PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<part>\d+</part>").unwrap());
 
 #[derive(Debug, Clone)]
 pub enum ConsensusAction {
@@ -83,10 +82,11 @@ impl Consensus {
                 Task::future(pick_save_folder(file_name))
                     .and_then(|path| {
                         Task::future(async { fs::create_dir(&path).await.map(|_| path) })
+                            .map_err(|error| Error::from(error))
                     })
                     .then(|path| match path {
                         Ok(path) => Task::done(ConsensusAction::SavePages(path).into()),
-                        Err(err) => Task::future(display_error(err)).discard(),
+                        Err(err) => err.display_error(),
                     })
             }
             ConsensusAction::SavePages(path) => self.save_pages(path),

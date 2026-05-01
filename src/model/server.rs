@@ -405,7 +405,7 @@ impl Method {
         match self {
             Method::Batch => {
                 let mut iter = tasks.into_iter();
-                std::iter::from_fn(|| {
+                iter::from_fn(|| {
                     let chunk: Vec<_> = iter.by_ref().take(BATCH_SIZE).collect();
                     (!chunk.is_empty()).then_some(chunk)
                 })

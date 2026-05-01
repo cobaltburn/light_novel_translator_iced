@@ -186,7 +186,7 @@ fn candidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusActi
     });
 
     row![
-        button(text("canidate").center()).on_press(ConsensusAction::SelectCandidate(i)),
+        button(text("candidate").center()).on_press(ConsensusAction::SelectCandidate(i)),
         container(
             row![text(folder).width(Length::Fill)]
                 .push(x_button)

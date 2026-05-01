@@ -2,7 +2,7 @@ use crate::{
     actions::select_format_folder,
     controller::builder::DocBuilder,
     error::{Error, Result},
-    message::{Message, display_error, select_epub},
+    message::{Message, select_epub},
     model::format::{Format, FormatPage},
 };
 use epub::doc::EpubDoc;
@@ -34,8 +34,8 @@ pub enum FormatAction {
 impl Format {
     pub fn perform(&mut self, action: FormatAction) -> Task<Message> {
         match action {
-            FormatAction::SetTitle(title) => (self.metadata.title = title).into(),
-            FormatAction::SetAuthors(authors) => (self.metadata.authors = authors).into(),
+            FormatAction::SetTitle(title) => self.set_title(title).into(),
+            FormatAction::SetAuthors(authors) => self.set_authors(authors).into(),
             FormatAction::SetPages { name, pages } => self.set_pages(name, pages).into(),
             FormatAction::SelectEpub => Task::future(select_epub()).and_then(|(path, buffer)| {
                 Task::done(FormatAction::SetEpub { path, buffer }.into())
@@ -44,32 +44,31 @@ impl Format {
                 self.epub_path.parent().unwrap_or(Path::new("")).into(),
             ))
             .and_then(|(name, pages)| Task::done(FormatAction::SetPages { name, pages }.into())),
-            FormatAction::SetEpub { path, buffer } => {
-                Task::done(self.set_epub(path, buffer)).then(|r| match r {
-                    Ok(_) => Task::none(),
-                    Err(error) => Task::future(display_error(error)).discard(),
-                })
-            }
+            FormatAction::SetEpub { path, buffer } => match self.set_epub(path, buffer) {
+                Ok(_) => Task::none(),
+                Err(error) => error.display_error(),
+            },
             FormatAction::Build => Task::done(self.get_build_content())
-                .then(|builder| match builder {
-                    Ok(builder) => Task::done(builder.build()),
-                    Err(error) => Task::done(Err(error)),
-                })
-                .then(|content| match content {
-                    Ok((content, name)) => Task::future(save_epub(content, name)),
-                    Err(error) => Task::done(Err(error)),
-                })
+                .and_then(|builder| Task::done(builder.build()))
+                .and_then(|(content, name)| Task::future(save_epub(content, name)))
                 .then(|e| match e {
                     Ok(_) => Task::none(),
-                    Err(error) => Task::future(display_error(error)),
-                })
-                .discard(),
+                    Err(error) => error.display_error(),
+                }),
         }
     }
 
     fn set_pages(&mut self, name: String, pages: Vec<(PathBuf, String)>) {
         self.pages = pages.into_iter().map(|e| FormatPage::from(e)).collect();
         self.source_folder = name;
+    }
+
+    fn set_title(&mut self, title: String) {
+        self.metadata.title = title
+    }
+
+    fn set_authors(&mut self, authors: String) {
+        self.metadata.authors = authors
     }
 
     fn set_epub(&mut self, path: PathBuf, buffer: Vec<u8>) -> Result<()> {

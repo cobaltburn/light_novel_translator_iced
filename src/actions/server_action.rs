@@ -1,6 +1,5 @@
 use crate::{
     controller::client::Client,
-    message::display_error,
     model::server::{Method, Server, Think},
 };
 use iced::Task;
@@ -33,7 +32,7 @@ impl Server {
         self.client = Client::ollama();
         Task::future(self.client.clone().get_models()).then(|models| match models {
             Ok(models) => Task::done(ServerAction::SetModels(models).into()),
-            Err(error) => Task::future(display_error(error)).discard(),
+            Err(error) => error.display_error(),
         })
     }
 

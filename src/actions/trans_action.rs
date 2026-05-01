@@ -1,7 +1,7 @@
 use crate::{
     actions::{
-        clean_invisible_chars, complete_dialog, get_pages, pick_save_folder, save_file,
-        server_action::ServerAction,
+        clean_invisible_chars, complete_dialog, get_pages, handle_error, pick_save_folder,
+        save_file, server_action::ServerAction,
     },
     controller::{parse::remove_think_tags, part_tag},
     error::{Error, Result},
@@ -63,23 +63,16 @@ impl Translation {
                 page,
                 part,
             } => self.update_content(content, page, part).into(),
-            TransAction::Translate(page) => match self.translate(page) {
-                Ok(task) => task,
-                Err(error) => Task::future(display_error(error)).discard(),
-            },
-            TransAction::TranslatePage(page) => match self.translate_page(page) {
-                Ok(task) => task,
-                Err(error) => Task::future(display_error(error)).discard(),
-            },
-            TransAction::TranslatePart { page, part } => match self.translate_part(page, part) {
-                Ok(task) => task,
-                Err(error) => Task::future(display_error(error)).discard(),
-            },
+            TransAction::Translate(page) => handle_error(self.translate(page)),
+            TransAction::TranslatePage(page) => handle_error(self.translate_page(page)),
+            TransAction::TranslatePart { page, part } => {
+                handle_error(self.translate_part(page, part))
+            }
             TransAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .then(|doc| match doc {
-                    Ok((name, pages)) => Task::done(TransAction::SetEpub { name, pages }.into()),
-                    Err(error) => Task::future(display_error(error)).discard(),
+                    Ok((name, pages)) => Task::done(TransAction::SetEpub { name, pages }),
+                    Err(error) => error.display_error(),
                 }),
             TransAction::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
@@ -105,11 +98,8 @@ impl Translation {
             .position(|p| matches!(p.activity, Activity::Active));
 
         self.server.abort();
-        if let Some(page) = page {
-            Task::done(TransAction::PageComplete(page))
-        } else {
-            Task::none()
-        }
+        page.map(|page| Task::done(TransAction::PageComplete(page)))
+            .unwrap_or_default()
     }
 
     fn set_page(&mut self, page: usize) {
@@ -168,8 +158,8 @@ impl Translation {
             let contents = remove_think_tags(&text);
 
             Task::future(fs::write(file_path, contents)).then(|r| match r {
-                Ok(()) => Task::none(),
-                Err(e) => Task::future(display_error(e)),
+                Ok(_) => Task::none(),
+                Err(error) => Task::future(display_error(error)),
             })
         });
 
