@@ -17,6 +17,7 @@ use ollama_rs::{
         images::Image,
     },
 };
+use reqwest::StatusCode;
 use std::{
     iter,
     ops::Not,
@@ -38,8 +39,20 @@ pub enum Client {
 }
 
 impl Client {
-    pub fn ollama(client: Ollama) -> Client {
-        Client::Ollama(client)
+    pub fn ollama() -> Client {
+        let client = reqwest::ClientBuilder::new()
+            .retry(
+                reqwest::retry::for_host("127.0.0.1")
+                    .max_retries_per_request(2)
+                    .classify_fn(|req| match req.status() {
+                        Some(StatusCode::SERVICE_UNAVAILABLE) => req.retryable(),
+                        Some(StatusCode::TOO_MANY_REQUESTS) => req.retryable(),
+                        _ => req.success(),
+                    }),
+            )
+            .build()
+            .expect("reqwest client builder");
+        Client::Ollama(Ollama::new_with_client("http://127.0.0.1", 11434, client))
     }
 
     pub async fn get_models(self) -> Result<Vec<String>> {
@@ -230,11 +243,7 @@ impl Client {
         }
 
         let skip_pairs = pair_count - context_window;
-        let kept = history[1..]
-            .chunks(2)
-            .skip(skip_pairs)
-            .flatten()
-            .cloned();
+        let kept = history[1..].chunks(2).skip(skip_pairs).flatten().cloned();
 
         *history = iter::once(ChatMessage::system(system_prompt.to_string()))
             .chain(kept)
@@ -246,20 +255,7 @@ impl Client {
             return Err(Error::ServerError("server not connected"));
         };
 
-        let stream = loop {
-            match client.send_chat_messages_stream(request.clone()).await {
-                Ok(stream) => break stream,
-                Err(OllamaError::Other(error)) if error.contains("503") => {
-                    time::sleep(Duration::from_secs(10)).await
-                }
-                Err(OllamaError::Other(error)) if error.contains("429") => {
-                    time::sleep(Duration::from_secs(10)).await
-                }
-                Err(error) => return Err(Error::OllamaError(error)),
-            }
-        };
-
-        Ok(stream)
+        Ok(client.send_chat_messages_stream(request).await?)
     }
 
     async fn stream_history(
@@ -277,20 +273,7 @@ impl Client {
             hist.iter().cloned().chain(user_msgs).collect()
         };
 
-        let stream = loop {
-            match client.send_chat_messages_stream(request.clone()).await {
-                Ok(stream) => break stream,
-                Err(OllamaError::Other(error)) if error.contains("503") => {
-                    time::sleep(Duration::from_secs(10)).await
-                }
-                Err(OllamaError::Other(error)) if error.contains("429") => {
-                    time::sleep(Duration::from_secs(10)).await
-                }
-                Err(error) => return Err(Error::OllamaError(error)),
-            }
-        };
-
-        Ok(stream)
+        Ok(client.send_chat_messages_stream(request).await?)
     }
 
     pub fn extract_text(

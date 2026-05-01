@@ -4,7 +4,6 @@ use crate::{
     model::server::{Method, Server, Think},
 };
 use iced::Task;
-use ollama_rs::Ollama;
 
 #[derive(Debug, Clone)]
 pub enum ServerAction {
@@ -31,7 +30,7 @@ impl Server {
     }
 
     pub fn connect(&mut self) -> Task<ServerAction> {
-        self.client = Client::ollama(Ollama::default());
+        self.client = Client::ollama();
         Task::future(self.client.clone().get_models()).then(|models| match models {
             Ok(models) => Task::done(ServerAction::SetModels(models).into()),
             Err(error) => Task::future(display_error(error)).discard(),
