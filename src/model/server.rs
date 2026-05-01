@@ -16,6 +16,7 @@ use ollama_rs::{
 };
 use quick_xml::{Writer, events::BytesText};
 use std::{
+    cell::LazyCell,
     collections::HashMap,
     ffi::OsStr,
     io::Cursor,
@@ -23,8 +24,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-const REPEAT_PENALTY: f32 = 1.3;
-const MAX_TOKENS: u64 = 8192;
+const MODEL_OPTIONS: LazyCell<ModelOptions> = LazyCell::new(|| {
+    ModelOptions::default()
+        .repeat_penalty(1.05)
+        .num_ctx(8192)
+        .temperature(0.3)
+        .top_p(0.8)
+});
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -73,12 +79,8 @@ impl Server {
                             ChatMessage::user(section.japanese.clone()),
                         ],
                     )
-                    .think(self.settings.think)
-                    .options(
-                        ModelOptions::default()
-                            .repeat_penalty(REPEAT_PENALTY)
-                            .num_ctx(MAX_TOKENS),
-                    ),
+                    .options(MODEL_OPTIONS.clone())
+                    .think(self.settings.think),
                     page,
                     part,
                 )
@@ -128,12 +130,8 @@ impl Server {
                         model.to_string(),
                         vec![ChatMessage::user(section.japanese.clone())],
                     )
-                    .think(self.settings.think)
-                    .options(
-                        ModelOptions::default()
-                            .repeat_penalty(REPEAT_PENALTY)
-                            .num_ctx(MAX_TOKENS),
-                    ),
+                    .options(MODEL_OPTIONS.clone())
+                    .think(self.settings.think),
                     history.clone(),
                     self.settings.context_window,
                     page,
@@ -164,12 +162,8 @@ impl Server {
         };
 
         let request = ChatMessageRequest::new(model, messages)
-            .think(self.settings.think)
-            .options(
-                ModelOptions::default()
-                    .repeat_penalty(REPEAT_PENALTY)
-                    .num_ctx(MAX_TOKENS),
-            );
+            .options(MODEL_OPTIONS.clone())
+            .think(self.settings.think);
 
         let task = match self.method {
             Method::History => {
@@ -235,12 +229,8 @@ impl Server {
                         ChatMessage::user(prompt),
                     ],
                 )
-                .think(self.settings.think)
-                .options(
-                    ModelOptions::default()
-                        .repeat_penalty(REPEAT_PENALTY)
-                        .num_ctx(MAX_TOKENS),
-                );
+                .options(MODEL_OPTIONS.clone())
+                .think(self.settings.think);
                 self.client.clone().consensus(request, page, part)
             })
             .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
@@ -273,12 +263,8 @@ impl Server {
                     ChatMessage::user(prompt),
                 ],
             )
-            .think(self.settings.think)
-            .options(
-                ModelOptions::default()
-                    .repeat_penalty(REPEAT_PENALTY)
-                    .num_ctx(MAX_TOKENS),
-            ),
+            .options(MODEL_OPTIONS.clone())
+            .think(self.settings.think),
             page,
             part,
         )?;
