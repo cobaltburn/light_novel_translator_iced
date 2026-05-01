@@ -27,7 +27,7 @@ use std::{
 use tokio::time;
 use tokio_stream::StreamExt;
 
-const MAX_WAIT: Duration = Duration::from_millis(500);
+const MAX_WAIT: Duration = Duration::from_millis(250);
 const CHUNK_SIZE: usize = 50;
 
 #[non_exhaustive]
@@ -43,10 +43,14 @@ impl Client {
         let client = reqwest::ClientBuilder::new()
             .retry(
                 reqwest::retry::for_host("127.0.0.1")
-                    .max_retries_per_request(2)
+                    .max_retries_per_request(10)
                     .classify_fn(|req| match req.status() {
-                        Some(StatusCode::SERVICE_UNAVAILABLE) => req.retryable(),
-                        Some(StatusCode::TOO_MANY_REQUESTS) => req.retryable(),
+                        Some(
+                            StatusCode::SERVICE_UNAVAILABLE
+                            | StatusCode::INTERNAL_SERVER_ERROR
+                            | StatusCode::TOO_MANY_REQUESTS
+                            | StatusCode::BAD_GATEWAY,
+                        ) => req.retryable(),
                         _ => req.success(),
                     }),
             )

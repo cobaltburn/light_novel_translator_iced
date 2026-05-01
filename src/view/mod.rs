@@ -2,7 +2,7 @@ use iced::widget::container::transparent;
 use iced::widget::text::{Span, Wrapping};
 use iced::widget::{button, container, rich_text, scrollable, span, text};
 use iced::{
-    Border, Color, Font, Length, Padding,
+    Border, Color, Length, Padding,
     alignment::{Horizontal, Vertical},
     widget::{
         Button, Container,
@@ -43,16 +43,13 @@ impl fmt::Display for View {
     }
 }
 
-pub const NOTO_SANS: Font = Font::with_name("Noto Sans CJK JP");
-
 pub fn text_scrollable<'a, T: fmt::Display, E: 'a>(content: T) -> Container<'a, E> {
     let scroll = scrollable(
         text(content.to_string())
             .width(Length::Fill)
             .align_x(Horizontal::Left)
             .align_y(Vertical::Center)
-            .wrapping(Wrapping::WordOrGlyph)
-            .font(NOTO_SANS),
+            .wrapping(Wrapping::WordOrGlyph),
     )
     .anchor_top()
     .width(Length::Fill);
@@ -74,8 +71,7 @@ pub fn rich_text_scrollable<'a, E: 'a>(content: Vec<Span<'a>>) -> Element<'a, E>
         rich_text(content)
             .width(Length::Fill)
             .align_x(Horizontal::Left)
-            .align_y(Vertical::Center)
-            .font(NOTO_SANS),
+            .align_y(Vertical::Center),
     )
     .spacing(5)
     .anchor_top()

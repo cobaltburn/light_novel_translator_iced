@@ -1,8 +1,13 @@
 use crate::{
     actions::consensus_action::ConsensusAction,
-    model::{Activity, page::Page, server::Server},
+    model::{
+        Activity,
+        page::{Page, Section},
+        server::Server,
+    },
     widget::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
 };
+use iced::widget::button::Status;
 use iced::{
     Border, Color, Element, Length, Padding, Renderer, Theme,
     alignment::Vertical,
@@ -47,6 +52,10 @@ impl Consensus {
 
     pub fn current_size_errors(&self) -> Option<&[usize]> {
         Some(&self.pages.get(self.current_page)?.size_error)
+    }
+
+    pub fn current_sections(&self) -> Option<&[Section]> {
+        Some(&self.pages.get(self.current_page)?.sections)
     }
 
     pub fn candidate_items(&self) -> Vec<Item<'_, ConsensusAction, Theme, Renderer>> {
@@ -108,15 +117,16 @@ pub fn build_path_buttons(deps: &SidebarDeps) -> Column<'static, ConsensusAction
             let activity = entry.activity.clone();
             let section_count = entry.section_count;
 
-            let button_text = text!("{}. {}", i + 1, &name)
-                .width(Length::Fill)
-                .style(move |theme| {
-                    if current == i {
-                        text::primary(theme)
-                    } else {
-                        text::default(theme)
-                    }
-                });
+            let button_text =
+                text!("{}. {}", i + 1, &name)
+                    .width(Length::Fill)
+                    .style(move |theme| {
+                        if current == i {
+                            text::primary(theme)
+                        } else {
+                            text::default(theme)
+                        }
+                    });
 
             let button_content = row![button_text]
                 .push(match activity {
@@ -168,7 +178,10 @@ fn path_button_overlay<'a>(
 fn candidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusAction> {
     let x_button = i.map(|i| {
         button(text("x").center())
-            .style(button::text)
+            .style(|theme, status| match status {
+                Status::Hovered => button::primary(theme, status),
+                _ => button::text(theme, status),
+            })
             .on_press(ConsensusAction::DropCandidate(i))
     });
 
@@ -179,6 +192,7 @@ fn candidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusActi
                 .push(x_button)
                 .align_y(Vertical::Center)
         )
+        .height(35)
         .width(Length::Fill)
         .padding(5)
         .style(|theme| {

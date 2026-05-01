@@ -24,6 +24,7 @@ use std::{
 };
 
 const REPEAT_PENALTY: f32 = 1.3;
+const MAX_TOKENS: u64 = 8192;
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -72,8 +73,12 @@ impl Server {
                             ChatMessage::user(section.japanese.clone()),
                         ],
                     )
-                    .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
-                    .think(self.settings.think),
+                    .think(self.settings.think)
+                    .options(
+                        ModelOptions::default()
+                            .repeat_penalty(REPEAT_PENALTY)
+                            .num_ctx(MAX_TOKENS),
+                    ),
                     page,
                     part,
                 )
@@ -92,10 +97,16 @@ impl Server {
     ) -> Result<Task<TransAction>> {
         let (current, history_pages) = pages.split_last().expect("dont pass an empty array");
 
-        let mut recent: Vec<&Section> = history_pages
+        let mut recent: Vec<&Section> = current
+            .sections
             .iter()
             .rev()
-            .flat_map(|p| p.sections.iter().rev())
+            .chain(
+                history_pages
+                    .iter()
+                    .rev()
+                    .flat_map(|p| p.sections.iter().rev()),
+            )
             .filter(|s| !s.content.is_empty())
             .take(self.settings.context_window)
             .collect();
@@ -117,8 +128,12 @@ impl Server {
                         model.to_string(),
                         vec![ChatMessage::user(section.japanese.clone())],
                     )
-                    .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
-                    .think(self.settings.think),
+                    .think(self.settings.think)
+                    .options(
+                        ModelOptions::default()
+                            .repeat_penalty(REPEAT_PENALTY)
+                            .num_ctx(MAX_TOKENS),
+                    ),
                     history.clone(),
                     self.settings.context_window,
                     page,
@@ -149,8 +164,12 @@ impl Server {
         };
 
         let request = ChatMessageRequest::new(model, messages)
-            .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
-            .think(self.settings.think);
+            .think(self.settings.think)
+            .options(
+                ModelOptions::default()
+                    .repeat_penalty(REPEAT_PENALTY)
+                    .num_ctx(MAX_TOKENS),
+            );
 
         let task = match self.method {
             Method::History => {
@@ -216,8 +235,12 @@ impl Server {
                         ChatMessage::user(prompt),
                     ],
                 )
-                .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
-                .think(self.settings.think);
+                .think(self.settings.think)
+                .options(
+                    ModelOptions::default()
+                        .repeat_penalty(REPEAT_PENALTY)
+                        .num_ctx(MAX_TOKENS),
+                );
                 self.client.clone().consensus(request, page, part)
             })
             .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
@@ -250,8 +273,12 @@ impl Server {
                     ChatMessage::user(prompt),
                 ],
             )
-            .options(ModelOptions::default().repeat_penalty(REPEAT_PENALTY))
-            .think(self.settings.think),
+            .think(self.settings.think)
+            .options(
+                ModelOptions::default()
+                    .repeat_penalty(REPEAT_PENALTY)
+                    .num_ctx(MAX_TOKENS),
+            ),
             page,
             part,
         )?;
