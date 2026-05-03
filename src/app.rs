@@ -3,8 +3,8 @@ use crate::{
     message::Message,
     model::translator::Translator,
     view::{
-        View, consensus_view::consensus_view, doc_view::doc_view, extraction_view::extraction_view,
-        format_view::format_view, translation_view::translation_view,
+        View, consensus_view::consensus_view, doc_view::doc_view, format_view::format_view,
+        translation_view::translation_view,
     },
     widget::side_bar::side_bar_container,
 };
@@ -24,6 +24,8 @@ pub const ICONS: LazyCell<PathBuf> = LazyCell::new(|| {
         .to_path_buf()
         .join("icons")
 });
+
+pub const PID: LazyCell<u32> = LazyCell::new(|| std::process::id());
 
 pub const RECOVERY_DIR: LazyCell<PathBuf> =
     LazyCell::new(|| std::env::temp_dir().join("light_novel_translator"));
@@ -53,7 +55,6 @@ impl Translator {
             View::Doc => doc_view(&self.doc).map(Into::into),
             View::Translation => translation_view(&self.translations, self.active_tab),
             View::Format => format_view(&self.format).map(Into::into),
-            View::Extraction => extraction_view(&self.extraction).map(Into::into),
             View::Consensus => consensus_view(&self.consensus).map(Into::into),
         }
     }

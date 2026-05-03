@@ -16,7 +16,6 @@ use crate::controller::part_tag;
 
 pub mod consensus_view;
 pub mod doc_view;
-pub mod extraction_view;
 pub mod format_view;
 pub mod translation_view;
 
@@ -27,7 +26,6 @@ pub enum View {
     Doc,
     Consensus,
     Format,
-    Extraction,
 }
 
 impl fmt::Display for View {
@@ -36,7 +34,6 @@ impl fmt::Display for View {
             View::Doc => "Document",
             View::Format => "Build",
             View::Translation => "Translation",
-            View::Extraction => "Extraction",
             View::Consensus => "Consensus",
         };
         write!(f, "{}", view)

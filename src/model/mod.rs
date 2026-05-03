@@ -1,6 +1,5 @@
 pub mod consensus;
 pub mod doc;
-pub mod extraction;
 pub mod format;
 pub mod page;
 pub mod server;

@@ -2,35 +2,19 @@ use crate::{
     actions::{
         consensus_action::ConsensusAction, server_action::ServerAction, trans_action::TransAction,
     },
-    controller::client::{CONSENSUS_PROMPT, Client, TRANSLATION_PROMPT},
+    controller::client::Client,
     error::{Error, Result},
     model::page::{Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
-use ollama_rs::{
-    generation::{
-        chat::{ChatMessage, request::ChatMessageRequest},
-        parameters::ThinkType,
-    },
-    models::ModelOptions,
-};
 use quick_xml::{Writer, events::BytesText};
 use std::{
-    cell::LazyCell,
     collections::HashMap,
     ffi::OsStr,
     io::Cursor,
     iter,
     sync::{Arc, Mutex},
 };
-
-const MODEL_OPTIONS: LazyCell<ModelOptions> = LazyCell::new(|| {
-    ModelOptions::default()
-        .repeat_penalty(1.05)
-        .num_ctx(8192)
-        .temperature(0.3)
-        .top_p(0.8)
-});
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -66,21 +50,16 @@ impl Server {
         page: usize,
     ) -> Result<Task<TransAction>> {
         let current = pages.last().expect("dont pass an empty array");
+
         let tasks: Result<Vec<_>> = current
             .sections
             .iter()
             .enumerate()
             .map(|(part, section)| {
                 self.client.clone().translate(
-                    ChatMessageRequest::new(
-                        model.to_string(),
-                        vec![
-                            ChatMessage::system(TRANSLATION_PROMPT.to_string()),
-                            ChatMessage::user(section.japanese.clone()),
-                        ],
-                    )
-                    .options(MODEL_OPTIONS.clone())
-                    .think(self.settings.think),
+                    section.japanese.clone(),
+                    model.to_string(),
+                    self.settings.think,
                     page,
                     part,
                 )
@@ -114,8 +93,9 @@ impl Server {
             .collect();
         recent.reverse();
 
-        let history: Vec<_> = iter::once(ChatMessage::system(TRANSLATION_PROMPT.to_owned()))
-            .chain(recent.into_iter().flat_map(Section::history_message))
+        let history: Vec<_> = recent
+            .into_iter()
+            .flat_map(Section::history_message)
             .collect();
 
         let history = Arc::new(Mutex::new(history));
@@ -126,14 +106,11 @@ impl Server {
             .enumerate()
             .map(|(part, section)| {
                 self.client.clone().translate_history(
-                    ChatMessageRequest::new(
-                        model.to_string(),
-                        vec![ChatMessage::user(section.japanese.clone())],
-                    )
-                    .options(MODEL_OPTIONS.clone())
-                    .think(self.settings.think),
+                    section.japanese.clone(),
+                    model.to_string(),
                     history.clone(),
                     self.settings.context_window,
+                    self.settings.think,
                     page,
                     part,
                 )
@@ -153,17 +130,6 @@ impl Server {
     ) -> Result<Task<TransAction>> {
         let current = pages.last().unwrap();
         let section = current.sections.get(part).unwrap().clone();
-        let messages = match self.method {
-            Method::History => vec![ChatMessage::user(section.japanese.clone())],
-            _ => vec![
-                ChatMessage::system(TRANSLATION_PROMPT.to_string()),
-                ChatMessage::user(section.japanese.clone()),
-            ],
-        };
-
-        let request = ChatMessageRequest::new(model, messages)
-            .options(MODEL_OPTIONS.clone())
-            .think(self.settings.think);
 
         let task = match self.method {
             Method::History => {
@@ -184,20 +150,30 @@ impl Server {
                     .collect();
                 recent.reverse();
 
-                let history: Vec<_> =
-                    iter::once(ChatMessage::system(TRANSLATION_PROMPT.to_owned()))
-                        .chain(recent.into_iter().flat_map(Section::history_message))
-                        .collect();
+                let history: Vec<_> = recent
+                    .into_iter()
+                    .flat_map(Section::history_message)
+                    .collect();
+
+                let history = Arc::new(Mutex::new(history));
 
                 self.client.clone().translate_history(
-                    request,
-                    Arc::new(Mutex::new(history)),
+                    section.japanese.clone(),
+                    model.to_string(),
+                    history.clone(),
                     self.settings.context_window,
+                    self.settings.think,
                     page,
                     part,
                 )?
             }
-            _ => self.client.clone().translate(request, page, part)?,
+            _ => self.client.clone().translate(
+                section.japanese.clone(),
+                model.to_string(),
+                self.settings.think,
+                page,
+                part,
+            )?,
         };
 
         Ok(Self::add_handle(&mut self.handles, task))
@@ -222,16 +198,13 @@ impl Server {
             .map(|(part, section)| {
                 let candidates: Vec<_> = candidates.iter().flat_map(|e| e.get(part)).collect();
                 let prompt = consensus_prompt(&section.japanese, &candidates)?;
-                let request = ChatMessageRequest::new(
+                self.client.clone().consensus(
+                    prompt,
                     model.to_string(),
-                    vec![
-                        ChatMessage::system(CONSENSUS_PROMPT.to_string()),
-                        ChatMessage::user(prompt),
-                    ],
+                    self.settings.think,
+                    page,
+                    part,
                 )
-                .options(MODEL_OPTIONS.clone())
-                .think(self.settings.think);
-                self.client.clone().consensus(request, page, part)
             })
             .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
             .collect();
@@ -256,15 +229,9 @@ impl Server {
         let prompt = consensus_prompt(&section.japanese, &page_candidates)?;
 
         let task = self.client.clone().consensus(
-            ChatMessageRequest::new(
-                model,
-                vec![
-                    ChatMessage::system(CONSENSUS_PROMPT.to_string()),
-                    ChatMessage::user(prompt),
-                ],
-            )
-            .options(MODEL_OPTIONS.clone())
-            .think(self.settings.think),
+            prompt,
+            model.to_string(),
+            self.settings.think,
             page,
             part,
         )?;
@@ -365,13 +332,13 @@ pub enum Think {
     None,
 }
 
-impl Into<ThinkType> for Think {
-    fn into(self) -> ThinkType {
+impl std::fmt::Display for Think {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Think::High => ThinkType::High,
-            Think::Medium => ThinkType::Medium,
-            Think::Low => ThinkType::Low,
-            Think::None => ThinkType::False,
+            Think::High => f.write_str("high"),
+            Think::Medium => f.write_str("medium"),
+            Think::Low => f.write_str("low"),
+            Think::None => f.write_str("false"),
         }
     }
 }

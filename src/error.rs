@@ -11,9 +11,6 @@ pub enum Error {
     #[error(transparent)]
     FromUtf8Error(#[from] std::string::FromUtf8Error),
 
-    #[error(transparent)]
-    OllamaError(#[from] ollama_rs::error::OllamaError),
-
     #[error("ServerError: {0}")]
     ServerError(&'static str),
 
@@ -52,6 +49,15 @@ pub enum Error {
 
     #[error(transparent)]
     IcedError(#[from] iced::Error),
+
+    #[error(transparent)]
+    ModelError(#[from] rig::model::ModelListingError),
+
+    #[error(transparent)]
+    StreamError(#[from] rig::agent::StreamingError),
+
+    #[error(transparent)]
+    SerdeJsonError(#[from] serde_json::Error),
 }
 
 impl Error {

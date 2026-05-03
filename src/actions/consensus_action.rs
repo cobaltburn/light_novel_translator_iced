@@ -136,27 +136,20 @@ impl Consensus {
         let Some(pages) = self.pages.get(..page + 1) else {
             let file_name = self.file_name();
             self.server.abort();
-            return Ok(
-                Task::future(complete_dialog(file_name.clone())).then(move |x| match x {
-                    true => Task::done(ConsensusAction::SaveTranslation(file_name.to_owned())),
-                    false => Task::none(),
-                }),
-            );
+            return Ok(Task::future(complete_dialog(file_name.clone())).discard());
         };
 
         let candidates = candidates_map(&self.candidates, page);
 
         let task = self.server.consensus(pages, candidates, &model, page)?;
+        let complete_task = self
+            .server
+            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
+        let next_task = self
+            .server
+            .bind_handle(Task::done(ConsensusAction::Consensus(page + 1)));
 
-        Ok(task
-            .chain(
-                self.server
-                    .bind_handle(Task::done(ConsensusAction::PageComplete(page))),
-            )
-            .chain(
-                self.server
-                    .bind_handle(Task::done(ConsensusAction::Consensus(page + 1))),
-            ))
+        Ok(task.chain(complete_task).chain(next_task))
     }
 
     pub fn consensus_page(&mut self, page: usize) -> Result<Task<ConsensusAction>> {

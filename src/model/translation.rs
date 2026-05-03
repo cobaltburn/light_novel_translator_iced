@@ -111,15 +111,16 @@ pub fn build_path_buttons(deps: &SidebarDeps) -> Column<'static, TransAction> {
             let activity = entry.activity.clone();
             let section_count = entry.section_count;
 
-            let button_text = text!("{}. {}", i + 1, &name)
-                .width(Length::Fill)
-                .style(move |theme| {
-                    if current == i {
-                        text::primary(theme)
-                    } else {
-                        text::default(theme)
-                    }
-                });
+            let button_text =
+                text!("{}. {}", i + 1, &name)
+                    .width(Length::Fill)
+                    .style(move |theme| {
+                        if current == i {
+                            text::primary(theme)
+                        } else {
+                            text::default(theme)
+                        }
+                    });
 
             let button_content = row![button_text]
                 .push(match activity {
@@ -148,12 +149,12 @@ impl From<Server> for Translation {
     }
 }
 
-fn path_button_overlay<'a>(
+fn path_button_overlay(
     count: usize,
     name: String,
     page: usize,
     inactive: bool,
-) -> Element<'a, TransAction> {
+) -> Element<'static, TransAction> {
     let overlay = column![
         context_menu_button(text("save").color(Color::WHITE))
             .on_press(TransAction::SavePage { name, page }),

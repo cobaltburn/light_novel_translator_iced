@@ -1,15 +1,18 @@
-use ollama_rs::generation::chat::ChatMessage;
-
 use crate::{actions::contains_japanese, model::Activity};
+use rig::message::Message;
+use serde::{Deserialize, Serialize};
 use std::{ffi::OsStr, iter, path::PathBuf};
 
 #[non_exhaustive]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct Page {
     pub path: PathBuf,
     pub sections: Vec<Section>,
+    #[serde(skip)]
     pub activity: Activity,
+    #[serde(skip)]
     pub size_error: Vec<usize>,
+    #[serde(skip)]
     pub jap_error: Vec<usize>,
 }
 
@@ -85,7 +88,7 @@ impl Page {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Section {
     pub japanese: String,
     pub content: String,
@@ -99,10 +102,10 @@ impl Section {
         }
     }
 
-    pub fn history_message(&self) -> [ChatMessage; 2] {
+    pub fn history_message(&self) -> [Message; 2] {
         [
-            ChatMessage::user(self.japanese.clone()),
-            ChatMessage::assistant(self.content.clone()),
+            Message::user(self.japanese.clone()),
+            Message::assistant(self.content.clone()),
         ]
     }
 }

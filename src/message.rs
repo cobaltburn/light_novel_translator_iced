@@ -1,7 +1,7 @@
 use crate::{
     actions::{
-        consensus_action::ConsensusAction, doc_action::DocAction, extraction_action::ExtractAction,
-        format_action::FormatAction, trans_action::TransAction,
+        consensus_action::ConsensusAction, doc_action::DocAction, format_action::FormatAction,
+        trans_action::TransAction,
     },
     error::Error,
     model::translator::Translator,
@@ -16,7 +16,6 @@ pub enum Message {
     DocAction(DocAction),
     TransAction(usize, TransAction),
     FormatAction(FormatAction),
-    ExtractAction(ExtractAction),
     ConsensusAction(ConsensusAction),
     SetView(View),
     ToggleSideBar,
@@ -32,7 +31,6 @@ impl Translator {
             Message::DocAction(action) => self.doc.perform(action),
             Message::TransAction(tab, action) => self.translation_action(tab, action),
             Message::FormatAction(action) => self.format.perform(action),
-            Message::ExtractAction(action) => self.extraction.perform(action).map(Into::into),
             Message::ConsensusAction(action) => self.consensus.perform(action).map(Into::into),
             Message::SetView(view) => self.set_view(view).into(),
             Message::ToggleSideBar => self.toggle_side_bar_collapse().into(),
@@ -53,12 +51,6 @@ impl From<DocAction> for Message {
 impl From<FormatAction> for Message {
     fn from(action: FormatAction) -> Self {
         Message::FormatAction(action)
-    }
-}
-
-impl From<ExtractAction> for Message {
-    fn from(action: ExtractAction) -> Self {
-        Message::ExtractAction(action)
     }
 }
 

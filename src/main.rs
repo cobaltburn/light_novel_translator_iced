@@ -12,7 +12,9 @@ pub mod widget;
 
 fn main() -> Result<()> {
     tracing_subscriber::registry()
-        .with(EnvFilter::new("light_novel_translator_iced=debug,error"))
+        .with(EnvFilter::new(
+            "light_novel_translator_iced=debug,reqwest_retry=warn,error",
+        ))
         .with(tracing_subscriber::fmt::layer())
         .init();
     log::info!("logging is enabled");

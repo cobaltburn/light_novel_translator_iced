@@ -3,6 +3,7 @@ use crate::{
         clean_invisible_chars, complete_dialog, get_pages, handle_error, pick_save_folder,
         save_file, server_action::ServerAction,
     },
+    app::PID,
     controller::{parse::remove_think_tags, part_tag},
     error::{Error, Result},
     message::{display_error, select_epub},
@@ -27,6 +28,7 @@ pub enum TransAction {
         name: String,
         page: usize,
     },
+    Save(PathBuf),
     OpenEpub,
     SetEpub {
         name: PathBuf,
@@ -68,6 +70,7 @@ impl Translation {
             TransAction::TranslatePart { page, part } => {
                 handle_error(self.translate_part(page, part))
             }
+            TransAction::Save(path) => handle_error(self.save_json(path)),
             TransAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .then(|doc| match doc {
@@ -89,6 +92,14 @@ impl Translation {
                 section.content.push_str(&content);
             };
         };
+    }
+
+    fn save_json(&self, path: PathBuf) -> Result<Task<TransAction>> {
+        let contents = serde_json::to_string_pretty(&self.pages)?;
+        Ok(Task::future(fs::write(path, contents)).then(|e| match e {
+            Err(error) => Error::from(error).display_error(),
+            Ok(_) => Task::none(),
+        }))
     }
 
     fn cancel(&mut self) -> Task<TransAction> {
@@ -184,12 +195,7 @@ impl Translation {
         let Some(pages) = self.pages.get_mut(..page + 1) else {
             let file_name = self.file_name();
             self.server.abort();
-            return Ok(
-                Task::future(complete_dialog(file_name.clone())).then(move |x| match x {
-                    true => Task::done(TransAction::SaveTranslation(file_name.to_owned())),
-                    false => Task::none(),
-                }),
-            );
+            return Ok(Task::future(complete_dialog(file_name.clone())).discard());
         };
 
         let current_page = pages.last_mut().unwrap();
@@ -201,11 +207,25 @@ impl Translation {
         let complete_task = self
             .server
             .bind_handle(Task::done(TransAction::PageComplete(page)));
+
+        let backup = self
+            .file_path
+            .with_extension(model)
+            .with_added_extension(PID.to_string())
+            .with_added_extension("json");
+
+        let backup_task = self
+            .server
+            .bind_handle(Task::done(TransAction::Save(backup)));
+
         let next_task = self
             .server
             .bind_handle(Task::done(TransAction::Translate(page + 1)));
 
-        Ok(task.chain(complete_task).chain(next_task))
+        Ok(task
+            .chain(complete_task)
+            .chain(backup_task)
+            .chain(next_task))
     }
 
     pub fn translate_page(&mut self, page: usize) -> Result<Task<TransAction>> {

@@ -1,31 +1,25 @@
 use crate::{
-    actions::{
-        consensus_action::ConsensusAction, extraction_action::ExtractAction,
-        server_action::ServerAction, trans_action::TransAction,
-    },
+    actions::{consensus_action::ConsensusAction, trans_action::TransAction},
     error::{Error, Result},
-    message::display_error,
-    model::server::{Settings, Think},
+    model::server::Think,
 };
 use iced::Task;
-use ollama_rs::{
-    Ollama,
-    error::OllamaError,
-    generation::{
-        chat::{ChatMessage, ChatMessageResponseStream, request::ChatMessageRequest},
-        completion::{GenerationResponseStream, request::GenerationRequest},
-        images::Image,
-    },
+use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
+use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
+use rig::{
+    agent::{MultiTurnStreamItem, StreamingError},
+    client::{CompletionClient, ModelListingClient, Nothing},
+    completion::CompletionError,
+    message::Message,
+    providers::ollama::{self, OllamaApiKey, OllamaExt},
+    streaming::{StreamedAssistantContent, StreamingChat, StreamingPrompt},
 };
-use reqwest::StatusCode;
 use std::{
-    iter,
     ops::Not,
     result,
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio::time;
 use tokio_stream::StreamExt;
 
 const MAX_WAIT: Duration = Duration::from_millis(250);
@@ -36,35 +30,30 @@ const CHUNK_SIZE: usize = 50;
 pub enum Client {
     #[default]
     Disconnected,
-    Ollama(Ollama),
+    Ollama(rig::client::Client<OllamaExt, ClientWithMiddleware>),
 }
 
 impl Client {
     pub fn ollama() -> Client {
-        let client = reqwest::ClientBuilder::new()
-            .retry(
-                reqwest::retry::for_host("127.0.0.1")
-                    .max_retries_per_request(10)
-                    .classify_fn(|req| match req.status() {
-                        Some(
-                            StatusCode::SERVICE_UNAVAILABLE
-                            | StatusCode::INTERNAL_SERVER_ERROR
-                            | StatusCode::TOO_MANY_REQUESTS
-                            | StatusCode::BAD_GATEWAY,
-                        ) => req.retryable(),
-                        _ => req.success(),
-                    }),
-            )
+        let policy = ExponentialBackoff::builder()
+            .retry_bounds(Duration::from_secs(5), Duration::from_secs(30 * 60))
+            .build_with_total_retry_duration(Duration::from_secs(30));
+        let http = MiddlewareBuilder::new(Default::default())
+            .with(RetryTransientMiddleware::new_with_policy(policy))
+            .build();
+        let client = ollama::Client::builder()
+            .api_key(OllamaApiKey::from(Nothing))
+            .http_client(http)
             .build()
-            .expect("reqwest client builder");
-        Client::Ollama(Ollama::new_with_client("http://127.0.0.1", 11434, client))
+            .unwrap();
+        Client::Ollama(client)
     }
 
     pub async fn get_models(self) -> Result<Vec<String>> {
         match self {
             Client::Ollama(client) => {
-                let models = client.list_local_models().await?;
-                let mut models: Vec<_> = models.into_iter().map(|model| model.name).collect();
+                let models = client.list_models().await?;
+                let mut models: Vec<_> = models.into_iter().map(|model| model.id).collect();
                 models.sort();
                 Ok(models)
             }
@@ -74,252 +63,227 @@ impl Client {
 
     pub fn translate(
         self,
-        request: ChatMessageRequest,
+        prompt: String,
+        model: String,
+        think: Think,
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
-        if let Client::Disconnected = self {
-            return Err(Error::ServerError("server disconnected"));
-        }
+        let Client::Ollama(client) = self else {
+            return Err(Error::ServerError("server not connected"));
+        };
 
-        Ok(Self::run_chat_task(
-            self.stream(request),
-            move |content| TransAction::UpdateContent {
-                content,
-                page,
-                part,
-            },
-            TransAction::CancelTranslate,
-        )
-        .chain(Task::done(TransAction::CleanText { page, part })))
+        let agent = client
+            .agent(model)
+            .preamble(TRANSLATION_PROMPT)
+            .temperature(0.3)
+            .additional_params(serde_json::json!({
+                "num_ctx": 8192,
+                "top_p": 0.8,
+                "repeat_penalty": 1.05,
+                "think": !matches!(think, Think::None),
+            }))
+            .build();
+
+        let task = Task::future(async move { agent.stream_prompt(prompt).await })
+            .then(|stream| {
+                Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |r| {
+                    r.into_iter()
+                        .filter_map(|e| match e {
+                            Err(StreamingError::Completion(CompletionError::JsonError(_))) => None,
+                            e => Some(e),
+                        })
+                        .collect::<result::Result<Vec<_>, _>>()
+                })
+            })
+            .and_then(move |items| {
+                let content = items
+                    .into_iter()
+                    .flat_map(|r| match r {
+                        MultiTurnStreamItem::StreamAssistantItem(
+                            StreamedAssistantContent::Text(t),
+                        ) if t.text.is_empty() => None,
+                        MultiTurnStreamItem::StreamAssistantItem(
+                            StreamedAssistantContent::Text(t),
+                        ) => Some(t.text),
+                        _ => None,
+                    })
+                    .collect::<String>();
+                Task::done(Ok(content))
+            })
+            .then(move |content| match content {
+                Ok(content) if content.is_empty() => Task::none(),
+                Ok(content) => Task::done(TransAction::UpdateContent {
+                    content,
+                    page,
+                    part,
+                }),
+                Err(error) => {
+                    log::error!("{:#?}", error);
+                    Task::done(TransAction::CancelTranslate)
+                        .chain(Error::from(error).display_error())
+                }
+            })
+            .chain(Task::done(TransAction::CleanText { page, part }));
+
+        Ok(task)
     }
 
     pub fn translate_history(
         self,
-        request: ChatMessageRequest,
-        history: Arc<Mutex<Vec<ChatMessage>>>,
+        prompt: String,
+        model: String,
+        history: Arc<Mutex<Vec<Message>>>,
         context_window: usize,
+        think: Think,
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
-        if let Client::Disconnected = self {
-            return Err(Error::ServerError("server disconnected"));
-        }
+        let Client::Ollama(client) = self else {
+            return Err(Error::ServerError("server not connected"));
+        };
 
-        let user_msg = request
-            .messages
-            .last()
-            .cloned()
-            .ok_or(Error::ServerError("missing user message"))?;
-        let acc = Arc::new(Mutex::new(String::new()));
-        let acc_for_stream = acc.clone();
+        let agent = client
+            .agent(model)
+            .preamble(TRANSLATION_PROMPT)
+            .temperature(0.3)
+            .additional_params(serde_json::json!({
+                "num_ctx": 8192,
+                "top_p": 0.8,
+                "repeat_penalty": 1.05,
+                "think": !matches!(think, Think::None),
+            }))
+            .build();
 
-        Ok(Self::run_chat_task(
-            self.stream_history(request, history.clone()),
-            move |content| {
-                acc_for_stream.lock().unwrap().push_str(&content);
-                TransAction::UpdateContent {
+        let chat_history = history.clone();
+        let task =
+            Task::future(async move {
+                let chat_history = chat_history.lock().unwrap().to_vec();
+                agent.stream_chat(prompt, chat_history).await
+            })
+            .then(|stream| {
+                Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |r| {
+                    r.into_iter()
+                        .filter_map(|e| match e {
+                            Err(StreamingError::Completion(CompletionError::JsonError(_))) => None,
+                            e => Some(e),
+                        })
+                        .collect::<result::Result<Vec<_>, _>>()
+                })
+            })
+            .and_then(move |items| {
+                let content = items
+                    .into_iter()
+                    .flat_map(|r| match r {
+                        MultiTurnStreamItem::StreamAssistantItem(
+                            StreamedAssistantContent::Text(t),
+                        ) if t.text.is_empty() => None,
+                        MultiTurnStreamItem::StreamAssistantItem(
+                            StreamedAssistantContent::Text(t),
+                        ) => Some(t.text),
+                        MultiTurnStreamItem::FinalResponse(response) => {
+                            if let Some(hist) = response.history() {
+                                let mut shared = history.lock().unwrap();
+                                shared.extend_from_slice(hist);
+                                Self::shift_history(&mut shared, context_window);
+                            }
+                            None
+                        }
+                        _ => None,
+                    })
+                    .collect::<String>();
+                Task::done(Ok(content))
+            })
+            .then(move |content| match content {
+                Ok(content) if content.is_empty() => Task::none(),
+                Ok(content) => Task::done(TransAction::UpdateContent {
                     content,
                     page,
                     part,
-                }
-            },
-            TransAction::CancelTranslate,
-        )
-        .chain(Task::future(async move {
-            let assistant = std::mem::take(&mut *acc.lock().unwrap());
-            if !assistant.is_empty() {
-                let mut hist = history.lock().unwrap();
-                hist.push(user_msg);
-                hist.push(ChatMessage::assistant(assistant));
-            }
-            Self::shift_history(history, context_window, TRANSLATION_PROMPT);
-            TransAction::CleanText { page, part }
-        })))
+                }),
+                Err(error) => Task::done(TransAction::CancelTranslate)
+                    .chain(Error::from(error).display_error()),
+            })
+            .chain(Task::done(TransAction::CleanText { page, part }));
+
+        Ok(task)
     }
 
     pub fn consensus(
         self,
-        request: ChatMessageRequest,
+        prompt: String,
+        model: String,
+        think: Think,
         page: usize,
         part: usize,
     ) -> Result<Task<ConsensusAction>> {
-        if let Client::Disconnected = self {
-            return Err(Error::ServerError("server disconnected"));
-        }
+        let Client::Ollama(client) = self else {
+            return Err(Error::ServerError("server not connected"));
+        };
 
-        Ok(Self::run_chat_task(
-            self.stream(request),
-            move |content| ConsensusAction::UpdateContent {
-                content,
-                page,
-                part,
-            },
-            ConsensusAction::CancelConsensus,
-        )
-        .chain(Task::done(ConsensusAction::CleanText { page, part })))
-    }
+        let agent = client
+            .agent(model)
+            .preamble(CONSENSUS_PROMPT)
+            .temperature(0.3)
+            .additional_params(serde_json::json!({
+                "num_ctx": 8192,
+                "top_p": 0.8,
+                "repeat_penalty": 1.05,
+                "think": !matches!(think, Think::None),
+            }))
+            .build();
 
-    pub fn consensus_history(
-        self,
-        request: ChatMessageRequest,
-        history: Arc<Mutex<Vec<ChatMessage>>>,
-        context_window: usize,
-        page: usize,
-        part: usize,
-    ) -> Result<Task<ConsensusAction>> {
-        if let Client::Disconnected = self {
-            return Err(Error::ServerError("server disconnected"));
-        }
-
-        let user_msg = request
-            .messages
-            .last()
-            .cloned()
-            .ok_or(Error::ServerError("missing user message"))?;
-        let acc = Arc::new(Mutex::new(String::new()));
-        let acc_for_stream = acc.clone();
-
-        Ok(Self::run_chat_task(
-            self.stream_history(request, history.clone()),
-            move |content| {
-                acc_for_stream.lock().unwrap().push_str(&content);
-                ConsensusAction::UpdateContent {
+        let task = Task::future(async move { agent.stream_prompt(prompt).await })
+            .then(|stream| {
+                Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |r| {
+                    r.into_iter()
+                        .filter_map(|e| match e {
+                            Err(StreamingError::Completion(CompletionError::JsonError(_))) => None,
+                            e => Some(e),
+                        })
+                        .collect::<result::Result<Vec<_>, _>>()
+                })
+            })
+            .and_then(move |items| {
+                let content = items
+                    .into_iter()
+                    .flat_map(|r| match r {
+                        MultiTurnStreamItem::StreamAssistantItem(
+                            StreamedAssistantContent::Text(t),
+                        ) if t.text.is_empty() => None,
+                        MultiTurnStreamItem::StreamAssistantItem(
+                            StreamedAssistantContent::Text(t),
+                        ) => Some(t.text),
+                        _ => None,
+                    })
+                    .collect::<String>();
+                Task::done(Ok(content))
+            })
+            .then(move |content| match content {
+                Ok(content) if content.is_empty() => Task::none(),
+                Ok(content) => Task::done(ConsensusAction::UpdateContent {
                     content,
                     page,
                     part,
+                }),
+                Err(error) => {
+                    log::error!("{:#?}", error);
+                    Task::done(ConsensusAction::CancelConsensus)
+                        .chain(Error::from(error).display_error())
                 }
-            },
-            ConsensusAction::CancelConsensus,
-        )
-        .chain(Task::future(async move {
-            let assistant = std::mem::take(&mut *acc.lock().unwrap());
-            if !assistant.is_empty() {
-                let mut hist = history.lock().unwrap();
-                hist.push(user_msg);
-                hist.push(ChatMessage::assistant(assistant));
-            }
-            Self::shift_history(history, context_window, CONSENSUS_PROMPT);
-            ConsensusAction::CleanText { page, part }
-        })))
+            })
+            .chain(Task::done(ConsensusAction::CleanText { page, part }));
+
+        Ok(task)
     }
 
-    fn run_chat_task<A>(
-        stream_future: impl Future<Output = Result<ChatMessageResponseStream>> + Send + 'static,
-        mut on_content: impl FnMut(String) -> A + Send + 'static,
-        cancel: A,
-    ) -> Task<A>
-    where
-        A: Send + Clone + 'static,
-    {
-        Task::future(stream_future)
-            .and_then(|stream| {
-                Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |res| {
-                    res.into_iter()
-                        .map(|e| e.map(|e| e.message.content))
-                        .collect::<result::Result<String, ()>>()
-                })
-                .map_err(|_| Error::ServerError("Failed to read stream"))
-            })
-            .then(move |response| match response {
-                Ok(content) if content.is_empty() => Task::none(),
-                Ok(content) => Task::done(on_content(content)),
-                Err(error) => Task::done(cancel.to_owned()).chain(error.display_error()),
-            })
-    }
-
-    fn shift_history(
-        history: Arc<Mutex<Vec<ChatMessage>>>,
-        context_window: usize,
-        system_prompt: &str,
-    ) {
-        let mut history = history.lock().unwrap();
-
-        let pair_count = history.len().saturating_sub(1) / 2;
+    fn shift_history(history: &mut Vec<Message>, context_window: usize) {
+        let pair_count = history.len() / 2;
         if pair_count <= context_window {
             return;
         }
-
-        let skip_pairs = pair_count - context_window;
-        let kept = history[1..].chunks(2).skip(skip_pairs).flatten().cloned();
-
-        *history = iter::once(ChatMessage::system(system_prompt.to_string()))
-            .chain(kept)
-            .collect();
-    }
-
-    async fn stream(self, request: ChatMessageRequest) -> Result<ChatMessageResponseStream> {
-        let Client::Ollama(client) = self else {
-            return Err(Error::ServerError("server not connected"));
-        };
-
-        Ok(client.send_chat_messages_stream(request).await?)
-    }
-
-    async fn stream_history(
-        self,
-        mut request: ChatMessageRequest,
-        history: Arc<Mutex<Vec<ChatMessage>>>,
-    ) -> Result<ChatMessageResponseStream> {
-        let Client::Ollama(client) = self else {
-            return Err(Error::ServerError("server not connected"));
-        };
-
-        let user_msgs = std::mem::take(&mut request.messages);
-        request.messages = {
-            let hist = history.lock().unwrap();
-            hist.iter().cloned().chain(user_msgs).collect()
-        };
-
-        Ok(client.send_chat_messages_stream(request).await?)
-    }
-
-    pub fn extract_text(
-        self,
-        model: String,
-        image_base64: String,
-        page: usize,
-        Settings { think, .. }: Settings,
-    ) -> Task<ExtractAction> {
-        Task::future(self.extract_stream(model, image_base64, think))
-            .and_then(|stream| {
-                Task::stream(stream).map_err(|_| Error::ServerError("Failed to read stream"))
-            })
-            .then(move |response| match response {
-                Ok(responses) => {
-                    let content = responses.into_iter().map(|r| r.response).collect();
-                    Task::done(ExtractAction::UpdateContent { content, page })
-                }
-                Err(error) => Task::done(ServerAction::Abort.into())
-                    .chain(Task::future(display_error(error)).discard()),
-            })
-    }
-
-    async fn extract_stream(
-        self,
-        model: String,
-        image_base64: String,
-        think: Think,
-    ) -> Result<GenerationResponseStream> {
-        let Client::Ollama(client) = self else {
-            return Err(Error::ServerError("server not connected"));
-        };
-
-        let request = GenerationRequest::new(model, EXTRACT_PROMPT)
-            .add_image(Image::from_base64(image_base64))
-            .think(think);
-
-        let stream = loop {
-            match client.generate_stream(request.clone()).await {
-                Ok(stream) => break stream,
-                Err(OllamaError::Other(error)) if error.contains("503") => {
-                    time::sleep(Duration::from_secs(10)).await
-                }
-                Err(error) => return Err(Error::OllamaError(error)),
-            }
-        };
-
-        Ok(stream)
+        let skip = (pair_count - context_window) * 2;
+        history.drain(..skip);
     }
 
     pub fn connected(&self) -> bool {
@@ -442,32 +406,4 @@ Output ONLY the final synthesized English translation. Do not include:
 - Any preamble or explanation
 
 The output should be ready to drop directly into the final manuscript.
-"#;
-
-pub const EXTRACT_PROMPT: &str = r#"
-You are extracting Japanese text from a light novel page.
-
-OUTPUT RULES:
-- Return ONLY raw Japanese text
-- No explanations, translations, descriptions, or English text
-
-IGNORE:
-- Running header at the top of the page (book/chapter title that appears alongside page numbers)
-- Page numbers
-- Do NOT ignore vertical column text even if it extends near the top of the page
-
-READING ORDER:
-Columns are vertical. Read right-to-left across the page:
-1. Start at the RIGHTMOST column
-2. Read top to bottom within each column
-3. Move LEFT to the next column
-4. Repeat until the LEFTMOST column
-
-EXTRACTION:
-- Include ALL body text from every column, including edges
-- Preserve all punctuation: 。、！？「」『』（）―…
-- For furigana above kanji, format as: 漢字《かんじ》
-- If a character is unclear, infer from context
-
-Begin output with the first character of the rightmost body text column.
 "#;

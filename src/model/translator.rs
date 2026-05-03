@@ -1,10 +1,7 @@
 use crate::{
     actions::trans_action::TransAction,
     message::Message,
-    model::{
-        consensus::Consensus, doc::Doc, extraction::Extraction, format::Format,
-        translation::Translation,
-    },
+    model::{consensus::Consensus, doc::Doc, format::Format, translation::Translation},
     view::View,
 };
 use iced::{Function, Task};
@@ -19,7 +16,6 @@ pub struct Translator {
     pub doc: Doc,
     pub translations: BTreeMap<usize, Translation>,
     pub format: Format,
-    pub extraction: Extraction,
     pub consensus: Consensus,
 }
 
@@ -32,7 +28,6 @@ impl Default for Translator {
             doc: Default::default(),
             translations: BTreeMap::from([(0, Translation::default())]),
             format: Default::default(),
-            extraction: Default::default(),
             consensus: Default::default(),
         }
     }

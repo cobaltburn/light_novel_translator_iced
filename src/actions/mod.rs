@@ -15,7 +15,6 @@ use tokio::fs::{self, read_dir, read_to_string};
 
 pub mod consensus_action;
 pub mod doc_action;
-pub mod extraction_action;
 pub mod format_action;
 pub mod server_action;
 pub mod trans_action;
@@ -101,20 +100,18 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
     Ok((file_path, pages))
 }
 
-pub async fn complete_dialog(file_name: String) -> bool {
+pub async fn complete_dialog(file_name: String) {
     let file_name = Path::new(&file_name)
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy();
 
-    let dialog = rfd::AsyncMessageDialog::new()
+    rfd::AsyncMessageDialog::new()
         .set_title("Translation Complete")
-        .set_description(format!("Save: {}", file_name))
-        .set_buttons(rfd::MessageButtons::YesNo)
+        .set_description(file_name)
+        .set_buttons(rfd::MessageButtons::Ok)
         .show()
         .await;
-
-    matches!(dialog, rfd::MessageDialogResult::Yes)
 }
 
 pub async fn select_format_folder(dir: PathBuf) -> Option<(String, Vec<(PathBuf, String)>)> {
