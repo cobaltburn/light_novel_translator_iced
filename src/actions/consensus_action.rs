@@ -142,14 +142,20 @@ impl Consensus {
         let candidates = candidates_map(&self.candidates, page);
 
         let task = self.server.consensus(pages, candidates, &model, page)?;
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
-        let next_task = self
-            .server
-            .bind_handle(Task::done(ConsensusAction::Consensus(page + 1)));
+        let complete_task = self.complete_task(page);
+        let next_task = self.next_task(page);
 
         Ok(task.chain(complete_task).chain(next_task))
+    }
+
+    fn complete_task(&mut self, page: usize) -> Task<ConsensusAction> {
+        self.server
+            .bind_handle(Task::done(ConsensusAction::PageComplete(page)))
+    }
+
+    fn next_task(&mut self, page: usize) -> Task<ConsensusAction> {
+        self.server
+            .bind_handle(Task::done(ConsensusAction::Consensus(page + 1)))
     }
 
     pub fn consensus_page(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
@@ -173,11 +179,10 @@ impl Consensus {
         let candidates = candidates_map(&self.candidates, page);
 
         let task = self.server.consensus(pages, candidates, &model, page)?;
+        let complete_task = self.complete_task(page);
+
         Ok(task
-            .chain(
-                self.server
-                    .bind_handle(Task::done(ConsensusAction::PageComplete(page))),
-            )
+            .chain(complete_task)
             .chain(Task::done(ServerAction::Abort.into())))
     }
 

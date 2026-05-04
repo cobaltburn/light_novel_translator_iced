@@ -86,6 +86,21 @@ impl Page {
             }))
             .collect()
     }
+
+    pub fn check_page(&mut self) {
+        self.size_error = self.check_size();
+        self.jap_error = self.check_japanese();
+
+        self.activity = if self.check_incomplete() {
+            Activity::Incomplete
+        } else if let Some(i) = self.size_error.first() {
+            Activity::Error(i + 1)
+        } else if let Some(i) = self.jap_error.first() {
+            Activity::Error(i + 1)
+        } else {
+            Activity::Complete
+        };
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

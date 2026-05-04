@@ -14,8 +14,7 @@ use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::{Horizontal, Vertical},
     widget::{
-        Button, Column, Container, Row, container::transparent, lazy, right, space::vertical,
-        stack,
+        Button, Column, Container, Row, container::transparent, lazy, right, space::vertical, stack,
     },
 };
 use iced::{
@@ -207,15 +206,23 @@ fn epub_menu(model: &Translation) -> Item<'_, TransAction, Theme, Renderer> {
     )
 }
 
-fn file_menu_buttons(model: &Translation) -> Element<'_, TransAction> {
-    let file_name = model.file_name();
+fn file_menu_buttons(state: &Translation) -> Element<'_, TransAction> {
+    let file_name = state.file_name();
     let not_empty = !file_name.is_empty();
-    let save_message = not_empty.then_some(TransAction::SaveTranslation(file_name));
+    let save = not_empty.then_some(TransAction::SaveTranslation(file_name));
+    let recovery = not_empty.then_some(TransAction::Recover);
 
-    button(text("save").center())
-        .on_press_maybe(save_message)
-        .padding(5)
-        .into()
+    row![
+        button(text("save").center())
+            .on_press_maybe(save)
+            .padding(5),
+        button(text("recover").center())
+            .on_press_maybe(recovery)
+            .padding(5)
+    ]
+    .align_y(Vertical::Center)
+    .spacing(10)
+    .into()
 }
 
 fn epub_select(model: &Translation) -> Row<'_, TransAction> {

@@ -61,6 +61,17 @@ pub async fn load_markdown_folder() -> Option<Vec<(PathBuf, String)>> {
     Some(pages)
 }
 
+pub async fn load_recovery() -> Option<Vec<Page>> {
+    let handle = rfd::AsyncFileDialog::new()
+        .add_filter("json", &["json"])
+        .set_title("recovery")
+        .pick_file()
+        .await?;
+    let json = handle.read().await;
+    let pages: Vec<Page> = serde_json::from_slice(&json).ok()?;
+    Some(pages)
+}
+
 pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<Page>)> {
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 

@@ -1,7 +1,7 @@
 use crate::{
     actions::{
-        clean_invisible_chars, complete_dialog, get_pages, handle_error, pick_save_folder,
-        save_file, server_action::ServerAction,
+        clean_invisible_chars, complete_dialog, get_pages, handle_error, load_recovery,
+        pick_save_folder, save_file, server_action::ServerAction,
     },
     app::PID,
     controller::{parse::remove_think_tags, part_tag},
@@ -10,7 +10,7 @@ use crate::{
     model::{Activity, page::Page, translation::Translation},
 };
 use iced::Task;
-use std::path::PathBuf;
+use std::{collections::HashMap, mem, path::PathBuf};
 use tokio::fs;
 
 #[non_exhaustive]
@@ -29,6 +29,8 @@ pub enum TransAction {
         page: usize,
     },
     Save(PathBuf),
+    Recover,
+    RecoverPages(Vec<Page>),
     OpenEpub,
     SetEpub {
         name: PathBuf,
@@ -53,7 +55,7 @@ impl Translation {
     pub fn perform(&mut self, action: TransAction) -> Task<TransAction> {
         match action {
             TransAction::ServerAction(action) => self.server.perform(action).map(Into::into),
-            TransAction::SetPage(page) => self.set_page(page).into(),
+            TransAction::SetPage(page) => self.set_current_page(page).into(),
             TransAction::CleanText { page, part } => self.clean_text(page, part).into(),
             TransAction::PageComplete(page) => self.check_complete(page).into(),
             TransAction::CancelTranslate => self.cancel().into(),
@@ -83,6 +85,24 @@ impl Translation {
                     Ok(path) => Task::done(TransAction::SavePages(path).into()),
                     Err(err) => Task::future(display_error(err)).discard(),
                 }),
+            TransAction::RecoverPages(pages) => self.recover_pages(pages).into(),
+            TransAction::Recover => Task::future(load_recovery())
+                .and_then(|pages| Task::done(TransAction::RecoverPages(pages))),
+        }
+    }
+
+    pub fn recover_pages(&mut self, pages: Vec<Page>) {
+        let mut pages: HashMap<_, _> = pages
+            .into_iter()
+            .filter(|p| !p.sections.iter().all(|s| s.content.is_empty()))
+            .map(|p| (p.path.clone(), p))
+            .collect();
+
+        for page in self.pages.iter_mut() {
+            if let Some(p) = pages.get_mut(&page.path) {
+                mem::swap(&mut page.sections, &mut p.sections);
+                page.check_page();
+            }
         }
     }
 
@@ -113,26 +133,13 @@ impl Translation {
             .unwrap_or_default()
     }
 
-    fn set_page(&mut self, page: usize) {
+    fn set_current_page(&mut self, page: usize) {
         self.current_page = page
     }
 
     fn check_complete(&mut self, page: usize) {
-        let Some(page) = self.pages.get_mut(page) else {
-            return;
-        };
-
-        page.size_error = page.check_size();
-        page.jap_error = page.check_japanese();
-
-        page.activity = if page.check_incomplete() {
-            Activity::Incomplete
-        } else if let Some(i) = page.size_error.first() {
-            Activity::Error(i + 1)
-        } else if let Some(i) = page.jap_error.first() {
-            Activity::Error(i + 1)
-        } else {
-            Activity::Complete
+        if let Some(page) = self.pages.get_mut(page) {
+            page.check_page();
         };
     }
 
@@ -204,9 +211,25 @@ impl Translation {
 
         let task = self.server.translate(pages, &model, page)?;
 
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(TransAction::PageComplete(page)));
+        let complete_task = self.complete_task(page);
+        let backup_task = self.backup_task()?;
+        let next_task = self.next_task(page);
+
+        Ok(task
+            .chain(complete_task)
+            .chain(backup_task)
+            .chain(next_task))
+    }
+
+    fn complete_task(&mut self, page: usize) -> Task<TransAction> {
+        self.server
+            .bind_handle(Task::done(TransAction::PageComplete(page)))
+    }
+
+    fn backup_task(&mut self) -> Result<Task<TransAction>> {
+        let Some(model) = self.server.current_model.clone() else {
+            return Err(Error::ServerError("No model found"));
+        };
 
         let backup = self
             .file_path
@@ -214,18 +237,14 @@ impl Translation {
             .with_added_extension(PID.to_string())
             .with_added_extension("json");
 
-        let backup_task = self
+        Ok(self
             .server
-            .bind_handle(Task::done(TransAction::Save(backup)));
+            .bind_handle(Task::done(TransAction::Save(backup))))
+    }
 
-        let next_task = self
-            .server
-            .bind_handle(Task::done(TransAction::Translate(page + 1)));
-
-        Ok(task
-            .chain(complete_task)
-            .chain(backup_task)
-            .chain(next_task))
+    fn next_task(&mut self, page: usize) -> Task<TransAction> {
+        self.server
+            .bind_handle(Task::done(TransAction::Translate(page + 1)))
     }
 
     pub fn translate_page(&mut self, page: usize) -> Result<Task<TransAction>> {
@@ -275,9 +294,7 @@ impl Translation {
         current.sections.get_mut(part).unwrap().content.clear();
 
         let task = self.server.translate_part(pages, model, page, part)?;
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(TransAction::PageComplete(page)));
+        let complete_task = self.complete_task(page);
 
         let task = task
             .chain(complete_task)

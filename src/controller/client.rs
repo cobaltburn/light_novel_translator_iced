@@ -16,14 +16,9 @@ use rig::{
 };
 use std::{
     ops::Not,
-    result,
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tokio_stream::StreamExt;
-
-const MAX_WAIT: Duration = Duration::from_millis(250);
-const CHUNK_SIZE: usize = 50;
 
 #[non_exhaustive]
 #[derive(Debug, Default, Clone)]
@@ -86,20 +81,10 @@ impl Client {
             .build();
 
         let task = Task::future(async move { agent.stream_prompt(prompt).await })
-            .then(|stream| {
-                Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |r| {
-                    r.into_iter()
-                        .filter_map(|e| match e {
-                            Err(StreamingError::Completion(CompletionError::JsonError(_))) => None,
-                            e => Some(e),
-                        })
-                        .collect::<result::Result<Vec<_>, _>>()
-                })
-            })
-            .and_then(move |items| {
-                let content = items
-                    .into_iter()
-                    .flat_map(|r| match r {
+            .then(Task::stream)
+            .and_then(move |r| {
+                let content =
+                    match r {
                         MultiTurnStreamItem::StreamAssistantItem(
                             StreamedAssistantContent::Text(t),
                         ) if t.text.is_empty() => None,
@@ -107,22 +92,20 @@ impl Client {
                             StreamedAssistantContent::Text(t),
                         ) => Some(t.text),
                         _ => None,
-                    })
-                    .collect::<String>();
+                    };
+
                 Task::done(Ok(content))
             })
             .then(move |content| match content {
-                Ok(content) if content.is_empty() => Task::none(),
-                Ok(content) => Task::done(TransAction::UpdateContent {
+                Ok(None) => Task::none(),
+                Ok(Some(content)) => Task::done(TransAction::UpdateContent {
                     content,
                     page,
                     part,
                 }),
-                Err(error) => {
-                    log::error!("{:#?}", error);
-                    Task::done(TransAction::CancelTranslate)
-                        .chain(Error::from(error).display_error())
-                }
+                Err(StreamingError::Completion(CompletionError::JsonError(_))) => Task::none(),
+                Err(error) => Task::done(TransAction::CancelTranslate)
+                    .chain(Error::from(error).display_error()),
             })
             .chain(Task::done(TransAction::CleanText { page, part }));
 
@@ -161,20 +144,10 @@ impl Client {
                 let chat_history = chat_history.lock().unwrap().to_vec();
                 agent.stream_chat(prompt, chat_history).await
             })
-            .then(|stream| {
-                Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |r| {
-                    r.into_iter()
-                        .filter_map(|e| match e {
-                            Err(StreamingError::Completion(CompletionError::JsonError(_))) => None,
-                            e => Some(e),
-                        })
-                        .collect::<result::Result<Vec<_>, _>>()
-                })
-            })
-            .and_then(move |items| {
-                let content = items
-                    .into_iter()
-                    .flat_map(|r| match r {
+            .then(Task::stream)
+            .and_then(move |r| {
+                let content =
+                    match r {
                         MultiTurnStreamItem::StreamAssistantItem(
                             StreamedAssistantContent::Text(t),
                         ) if t.text.is_empty() => None,
@@ -190,17 +163,18 @@ impl Client {
                             None
                         }
                         _ => None,
-                    })
-                    .collect::<String>();
+                    };
+
                 Task::done(Ok(content))
             })
             .then(move |content| match content {
-                Ok(content) if content.is_empty() => Task::none(),
-                Ok(content) => Task::done(TransAction::UpdateContent {
+                Ok(None) => Task::none(),
+                Ok(Some(content)) => Task::done(TransAction::UpdateContent {
                     content,
                     page,
                     part,
                 }),
+                Err(StreamingError::Completion(CompletionError::JsonError(_))) => Task::none(),
                 Err(error) => Task::done(TransAction::CancelTranslate)
                     .chain(Error::from(error).display_error()),
             })
@@ -234,20 +208,10 @@ impl Client {
             .build();
 
         let task = Task::future(async move { agent.stream_prompt(prompt).await })
-            .then(|stream| {
-                Task::run(stream.chunks_timeout(CHUNK_SIZE, MAX_WAIT), |r| {
-                    r.into_iter()
-                        .filter_map(|e| match e {
-                            Err(StreamingError::Completion(CompletionError::JsonError(_))) => None,
-                            e => Some(e),
-                        })
-                        .collect::<result::Result<Vec<_>, _>>()
-                })
-            })
-            .and_then(move |items| {
-                let content = items
-                    .into_iter()
-                    .flat_map(|r| match r {
+            .then(Task::stream)
+            .and_then(move |r| {
+                let content =
+                    match r {
                         MultiTurnStreamItem::StreamAssistantItem(
                             StreamedAssistantContent::Text(t),
                         ) if t.text.is_empty() => None,
@@ -255,22 +219,20 @@ impl Client {
                             StreamedAssistantContent::Text(t),
                         ) => Some(t.text),
                         _ => None,
-                    })
-                    .collect::<String>();
+                    };
+
                 Task::done(Ok(content))
             })
             .then(move |content| match content {
-                Ok(content) if content.is_empty() => Task::none(),
-                Ok(content) => Task::done(ConsensusAction::UpdateContent {
+                Ok(None) => Task::none(),
+                Ok(Some(content)) => Task::done(ConsensusAction::UpdateContent {
                     content,
                     page,
                     part,
                 }),
-                Err(error) => {
-                    log::error!("{:#?}", error);
-                    Task::done(ConsensusAction::CancelConsensus)
-                        .chain(Error::from(error).display_error())
-                }
+                Err(StreamingError::Completion(CompletionError::JsonError(_))) => Task::none(),
+                Err(error) => Task::done(ConsensusAction::CancelConsensus)
+                    .chain(Error::from(error).display_error()),
             })
             .chain(Task::done(ConsensusAction::CleanText { page, part }));
 
