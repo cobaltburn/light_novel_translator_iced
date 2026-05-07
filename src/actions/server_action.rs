@@ -18,9 +18,9 @@ pub enum ServerAction {
 impl Server {
     pub fn perform(&mut self, action: ServerAction) -> Task<ServerAction> {
         match action {
-            ServerAction::SelectModel(model) => self.select_model(model).into(),
+            ServerAction::SelectModel(model) => self.set_model(model).into(),
             ServerAction::SetThink(think) => self.set_think(think).into(),
-            ServerAction::SetMethod(method) => self.select_method(method).into(),
+            ServerAction::SetMethod(method) => self.set_method(method).into(),
             ServerAction::SetModels(models) => self.set_models(models).into(),
             ServerAction::SetWindow(window) => self.set_window(window).into(),
             ServerAction::Connect => self.connect(),
@@ -30,16 +30,18 @@ impl Server {
 
     pub fn connect(&mut self) -> Task<ServerAction> {
         self.client = Client::ollama();
-        Task::future(self.client.clone().get_models()).then(|models| match models {
-            Ok(models) => Task::done(ServerAction::SetModels(models).into()),
+        let client = self.client.clone();
+        Task::future(async move { client.get_models().await }).then(|models| match models {
+            Ok(models) => Task::done(ServerAction::SetModels(models)),
             Err(error) => error.display_error(),
         })
     }
 
-    fn select_model(&mut self, model: String) {
+    fn set_model(&mut self, model: String) {
         self.current_model = Some(model)
     }
-    fn select_method(&mut self, method: Method) {
+
+    fn set_method(&mut self, method: Method) {
         self.method = method;
     }
 

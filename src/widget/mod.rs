@@ -4,6 +4,7 @@ use iced::widget::button::Status;
 use iced::widget::{Button, button, container, svg};
 use iced::{Border, Element, Renderer, Theme, advanced};
 
+pub mod page_sidebar;
 pub mod server_widget;
 pub mod side_bar;
 

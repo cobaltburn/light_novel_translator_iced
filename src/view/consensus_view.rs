@@ -1,31 +1,36 @@
 use crate::{
     actions::{consensus_action::ConsensusAction, server_action::ServerAction},
     model::{
-        consensus::{Consensus, build_path_buttons},
+        consensus::Consensus,
         server::{Method, Server},
     },
     view::{menu_button, part_span, rich_text_scrollable},
-    widget::server_widget::{ollama_input, think_selector},
+    widget::{
+        page_sidebar::build_path_buttons,
+        server_widget::{ollama_input, think_selector},
+    },
 };
 use iced::{
     Border, Color, Element, Length, Padding, Renderer, Theme,
-    alignment::{Horizontal, Vertical},
+    alignment::Vertical,
     widget::{
-        Column, Container, button, column, container, lazy, radio, right, row, scrollable,
-        space::vertical, stack, text,
+        Container, button, column, container, lazy, radio, row, scrollable, space::vertical, stack,
+        text,
     },
 };
 use iced_aw::{Menu, MenuBar, menu::Item};
 use std::ops::Not;
 
 pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
-    let content = model
-        .current_content()
-        .into_iter()
-        .flatten()
+    let page = model.current_page();
+    let error_cards = page.map(|p| p.error_cards());
+    let sections = page.map(|p| p.sections.as_slice()).unwrap_or_default();
+    let content = sections
+        .iter()
+        .map(|s| &s.content)
         .enumerate()
         .flat_map(|(i, t)| part_span(i, t))
-        .collect();
+        .collect::<Vec<_>>();
 
     container(column![
         vertical(),
@@ -33,7 +38,7 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
             menu_bar(model),
             row![
                 side_bar(model),
-                stack![rich_text_scrollable(content), error_card(model)]
+                stack![rich_text_scrollable(content), error_cards]
             ]
             .spacing(10)
         ]
@@ -47,35 +52,6 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
     .height(Length::Fill)
     .padding(10)
     .into()
-}
-
-fn error_card(model: &Consensus) -> Element<'_, ConsensusAction> {
-    let current_sections = model
-        .current_sections()
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter(|(_, s)| s.content.is_empty())
-        .map(|(i, _)| text!("Empty part: {:<2}", i + 1));
-    let errors = model
-        .current_jap_errors()
-        .into_iter()
-        .flatten()
-        .map(|i| text!("Japanese error: {:2}", i + 1));
-
-    let errors = model
-        .current_size_errors()
-        .into_iter()
-        .flatten()
-        .map(|i| text!("Size error: {:2}", i + 1))
-        .chain(errors)
-        .chain(current_sections)
-        .map(|e| container(e).padding(5).style(container::primary).into())
-        .collect::<Column<_>>();
-
-    right(errors.spacing(5).align_x(Horizontal::Right))
-        .padding(20)
-        .into()
 }
 
 fn side_bar(model: &Consensus) -> Container<'_, ConsensusAction> {

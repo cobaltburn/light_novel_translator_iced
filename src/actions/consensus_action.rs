@@ -120,14 +120,18 @@ impl Consensus {
         }
     }
 
-    pub fn consensus(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
+    fn check_ready(&self) -> Result<String> {
         if !self.server.connected() {
             return Err(Error::ServerError("Not connected to a server"));
         }
+        self.server
+            .current_model
+            .clone()
+            .ok_or(Error::ServerError("No model selected"))
+    }
 
-        let Some(model) = self.server.current_model.clone() else {
-            return Err(Error::ServerError("No model selected"));
-        };
+    pub fn consensus(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
+        let model = self.check_ready()?;
         if let Some(page) = self.pages.get_mut(page) {
             page.activity = Activity::Active;
             page.clear();
@@ -159,13 +163,7 @@ impl Consensus {
     }
 
     pub fn consensus_page(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
-        if !self.server.connected() {
-            return Err(Error::ServerError("Not connected to a server"));
-        }
-
-        let Some(model) = self.server.current_model.clone() else {
-            return Err(Error::ServerError("No model selected"));
-        };
+        let model = self.check_ready()?;
 
         if let Some(page) = self.pages.get_mut(page) {
             page.activity = Activity::Active;
@@ -187,13 +185,7 @@ impl Consensus {
     }
 
     pub fn consensus_part(&mut self, page: usize, part: usize) -> Result<Task<ConsensusAction>> {
-        if !self.server.connected() {
-            return Err(Error::ServerError("Not connected to a server"));
-        }
-
-        let Some(model) = self.server.current_model.clone() else {
-            return Err(Error::ServerError("No model selected"));
-        };
+        let model = self.check_ready()?;
 
         if let Some(page) = self.pages.get_mut(page) {
             page.activity = Activity::Active;

@@ -1,19 +1,15 @@
 use crate::{
     actions::consensus_action::ConsensusAction,
-    model::{
-        Activity,
-        page::{Page, Section},
-        server::Server,
-    },
-    widget::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
+    model::{page::Page, server::Server},
+    widget::page_sidebar::{SidebarAction, SidebarDeps, SidebarRow},
 };
 use iced::widget::button::Status;
 use iced::{
-    Border, Color, Element, Length, Padding, Renderer, Theme,
+    Border, Color, Element, Length, Renderer, Theme,
     alignment::Vertical,
-    widget::{Column, button, column, container, row, scrollable, text},
+    widget::{button, container, row, text},
 };
-use iced_aw::{ContextMenu, menu::Item};
+use iced_aw::menu::Item;
 use std::{iter::once, path::PathBuf};
 
 #[derive(Debug, Default)]
@@ -27,15 +23,8 @@ pub struct Consensus {
 }
 
 impl Consensus {
-    pub fn current_content(&self) -> Option<impl Iterator<Item = &String>> {
-        let text = self
-            .pages
-            .get(self.current_page)?
-            .sections
-            .iter()
-            .map(|e| &e.content);
-
-        Some(text)
+    pub fn current_page(&self) -> Option<&Page> {
+        self.pages.get(self.current_page)
     }
 
     pub fn file_name(&self) -> String {
@@ -44,18 +33,6 @@ impl Consensus {
             .unwrap_or_default()
             .to_string_lossy()
             .to_string()
-    }
-
-    pub fn current_jap_errors(&self) -> Option<&[usize]> {
-        Some(&self.pages.get(self.current_page)?.jap_error)
-    }
-
-    pub fn current_size_errors(&self) -> Option<&[usize]> {
-        Some(&self.pages.get(self.current_page)?.size_error)
-    }
-
-    pub fn current_sections(&self) -> Option<&[Section]> {
-        Some(&self.pages.get(self.current_page)?.sections)
     }
 
     pub fn candidate_items(&self) -> Vec<Item<'_, ConsensusAction, Theme, Renderer>> {
@@ -91,88 +68,22 @@ impl Consensus {
     }
 }
 
-#[derive(Hash)]
-pub struct SidebarDeps {
-    pub current_page: usize,
-    pub active: bool,
-    pub rows: Vec<SidebarRow>,
-}
-
-#[derive(Hash)]
-pub struct SidebarRow {
-    pub name: String,
-    pub activity: Activity,
-    pub section_count: usize,
-}
-
-pub fn build_path_buttons(deps: &SidebarDeps) -> Column<'static, ConsensusAction> {
-    let current = deps.current_page;
-    let active = deps.active;
-
-    deps.rows
-        .iter()
-        .enumerate()
-        .map(|(i, entry)| {
-            let name = entry.name.clone();
-            let activity = entry.activity.clone();
-            let section_count = entry.section_count;
-
-            let button_text =
-                text!("{}. {}", i + 1, &name)
-                    .width(Length::Fill)
-                    .style(move |theme| {
-                        if current == i {
-                            text::primary(theme)
-                        } else {
-                            text::default(theme)
-                        }
-                    });
-
-            let button_content = row![button_text]
-                .push(match activity {
-                    Activity::Incomplete => None,
-                    Activity::Complete => Some(check_mark()),
-                    Activity::Error(e) => Some(row![text(e), cross_mark()].spacing(5).into()),
-                    Activity::Active => Some(active_mark()),
-                })
-                .padding(Padding::default().right(10));
-
-            ContextMenu::new(
-                text_button(button_content).on_press(ConsensusAction::SetPage(i)),
-                move || path_button_overlay(section_count, name.clone(), i, active),
-            )
-            .into()
-        })
-        .collect()
-}
-
-fn path_button_overlay<'a>(
-    count: usize,
-    name: String,
-    page: usize,
-    active: bool,
-) -> Element<'a, ConsensusAction> {
-    let overlay = column![
-        context_menu_button(text("save").color(Color::WHITE))
-            .on_press(ConsensusAction::SavePage { name, page }),
-        context_menu_button(text("translate").color(Color::WHITE))
-            .on_press_maybe(active.then_some(ConsensusAction::Consensus(page))),
-        context_menu_button(text("translate page").color(Color::WHITE))
-            .on_press_maybe(active.then_some(ConsensusAction::ConsensusPage(page)))
-    ]
-    .extend((0..count).map(|part| {
-        context_menu_button(text!("translate part {}", part + 1).color(Color::WHITE))
-            .on_press_maybe(active.then_some(ConsensusAction::ConsensusPart { page, part }))
-            .into()
-    }))
-    .padding(5)
-    .spacing(5);
-
-    container(scrollable(overlay).width(Length::Fill))
-        .style(container::rounded_box)
-        .max_height(400)
-        .width(300)
-        .into()
+impl SidebarAction for ConsensusAction {
+    fn set_page(page: usize) -> Self {
+        ConsensusAction::SetPage(page)
+    }
+    fn save_page(name: String, page: usize) -> Self {
+        ConsensusAction::SavePage { name, page }
+    }
+    fn translate(page: usize) -> Self {
+        ConsensusAction::Consensus(page)
+    }
+    fn translate_page(page: usize) -> Self {
+        ConsensusAction::ConsensusPage(page)
+    }
+    fn translate_part(page: usize, part: usize) -> Self {
+        ConsensusAction::ConsensusPart { page, part }
+    }
 }
 
 fn candidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusAction> {

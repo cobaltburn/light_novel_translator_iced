@@ -1,7 +1,16 @@
 use crate::{actions::contains_japanese, model::Activity};
+use iced::{
+    Element,
+    alignment::Horizontal,
+    widget::{Column, container, right, text},
+};
 use rig::message::Message;
 use serde::{Deserialize, Serialize};
-use std::{ffi::OsStr, iter, path::PathBuf};
+use std::{ffi::OsStr, path::PathBuf};
+
+const SIZE_TOLERANCE: usize = 1000;
+const SIZE_FLOOR: usize = 5000;
+const SECTION_CAPACITY: usize = 8 * 1024;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -56,34 +65,38 @@ impl Page {
     }
 
     pub fn check_size(&self) -> Vec<usize> {
-        let sections = &self.sections[..self.sections.len() - 1];
-
-        let lengths: Vec<_> = sections.iter().map(|e| e.content.len()).collect();
-
-        if lengths.is_empty() {
-            return lengths;
+        let Some((last, sections)) = self.sections.split_last() else {
+            return Vec::new();
+        };
+        if sections.is_empty() {
+            return Vec::new();
         }
 
+        let mut lengths: Vec<_> = sections.iter().map(|e| e.content.len()).collect();
         let mid = lengths.len() / 2;
-        let mut lens = lengths.clone();
-        let (_, median, _) = lens.select_nth_unstable(mid);
+        let mut sorted = lengths.clone();
+        let (_, median, _) = sorted.select_nth_unstable(mid);
+        let median = *median;
 
-        let max = *median + 1000;
-        let min = median.saturating_sub(1000);
-        let base = 5000;
+        let max = median + SIZE_TOLERANCE;
+        let min = median.saturating_sub(SIZE_TOLERANCE);
+
+        lengths.push(last.content.len());
+        let last_index = lengths.len() - 1;
 
         lengths
             .into_iter()
             .enumerate()
-            .filter(|&(_, e)| e != 0)
-            .filter_map(|(i, count)| (count < base || count > max || count < min).then_some(i))
-            .chain(iter::from_fn(|| {
-                if self.sections.last()?.content.len() > max {
-                    Some(self.sections.len() - 1)
-                } else {
-                    None
+            .filter(|&(i, count)| {
+                if count == 0 {
+                    return false;
                 }
-            }))
+                if i == last_index {
+                    return count > max;
+                }
+                count < SIZE_FLOOR || count > max || count < min
+            })
+            .map(|(i, _)| i)
             .collect()
     }
 
@@ -101,6 +114,32 @@ impl Page {
             Activity::Complete
         };
     }
+
+    pub fn error_cards<T: 'static>(&self) -> Element<'_, T> {
+        let current_sections = self
+            .sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.content.is_empty())
+            .map(|(i, _)| text!("Empty part: {:2}", i + 1));
+        let errors = self
+            .jap_error
+            .iter()
+            .map(|i| text!("Japanese error: {:2}", i + 1));
+
+        let errors = self
+            .size_error
+            .iter()
+            .map(|i| text!("Size error: {:2}", i + 1))
+            .chain(errors)
+            .chain(current_sections)
+            .map(|e| container(e).padding(5).style(container::primary).into())
+            .collect::<Column<_>>();
+
+        right(errors.spacing(5).align_x(Horizontal::Right))
+            .padding(20)
+            .into()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -113,7 +152,7 @@ impl Section {
     pub fn new(japanese: String) -> Self {
         Self {
             japanese,
-            content: String::new(),
+            content: String::with_capacity(SECTION_CAPACITY),
         }
     }
 

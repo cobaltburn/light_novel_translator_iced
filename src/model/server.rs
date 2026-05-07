@@ -8,6 +8,7 @@ use crate::{
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
 use quick_xml::{Writer, events::BytesText};
+use rig::message::Message;
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -15,6 +16,9 @@ use std::{
     iter,
     sync::{Arc, Mutex},
 };
+
+const BATCH_SIZE: usize = 6;
+const DEFAULT_CONTEXT_WINDOW: usize = 5;
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -51,20 +55,21 @@ impl Server {
     ) -> Result<Task<TransAction>> {
         let current = pages.last().expect("dont pass an empty array");
 
+        let handles = &mut self.handles;
         let tasks: Result<Vec<_>> = current
             .sections
             .iter()
             .enumerate()
             .map(|(part, section)| {
-                self.client.clone().translate(
+                self.client.translate(
                     section.japanese.clone(),
-                    model.to_string(),
+                    model,
                     self.settings.think,
                     page,
                     part,
                 )
             })
-            .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
+            .map(|task| task.map(|task| bind(handles, task)))
             .collect();
 
         Ok(self.method.join_tasks(tasks?))
@@ -76,38 +81,19 @@ impl Server {
         model: &str,
         page: usize,
     ) -> Result<Task<TransAction>> {
-        let (current, history_pages) = pages.split_last().expect("dont pass an empty array");
-
-        let mut recent: Vec<&Section> = current
-            .sections
-            .iter()
-            .rev()
-            .chain(
-                history_pages
-                    .iter()
-                    .rev()
-                    .flat_map(|p| p.sections.iter().rev()),
-            )
-            .filter(|s| !s.content.is_empty())
-            .take(self.settings.context_window)
-            .collect();
-        recent.reverse();
-
-        let history: Vec<_> = recent
-            .into_iter()
-            .flat_map(Section::history_message)
-            .collect();
-
+        let history = build_history(pages, self.settings.context_window);
         let history = Arc::new(Mutex::new(history));
 
+        let current = pages.last().expect("dont pass an empty array");
+        let handles = &mut self.handles;
         let tasks: Result<Vec<_>> = current
             .sections
             .iter()
             .enumerate()
             .map(|(part, section)| {
-                self.client.clone().translate_history(
+                self.client.translate_history(
                     section.japanese.clone(),
-                    model.to_string(),
+                    model,
                     history.clone(),
                     self.settings.context_window,
                     self.settings.think,
@@ -115,7 +101,7 @@ impl Server {
                     part,
                 )
             })
-            .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
+            .map(|task| task.map(|task| bind(handles, task)))
             .collect();
 
         Ok(self.method.join_tasks(tasks?))
@@ -133,50 +119,29 @@ impl Server {
 
         let task = match self.method {
             Method::History => {
-                let (_, history_pages) = pages.split_last().expect("dont pass an empty array");
-
-                let mut recent: Vec<&Section> = current
-                    .sections
-                    .iter()
-                    .rev()
-                    .chain(
-                        history_pages
-                            .iter()
-                            .rev()
-                            .flat_map(|p| p.sections.iter().rev()),
-                    )
-                    .filter(|s| !s.content.is_empty())
-                    .take(self.settings.context_window)
-                    .collect();
-                recent.reverse();
-
-                let history: Vec<_> = recent
-                    .into_iter()
-                    .flat_map(Section::history_message)
-                    .collect();
-
+                let history = build_history(pages, self.settings.context_window);
                 let history = Arc::new(Mutex::new(history));
 
-                self.client.clone().translate_history(
+                self.client.translate_history(
                     section.japanese.clone(),
-                    model.to_string(),
-                    history.clone(),
+                    &model,
+                    history,
                     self.settings.context_window,
                     self.settings.think,
                     page,
                     part,
                 )?
             }
-            _ => self.client.clone().translate(
+            _ => self.client.translate(
                 section.japanese.clone(),
-                model.to_string(),
+                &model,
                 self.settings.think,
                 page,
                 part,
             )?,
         };
 
-        Ok(Self::add_handle(&mut self.handles, task))
+        Ok(self.bind_handle(task))
     }
 
     pub fn consensus(
@@ -191,6 +156,7 @@ impl Server {
             .get(current.file_stem().unwrap_or_default())
             .ok_or(Error::GeneralError(String::from("missing candidate files")))?;
 
+        let handles = &mut self.handles;
         let tasks: Result<Vec<_>> = current
             .sections
             .iter()
@@ -198,15 +164,10 @@ impl Server {
             .map(|(part, section)| {
                 let candidates: Vec<_> = candidates.iter().flat_map(|e| e.get(part)).collect();
                 let prompt = consensus_prompt(&section.japanese, &candidates)?;
-                self.client.clone().consensus(
-                    prompt,
-                    model.to_string(),
-                    self.settings.think,
-                    page,
-                    part,
-                )
+                self.client
+                    .consensus(prompt, model.to_string(), self.settings.think, page, part)
             })
-            .map(|task| task.map(|task| Self::add_handle(&mut self.handles, task)))
+            .map(|task| task.map(|task| bind(handles, task)))
             .collect();
 
         Ok(self.method.join_tasks(tasks?))
@@ -228,16 +189,42 @@ impl Server {
         let page_candidates: Vec<_> = page_candidates.iter().flat_map(|e| e.get(part)).collect();
         let prompt = consensus_prompt(&section.japanese, &page_candidates)?;
 
-        let task = self.client.clone().consensus(
-            prompt,
-            model.to_string(),
-            self.settings.think,
-            page,
-            part,
-        )?;
+        let task =
+            self.client
+                .consensus(prompt, model.to_string(), self.settings.think, page, part)?;
 
-        Ok(Self::add_handle(&mut self.handles, task))
+        Ok(self.bind_handle(task))
     }
+}
+
+fn bind<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
+    let (task, handle) = task.abortable();
+    handles.push(handle.abort_on_drop());
+    task
+}
+
+fn build_history(pages: &[Page], context_window: usize) -> Vec<Message> {
+    let (current, history_pages) = pages.split_last().expect("dont pass an empty array");
+
+    let mut recent: Vec<&Section> = current
+        .sections
+        .iter()
+        .rev()
+        .chain(
+            history_pages
+                .iter()
+                .rev()
+                .flat_map(|p| p.sections.iter().rev()),
+        )
+        .filter(|s| !s.content.is_empty())
+        .take(context_window)
+        .collect();
+    recent.reverse();
+
+    recent
+        .into_iter()
+        .flat_map(Section::history_message)
+        .collect()
 }
 
 pub fn consensus_prompt(section: &str, candidates: &[&String]) -> Result<String> {
@@ -281,19 +268,8 @@ impl Server {
         .into()
     }
 
-    pub fn bind_handle<T>(&mut self, task: Task<T>) -> Task<T>
-    where
-        T: 'static,
-    {
-        let (task, handle) = task.abortable();
-        self.handles.push(handle.abort_on_drop());
-        task
-    }
-
-    pub fn add_handle<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
-        let (task, handle) = task.abortable();
-        handles.push(handle.abort_on_drop());
-        task
+    pub fn bind_handle<T: 'static>(&mut self, task: Task<T>) -> Task<T> {
+        bind(&mut self.handles, task)
     }
 
     pub fn copy(&self) -> Self {
@@ -302,7 +278,7 @@ impl Server {
             models: self.models.clone(),
             current_model: self.current_model.clone(),
             settings: self.settings.clone(),
-            method: self.method.clone(),
+            method: self.method,
             handles: Vec::new(),
         }
     }
@@ -318,7 +294,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             think: Default::default(),
-            context_window: 5,
+            context_window: DEFAULT_CONTEXT_WINDOW,
         }
     }
 }
@@ -352,9 +328,7 @@ pub enum Method {
 }
 
 impl Method {
-    pub fn join_tasks<T: 'static>(&self, tasks: Vec<Task<T>>) -> Task<T> {
-        const BATCH_SIZE: usize = 6;
-
+    pub fn join_tasks<T: 'static>(self, tasks: Vec<Task<T>>) -> Task<T> {
         match self {
             Method::Batch => {
                 let mut iter = tasks.into_iter();

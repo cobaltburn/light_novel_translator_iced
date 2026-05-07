@@ -63,28 +63,29 @@ pub fn text_scrollable<'a, T: fmt::Display, E: 'a>(content: T) -> Container<'a, 
         .padding(Padding::new(10.0).right(5))
 }
 
-pub fn rich_text_scrollable<'a, E: 'a>(content: Vec<Span<'a>>) -> Element<'a, E> {
-    let scroll = scrollable(
-        rich_text(content)
-            .width(Length::Fill)
-            .align_x(Horizontal::Left)
-            .align_y(Vertical::Center),
+pub fn rich_text_scrollable<E: 'static>(content: Vec<Span>) -> Element<E> {
+    container(
+        scrollable(
+            rich_text(content)
+                .width(Length::Fill)
+                .align_x(Horizontal::Left)
+                .align_y(Vertical::Center),
+        )
+        .spacing(5)
+        .anchor_top()
+        .width(Length::Fill),
     )
-    .spacing(5)
-    .anchor_top()
-    .width(Length::Fill);
-    container(scroll)
-        .style(|theme| {
-            transparent(theme).border(Border {
-                color: Color::WHITE,
-                width: 1.0,
-                radius: 8.into(),
-            })
+    .style(|theme| {
+        transparent(theme).border(Border {
+            color: Color::WHITE,
+            width: 1.0,
+            radius: 8.into(),
         })
-        .height(Length::Fill)
-        .width(Length::Fill)
-        .padding(Padding::new(10.0).right(5))
-        .into()
+    })
+    .height(Length::Fill)
+    .width(Length::Fill)
+    .padding(Padding::new(10.0).right(5))
+    .into()
 }
 
 pub fn part_span(i: usize, t: &str) -> [Span<'_>; 2] {

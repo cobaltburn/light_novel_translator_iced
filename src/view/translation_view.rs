@@ -1,21 +1,17 @@
 use crate::{
     actions::trans_action::TransAction,
     message::Message,
-    model::{
-        server::Server,
-        translation::{Translation, build_path_buttons},
-    },
+    model::{server::Server, translation::Translation},
     view::{menu_button, part_span, rich_text_scrollable},
-    widget::server_widget::{
-        context_window_input, execution_selector, ollama_input, think_selector,
+    widget::{
+        page_sidebar::build_path_buttons,
+        server_widget::{context_window_input, execution_selector, ollama_input, think_selector},
     },
 };
 use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
-    alignment::{Horizontal, Vertical},
-    widget::{
-        Button, Column, Container, Row, container::transparent, lazy, right, space::vertical, stack,
-    },
+    alignment::Vertical,
+    widget::{Button, Container, Row, container::transparent, lazy, space::vertical, stack},
 };
 use iced::{
     border::Radius,
@@ -75,12 +71,13 @@ fn new_tab_button(_model: &Translation) -> Element<'_, Message> {
 }
 
 fn tab(model: &Translation) -> Element<'_, TransAction> {
-    let content = model
-        .current_content()
-        .into_iter()
-        .flatten()
+    let page = model.current_page();
+    let error_cards = page.map(|p| p.error_cards());
+    let sections = page.map(|p| p.sections.as_slice()).unwrap_or_default();
+    let content = sections
+        .iter()
         .enumerate()
-        .flat_map(|(i, t)| part_span(i, t))
+        .flat_map(|(i, t)| part_span(i, &t.content))
         .collect();
 
     container(column![
@@ -89,7 +86,7 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
             menu_bar(model),
             row![
                 side_bar(model),
-                stack![rich_text_scrollable(content), error_card(model)]
+                stack![rich_text_scrollable(content), error_cards]
             ]
             .spacing(10)
         ]
@@ -103,35 +100,6 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
     .height(Length::Fill)
     .padding(10)
     .into()
-}
-
-fn error_card(model: &Translation) -> Element<'_, TransAction> {
-    let current_sections = model
-        .current_sections()
-        .into_iter()
-        .flatten()
-        .enumerate()
-        .filter(|(_, s)| s.content.is_empty())
-        .map(|(i, _)| text!("Empty part: {:2}", i + 1));
-    let errors = model
-        .current_jap_errors()
-        .into_iter()
-        .flatten()
-        .map(|i| text!("Japanese error: {:2}", i + 1));
-
-    let errors = model
-        .current_size_errors()
-        .into_iter()
-        .flatten()
-        .map(|i| text!("Size error: {:2}", i + 1))
-        .chain(errors)
-        .chain(current_sections)
-        .map(|e| container(e).padding(5).style(container::primary).into())
-        .collect::<Column<_>>();
-
-    right(errors.spacing(5).align_x(Horizontal::Right))
-        .padding(20)
-        .into()
 }
 
 fn side_bar(model: &Translation) -> Container<'_, TransAction> {

@@ -190,14 +190,18 @@ impl Translation {
         self.pages = pages;
     }
 
-    pub fn translate(&mut self, page: usize) -> Result<Task<TransAction>> {
+    fn check_ready(&self) -> Result<String> {
         if !self.server.connected() {
             return Err(Error::ServerError("Not connected to a server"));
         }
+        self.server
+            .current_model
+            .clone()
+            .ok_or(Error::ServerError("No model selected"))
+    }
 
-        let Some(model) = self.server.current_model.clone() else {
-            return Err(Error::ServerError("No model selected"));
-        };
+    pub fn translate(&mut self, page: usize) -> Result<Task<TransAction>> {
+        let model = self.check_ready()?;
 
         let Some(pages) = self.pages.get_mut(..page + 1) else {
             let file_name = self.file_name();
@@ -248,13 +252,7 @@ impl Translation {
     }
 
     pub fn translate_page(&mut self, page: usize) -> Result<Task<TransAction>> {
-        if !self.server.connected() {
-            return Err(Error::ServerError("Not connected to a server"));
-        }
-
-        let Some(model) = self.server.current_model.clone() else {
-            return Err(Error::ServerError("No model selected"));
-        };
+        let model = self.check_ready()?;
 
         let Some(pages) = self.pages.get_mut(0..page + 1) else {
             return Ok(Task::done(ServerAction::Abort.into()));
@@ -265,25 +263,18 @@ impl Translation {
         current_page.clear();
 
         let task = self.server.translate(pages, &model, page)?;
-        let complete_task = self
-            .server
-            .bind_handle(Task::done(TransAction::PageComplete(page)));
 
-        let task = task
+        let complete_task = self.complete_task(page);
+        let backup_task = self.backup_task()?;
+
+        Ok(task
             .chain(complete_task)
-            .chain(Task::done(ServerAction::Abort.into()));
-
-        Ok(task)
+            .chain(backup_task)
+            .chain(Task::done(ServerAction::Abort.into())))
     }
 
     pub fn translate_part(&mut self, page: usize, part: usize) -> Result<Task<TransAction>> {
-        if !self.server.connected() {
-            return Err(Error::ServerError("Not connected to a server"));
-        }
-
-        let Some(model) = self.server.current_model.clone() else {
-            return Err(Error::ServerError("No model selected"));
-        };
+        let model = self.check_ready()?;
 
         let Some(pages) = self.pages.get_mut(..page + 1) else {
             return Ok(Task::done(ServerAction::Abort.into()));
@@ -295,12 +286,12 @@ impl Translation {
 
         let task = self.server.translate_part(pages, model, page, part)?;
         let complete_task = self.complete_task(page);
+        let backup_task = self.backup_task()?;
 
-        let task = task
+        Ok(task
             .chain(complete_task)
-            .chain(Task::done(ServerAction::Abort.into()));
-
-        Ok(task)
+            .chain(backup_task)
+            .chain(Task::done(ServerAction::Abort.into())))
     }
 
     fn clean_text(&mut self, page: usize, part: usize) {
