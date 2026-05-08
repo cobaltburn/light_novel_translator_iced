@@ -23,7 +23,18 @@ use std::ops::Not;
 
 pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
     let page = model.current_page();
-    let error_cards = page.map(|p| p.error_cards());
+    let current_page = model.current_page;
+    let can_consensus = page.is_some_and(|page| {
+        !page.active() && model.server.connected() && !model.file_name().is_empty()
+    });
+    let error_press = move |part| {
+        can_consensus.then_some(ConsensusAction::ConsensusPart {
+            page: current_page,
+            part,
+        })
+    };
+
+    let error_cards = page.map(|p| p.error_cards(error_press));
     let sections = page.map(|p| p.sections.as_slice()).unwrap_or_default();
     let content = sections
         .iter()

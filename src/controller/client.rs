@@ -25,6 +25,7 @@ use std::{
 const TEMPERATURE: f64 = 0.3;
 const TOP_P: f64 = 0.8;
 const REPEAT_PENALTY: f64 = 1.05;
+const RETRY_DURATION: Duration = Duration::from_secs(120);
 
 pub type SharedHistory = Arc<Mutex<Vec<Message>>>;
 
@@ -77,8 +78,8 @@ pub enum Client {
 impl Client {
     pub fn ollama() -> Client {
         let policy = ExponentialBackoff::builder()
-            .retry_bounds(Duration::from_secs(5), Duration::from_secs(30 * 60))
-            .build_with_total_retry_duration(Duration::from_secs(60));
+            .retry_bounds(Duration::from_secs(1), Duration::from_secs(10))
+            .build_with_total_retry_duration(RETRY_DURATION);
         let http = MiddlewareBuilder::new(Default::default())
             .with(RetryTransientMiddleware::new_with_policy(policy))
             .build();

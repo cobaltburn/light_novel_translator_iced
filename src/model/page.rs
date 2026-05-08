@@ -2,7 +2,7 @@ use crate::{actions::contains_japanese, model::Activity};
 use iced::{
     Element,
     alignment::Horizontal,
-    widget::{Column, container, right, text},
+    widget::{Column, button, right, text},
 };
 use rig::message::Message;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,10 @@ impl Page {
 
     pub fn file_stem(&self) -> Option<&OsStr> {
         self.path.file_stem()
+    }
+
+    pub fn active(&self) -> bool {
+        matches!(self.activity, Activity::Active)
     }
 
     pub fn check_incomplete(&self) -> bool {
@@ -116,25 +120,36 @@ impl Page {
         };
     }
 
-    pub fn error_cards<T: 'static>(&self) -> Element<'_, T> {
-        let current_sections = self
+    pub fn error_cards<T: 'static + Clone>(
+        &self,
+        on_press: impl Fn(usize) -> Option<T> + 'static,
+    ) -> Element<'_, T> {
+        let make_btn = |label: String, i: usize| {
+            button(text(label))
+                .padding(5)
+                .style(button::primary)
+                .on_press_maybe(on_press(i))
+        };
+
+        let empty_sections = self
             .sections
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.content.is_empty())
-            .map(|(i, _)| text!("Empty part: {:2}", i + 1));
-        let errors = self
+            .filter_map(|(i, s)| s.content.is_empty().then_some(i))
+            .map(|i| make_btn(format!("Empty part: {:2}", i + 1), i));
+        let jap_errors = self
             .jap_error
             .iter()
-            .map(|i| text!("Japanese error: {:2}", i + 1));
-
-        let errors = self
+            .map(|&i| make_btn(format!("Japanese error: {:2}", i + 1), i));
+        let size_errors = self
             .size_error
             .iter()
-            .map(|i| text!("Size error: {:2}", i + 1))
-            .chain(errors)
-            .chain(current_sections)
-            .map(|e| container(e).padding(5).style(container::primary).into())
+            .map(|&i| make_btn(format!("Size error: {:2}", i + 1), i));
+
+        let errors = size_errors
+            .chain(jap_errors)
+            .chain(empty_sections)
+            .map(Into::into)
             .collect::<Column<_>>();
 
         right(errors.spacing(5).align_x(Horizontal::Right))
