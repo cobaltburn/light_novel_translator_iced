@@ -3,7 +3,6 @@ use crate::{
         clean_invisible_chars, complete_dialog, get_pages, load_recovery, pick_save_folder,
         save_file, server_action::ServerAction,
     },
-    app::PID,
     controller::{parse::remove_think_tags, part_tag},
     error::{Error, Result},
     message::{display_error, select_epub},
@@ -28,7 +27,7 @@ pub enum TransAction {
         name: String,
         page: usize,
     },
-    Save(PathBuf),
+    SaveRecovery(PathBuf),
     Recover,
     RecoverPages(Vec<Page>),
     OpenEpub,
@@ -76,7 +75,7 @@ impl Translation {
             TransAction::TranslatePart { page, part } => self
                 .translate_part(page, part)
                 .unwrap_or_else(|error| error.display_error()),
-            TransAction::Save(path) => self
+            TransAction::SaveRecovery(path) => self
                 .save_json(path)
                 .unwrap_or_else(|error| error.display_error()),
             TransAction::OpenEpub => Task::future(select_epub())
@@ -222,7 +221,7 @@ impl Translation {
         let task = self.server.translate(pages, &model, page)?;
 
         let complete_task = self.complete_task(page);
-        let backup_task = self.backup_task()?;
+        let backup_task = self.backup_task();
         let next_task = self.next_task(page);
 
         Ok(task
@@ -236,20 +235,11 @@ impl Translation {
             .bind_handle(Task::done(TransAction::PageComplete(page)))
     }
 
-    fn backup_task(&mut self) -> Result<Task<TransAction>> {
-        let Some(model) = self.server.current_model.clone() else {
-            return Err(Error::ServerError("No model found"));
-        };
+    fn backup_task(&mut self) -> Task<TransAction> {
+        let backup = self.file_path.with_extension("json");
 
-        let backup = self
-            .file_path
-            .with_extension(model)
-            .with_added_extension(PID.to_string())
-            .with_added_extension("json");
-
-        Ok(self
-            .server
-            .bind_handle(Task::done(TransAction::Save(backup))))
+        self.server
+            .bind_handle(Task::done(TransAction::SaveRecovery(backup)))
     }
 
     fn next_task(&mut self, page: usize) -> Task<TransAction> {
@@ -271,7 +261,7 @@ impl Translation {
         let task = self.server.translate(pages, &model, page)?;
 
         let complete_task = self.complete_task(page);
-        let backup_task = self.backup_task()?;
+        let backup_task = self.backup_task();
 
         Ok(task
             .chain(complete_task)
@@ -292,7 +282,7 @@ impl Translation {
 
         let task = self.server.translate_part(pages, model, page, part)?;
         let complete_task = self.complete_task(page);
-        let backup_task = self.backup_task()?;
+        let backup_task = self.backup_task();
 
         Ok(task
             .chain(complete_task)
