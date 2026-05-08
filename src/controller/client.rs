@@ -23,7 +23,6 @@ use std::{
 };
 
 const TEMPERATURE: f64 = 0.3;
-const NUM_CTX: u32 = 8192;
 const TOP_P: f64 = 0.8;
 const REPEAT_PENALTY: f64 = 1.05;
 
@@ -193,7 +192,6 @@ impl Client {
 
 fn agent_params(think: Think) -> Value {
     serde_json::json!({
-        "num_ctx": NUM_CTX,
         "top_p": TOP_P,
         "repeat_penalty": REPEAT_PENALTY,
         "think": !matches!(think, Think::None),

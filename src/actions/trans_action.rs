@@ -1,7 +1,7 @@
 use crate::{
     actions::{
-        clean_invisible_chars, complete_dialog, get_pages, handle_error, load_recovery,
-        pick_save_folder, save_file, server_action::ServerAction,
+        clean_invisible_chars, complete_dialog, get_pages, load_recovery, pick_save_folder,
+        save_file, server_action::ServerAction,
     },
     app::PID,
     controller::{parse::remove_think_tags, part_tag},
@@ -67,12 +67,18 @@ impl Translation {
                 page,
                 part,
             } => self.update_content(content, page, part).into(),
-            TransAction::Translate(page) => handle_error(self.translate(page)),
-            TransAction::TranslatePage(page) => handle_error(self.translate_page(page)),
-            TransAction::TranslatePart { page, part } => {
-                handle_error(self.translate_part(page, part))
-            }
-            TransAction::Save(path) => handle_error(self.save_json(path)),
+            TransAction::Translate(page) => self
+                .translate(page)
+                .unwrap_or_else(|error| error.display_error()),
+            TransAction::TranslatePage(page) => self
+                .translate_page(page)
+                .unwrap_or_else(|error| error.display_error()),
+            TransAction::TranslatePart { page, part } => self
+                .translate_part(page, part)
+                .unwrap_or_else(|error| error.display_error()),
+            TransAction::Save(path) => self
+                .save_json(path)
+                .unwrap_or_else(|error| error.display_error()),
             TransAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .then(|doc| match doc {

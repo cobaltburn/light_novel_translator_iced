@@ -5,7 +5,6 @@ use crate::{
 };
 use epub::doc::EpubDoc;
 use htmd::HtmlToMarkdown;
-use iced::{Task, advanced::graphics::futures::MaybeSend};
 use std::{
     ffi::OsStr,
     io::Cursor,
@@ -145,23 +144,17 @@ pub async fn select_format_folder(dir: PathBuf) -> Option<(String, Vec<(PathBuf,
     Some((handle.file_name(), pages))
 }
 
-pub fn handle_error<T: MaybeSend + 'static>(task: Result<Task<T>>) -> Task<T> {
-    match task {
-        Ok(task) => task,
-        Err(error) => error.display_error(),
-    }
-}
-
 pub fn contains_japanese(text: &str) -> bool {
     text.chars().any(|c| {
-        matches!(c,
-            '\u{3040}'..='\u{309F}' |  // Hiragana
-            '\u{30A0}'..='\u{30FF}' |  // Katakana
-            '\u{4E00}'..='\u{9FFF}' |  // CJK Unified Ideographs (common kanji)
-            '\u{3400}'..='\u{4DBF}' |  // CJK Unified Ideographs Extension A
-            '\u{FF65}'..='\u{FF9F}' |  // Half-width Katakana
-            '\u{31F0}'..='\u{31FF}'    // Katakana Phonetic Extensions
-        )
+        c.is_alphabetic()
+            && matches!(c,
+                '\u{3040}'..='\u{309F}' |  // Hiragana
+                '\u{30A0}'..='\u{30FF}' |  // Katakana
+                '\u{4E00}'..='\u{9FFF}' |  // CJK Unified Ideographs (common kanji)
+                '\u{3400}'..='\u{4DBF}' |  // CJK Unified Ideographs Extension A
+                '\u{FF65}'..='\u{FF9F}' |  // Half-width Katakana
+                '\u{31F0}'..='\u{31FF}'    // Katakana Phonetic Extensions
+            )
     })
 }
 

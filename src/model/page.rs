@@ -10,6 +10,7 @@ use std::{ffi::OsStr, path::PathBuf};
 
 const SIZE_TOLERANCE: usize = 1000;
 const SIZE_FLOOR: usize = 5000;
+const SIZE_MAX: usize = 9000;
 const SECTION_CAPACITY: usize = 8 * 1024;
 
 #[non_exhaustive]
@@ -94,7 +95,7 @@ impl Page {
                 if i == last_index {
                     return count > max;
                 }
-                count < SIZE_FLOOR || count > max || count < min
+                count < SIZE_FLOOR || count > SIZE_MAX || count > max || count < min
             })
             .map(|(i, _)| i)
             .collect()
