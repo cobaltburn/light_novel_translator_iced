@@ -78,7 +78,7 @@ impl Client {
     pub fn ollama() -> Client {
         let policy = ExponentialBackoff::builder()
             .retry_bounds(Duration::from_secs(5), Duration::from_secs(30 * 60))
-            .build_with_total_retry_duration(Duration::from_secs(30));
+            .build_with_total_retry_duration(Duration::from_secs(60));
         let http = MiddlewareBuilder::new(Default::default())
             .with(RetryTransientMiddleware::new_with_policy(policy))
             .build();
