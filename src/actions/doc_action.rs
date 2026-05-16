@@ -1,13 +1,13 @@
 use crate::{
     controller::{
         parse::{join_partition, partition_text},
-        xml::strip_data_tags,
+        xml::{strip_syosetu_tags, strip_tags},
     },
     message::{Message, display_error, select_epub},
     model::doc::Doc,
 };
 use epub::doc::EpubDoc;
-use htmd::HtmlToMarkdown;
+use html2md::rewrite_html;
 use iced::Task;
 use std::{io::Cursor, path::PathBuf};
 
@@ -70,19 +70,12 @@ impl Doc {
     }
 
     pub fn get_page(&mut self, page: usize) -> Option<String> {
-        let converter = HtmlToMarkdown::builder()
-            .skip_tags(vec!["head", "img", "image"])
-            .scripting_enabled(false)
-            .build();
-
         let epub = self.epub.as_mut()?;
         epub.set_current_chapter(page);
         let html = epub.get_current_str()?.0;
-        let html = strip_data_tags(&html).ok()?;
-        let markdown = converter
-            .convert(&html)
-            .inspect_err(|e| log::error!("{e}"))
-            .ok()?;
+        let html = strip_syosetu_tags(&html).ok()?;
+        let html = strip_tags(&html).ok()?;
+        let markdown = rewrite_html(&html, false);
         let lines = markdown.lines();
         let markdown = lines.map(|s| format!("{}\n", s.trim())).collect::<String>();
         let parts = partition_text(&markdown);

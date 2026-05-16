@@ -73,9 +73,9 @@ fn new_tab_button(_model: &Translation) -> Element<'_, Message> {
 fn tab(model: &Translation) -> Element<'_, TransAction> {
     let page = model.current_page();
     let current_page = model.current_page;
-    let can_translate = page.is_some_and(|page| {
-        !page.active() && model.server.connected() && !model.file_name().is_empty()
-    });
+    let can_translate = model.server.handles.is_empty()
+        && model.server.connected()
+        && !model.file_name().is_empty();
     let error_press = move |part| {
         can_translate.then_some(TransAction::TranslatePart {
             page: current_page,

@@ -1,4 +1,5 @@
 use crate::error::{Error, Result};
+use bstr::ByteSlice;
 use pulldown_cmark::{Options, Parser, html::push_html};
 use quick_xml::{
     Reader, Writer,
@@ -24,11 +25,45 @@ pub fn remove_part_tags(input: &str) -> String {
     rg.replace_all(input, "").to_string()
 }
 
-pub fn strip_data_tags(html: &str) -> Result<String> {
+pub fn strip_syosetu_tags(html: &str) -> Result<String> {
     let mut reader = Reader::from_str(html);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
+
     loop {
         match reader.read_event()? {
+            Event::Start(tag) if contains_author_notes(&tag) => {
+                reader.read_to_end(tag.name())?;
+            }
+            Event::Eof => break,
+            e => writer.write_event(e)?,
+        }
+    }
+
+    Ok(String::from_utf8(writer.into_inner().into_inner())?)
+}
+
+const SYOSETU_AFTERWORD: &[u8] = b"--afterword";
+const SYOSETU_PREFACE: &[u8] = b"--preface";
+const SYOSETU_ATTRIBUTES: &[&[u8]] = &[SYOSETU_PREFACE, SYOSETU_AFTERWORD];
+
+fn contains_author_notes(tag: &BytesStart<'_>) -> bool {
+    tag.try_get_attribute("class")
+        .ok()
+        .flatten()
+        .is_some_and(|a| SYOSETU_ATTRIBUTES.iter().any(|e| a.value.contains_str(e)))
+}
+
+pub fn strip_tags(html: &str) -> Result<String> {
+    let mut reader = Reader::from_str(html);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    let tag_match = |e: &[u8]| matches!(e, b"head" | b"img" | b"image");
+
+    loop {
+        match reader.read_event()? {
+            Event::Empty(tag) if tag_match(tag.name().as_ref()) => (),
+            Event::Start(tag) if tag_match(tag.name().as_ref()) => {
+                reader.read_to_end(tag.name())?;
+            }
             e @ (Event::Start(_) | Event::End(_) | Event::Empty(_) | Event::Text(_)) => {
                 writer.write_event(e)?;
             }
@@ -36,6 +71,7 @@ pub fn strip_data_tags(html: &str) -> Result<String> {
             _ => (),
         }
     }
+
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 

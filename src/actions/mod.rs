@@ -1,10 +1,14 @@
 use crate::{
-    controller::{get_ordered_path, parse::partition_text, xml::strip_data_tags},
+    controller::{
+        get_ordered_path,
+        parse::partition_text,
+        xml::{strip_syosetu_tags, strip_tags},
+    },
     error::Result,
     model::page::Page,
 };
 use epub::doc::EpubDoc;
-use htmd::HtmlToMarkdown;
+use html2md::rewrite_html;
 use std::{
     ffi::OsStr,
     io::Cursor,
@@ -75,17 +79,14 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
 
     let paths = get_ordered_path(&epub);
-    let converter = HtmlToMarkdown::builder()
-        .skip_tags(vec!["head", "img", "image"])
-        .scripting_enabled(false)
-        .build();
 
     let pages: Result<Vec<_>> = paths
         .into_iter()
         .map(|path| {
             let html = epub.get_resource_str_by_path(&path).unwrap();
-            let html = strip_data_tags(&html)?;
-            let markdown = converter.convert(&html)?;
+            let html = strip_syosetu_tags(&html)?;
+            let html = strip_tags(&html)?;
+            let markdown = rewrite_html(&html, false);
             let markdown: Vec<_> = markdown.lines().map(|s| s.trim()).collect();
             Ok((path, markdown.join("\n")))
         })

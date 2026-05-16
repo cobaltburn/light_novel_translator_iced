@@ -279,6 +279,7 @@ impl Translation {
         let current = pages.last_mut().unwrap();
         current.activity = Activity::Active;
         current.sections.get_mut(part).unwrap().content.clear();
+        current.errors.clear();
 
         let task = self.server.translate_part(pages, model, page, part)?;
         let complete_task = self.complete_task(page);

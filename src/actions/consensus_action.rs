@@ -190,8 +190,7 @@ impl Consensus {
         if let Some(page) = self.pages.get_mut(page) {
             page.activity = Activity::Active;
             page.sections.get_mut(part).unwrap().content.clear();
-            page.jap_error.clear();
-            page.size_error.clear();
+            page.errors.clear();
         }
 
         let Some(pages) = self.pages.get(0..page + 1) else {
@@ -231,21 +230,8 @@ impl Consensus {
     }
 
     fn check_complete(&mut self, page: usize) {
-        let Some(page) = self.pages.get_mut(page) else {
-            return;
-        };
-
-        page.size_error = page.check_size();
-        page.jap_error = page.check_japanese();
-
-        page.activity = if page.check_incomplete() {
-            Activity::Incomplete
-        } else if let Some(i) = page.size_error.first() {
-            Activity::Error(i + 1)
-        } else if let Some(i) = page.jap_error.first() {
-            Activity::Error(i + 1)
-        } else {
-            Activity::Complete
+        if let Some(page) = self.pages.get_mut(page) {
+            page.check_page();
         };
     }
 

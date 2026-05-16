@@ -8,7 +8,8 @@ use crate::{
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
 use quick_xml::{Writer, events::BytesText};
-use rig::message::Message;
+use rig_core::message::Message;
+use serde::{Serialize, Serializer};
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -308,13 +309,13 @@ pub enum Think {
     None,
 }
 
-impl std::fmt::Display for Think {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Serialize for Think {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
         match self {
-            Think::High => f.write_str("high"),
-            Think::Medium => f.write_str("medium"),
-            Think::Low => f.write_str("low"),
-            Think::None => f.write_str("false"),
+            Think::High => serializer.serialize_str("high"),
+            Think::Medium => serializer.serialize_str("medium"),
+            Think::Low => serializer.serialize_str("low"),
+            Think::None => serializer.serialize_bool(false),
         }
     }
 }

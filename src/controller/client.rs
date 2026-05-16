@@ -7,7 +7,7 @@ use crate::{
 use iced::Task;
 use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
-use rig::{
+use rig_core::{
     agent::{MultiTurnStreamItem, StreamingError},
     client::{CompletionClient, ModelListingClient, Nothing},
     completion::{CompletionError, GetTokenUsage},
@@ -22,10 +22,12 @@ use std::{
     time::Duration,
 };
 
-const TEMPERATURE: f64 = 0.3;
+const TEMPERATURE: f64 = 0.5;
 const TOP_P: f64 = 0.8;
 const REPEAT_PENALTY: f64 = 1.05;
-const RETRY_DURATION: Duration = Duration::from_secs(120);
+const RETRY_DURATION: Duration = Duration::from_secs(240);
+const MIN_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(20);
 
 pub type SharedHistory = Arc<Mutex<Vec<Message>>>;
 
@@ -72,13 +74,13 @@ impl StreamAction for ConsensusAction {
 pub enum Client {
     #[default]
     Disconnected,
-    Ollama(rig::client::Client<OllamaExt, ClientWithMiddleware>),
+    Ollama(rig_core::client::Client<OllamaExt, ClientWithMiddleware>),
 }
 
 impl Client {
     pub fn ollama() -> Client {
         let policy = ExponentialBackoff::builder()
-            .retry_bounds(Duration::from_secs(1), Duration::from_secs(10))
+            .retry_bounds(MIN_RETRY_INTERVAL, MAX_RETRY_INTERVAL)
             .build_with_total_retry_duration(RETRY_DURATION);
         let http = MiddlewareBuilder::new(Default::default())
             .with(RetryTransientMiddleware::new_with_policy(policy))
@@ -195,7 +197,7 @@ fn agent_params(think: Think) -> Value {
     serde_json::json!({
         "top_p": TOP_P,
         "repeat_penalty": REPEAT_PENALTY,
-        "think": !matches!(think, Think::None),
+        "think": think,
     })
 }
 
