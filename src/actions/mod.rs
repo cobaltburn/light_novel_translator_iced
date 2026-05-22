@@ -4,7 +4,7 @@ use crate::{
         parse::partition_text,
         xml::{strip_syosetu_tags, strip_tags},
     },
-    error::Result,
+    error::{Error, Result},
     model::page::Page,
 };
 use epub::doc::EpubDoc;
@@ -83,7 +83,12 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
     let pages: Result<Vec<_>> = paths
         .into_iter()
         .map(|path| {
-            let html = epub.get_resource_str_by_path(&path).unwrap();
+            let html = epub
+                .get_resource_str_by_path(&path)
+                .ok_or(Error::GeneralError(format!(
+                    "Invalid file in epub: {}",
+                    path.to_string_lossy()
+                )))?;
             let html = strip_syosetu_tags(&html)?;
             let html = strip_tags(&html)?;
             let markdown = rewrite_html(&html, false);

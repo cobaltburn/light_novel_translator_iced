@@ -103,11 +103,17 @@ impl Translation {
             .map(|p| (p.path.clone(), p))
             .collect();
 
+        let mut last_section = String::new();
         for page in self.pages.iter_mut() {
             if let Some(p) = pages.get_mut(&page.path) {
                 mem::swap(&mut page.sections, &mut p.sections);
-                page.check_page();
+                page.check_page(&last_section);
             }
+            last_section = page
+                .sections
+                .last()
+                .map(|s| s.content.clone())
+                .unwrap_or_default();
         }
     }
 
@@ -143,8 +149,13 @@ impl Translation {
     }
 
     fn check_complete(&mut self, page: usize) {
+        let last_section = self
+            .pages
+            .get(page - 1)
+            .and_then(|p| Some(p.sections.last()?.content.clone()))
+            .unwrap_or_default();
         if let Some(page) = self.pages.get_mut(page) {
-            page.check_page();
+            page.check_page(&last_section);
         };
     }
 

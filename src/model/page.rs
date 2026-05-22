@@ -5,11 +5,18 @@ use iced::{
     widget::{Button, Column, button, right, text},
 };
 use phf::phf_map;
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
 use rig_core::message::Message;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, ffi::OsStr, path::PathBuf};
+use std::{collections::HashMap, ffi::OsStr, iter, path::PathBuf};
+use strsim::normalized_levenshtein;
 
 const SIZE_TOLERANCE: usize = 1000;
+const LEVENSHTEIN_TOLERANCE: f64 = 0.3;
+const FREQUENCY_TOLERANCE: f64 = 10.0;
 const SIZE_FLOOR: usize = 5000;
 const SIZE_MAX: usize = 9000;
 const SECTION_CAPACITY: usize = 8 * 1024;
@@ -71,19 +78,12 @@ impl Page {
             .iter()
             .enumerate()
             .filter(|(_, e)| check_char_frequency(&e.content))
-            .map(|(i, _)| PageError::Frequency(i))
+            .map(|(i, _)| PageError::Repeat(i))
             .collect()
     }
 
     pub fn check_size(&self) -> Vec<PageError> {
-        let Some((last, sections)) = self.sections.split_last() else {
-            return Vec::new();
-        };
-        if sections.is_empty() {
-            return Vec::new();
-        }
-
-        let mut lengths: Vec<_> = sections.iter().map(|e| e.content.len()).collect();
+        let lengths: Vec<_> = self.sections.iter().map(|e| e.content.len()).collect();
         let mid = lengths.len() / 2;
         let mut sorted = lengths.clone();
         let (_, median, _) = sorted.select_nth_unstable(mid);
@@ -92,7 +92,6 @@ impl Page {
         let max = median + SIZE_TOLERANCE;
         let min = median.saturating_sub(SIZE_TOLERANCE);
 
-        lengths.push(last.content.len());
         let last_index = lengths.len() - 1;
 
         lengths
@@ -111,24 +110,40 @@ impl Page {
             .collect()
     }
 
-    pub fn check_page(&mut self) {
-        let check_size = self.check_size();
-        let check_japanese = self.check_japanese();
-        let check_frequency = self.check_frequency();
+    fn check_text_difference(&self, last_section: &str) -> Vec<PageError> {
+        let sections = self.sections.iter().map(|s| s.content.as_str());
+        let sections: Vec<_> = iter::once(last_section).chain(sections).collect();
+
+        let errors = sections.par_windows(2).enumerate().flat_map(|(i, w)| {
+            let [a, b] = w else { panic!() };
+            if a.is_empty() || b.is_empty() {
+                return None;
+            }
+            if normalized_levenshtein(a, b) < LEVENSHTEIN_TOLERANCE {
+                return None;
+            }
+            Some(PageError::Copy(i))
+        });
+
+        errors.collect()
+    }
+
+    pub fn check_page(&mut self, last_section: &str) {
+        self.errors = [
+            self.check_size(),
+            self.check_japanese(),
+            self.check_frequency(),
+            self.check_text_difference(last_section),
+        ]
+        .concat();
 
         self.activity = if self.check_incomplete() {
             Activity::Incomplete
-        } else if let Some(PageError::Size(i)) = check_size.first() {
-            Activity::Error(i + 1)
-        } else if let Some(PageError::Japanese(i)) = check_japanese.first() {
-            Activity::Error(i + 1)
-        } else if let Some(PageError::Frequency(i)) = check_frequency.first() {
-            Activity::Error(i + 1)
+        } else if let Some(error) = self.errors.first() {
+            Activity::Error(error.index() + 1)
         } else {
             Activity::Complete
         };
-
-        self.errors = [check_size, check_japanese, check_frequency].concat();
     }
 
     pub fn error_cards<T: 'static + Clone>(
@@ -191,8 +206,6 @@ static LETTER_FREQUENCY: phf::Map<char, f64> = phf_map! {
     'e'=> 12.7,
 };
 
-const FREQUENCY_TOLERANCE: f64 = 10.0;
-
 fn check_char_frequency(text: &str) -> bool {
     let char_count: HashMap<char, usize> = text
         .to_lowercase()
@@ -241,10 +254,20 @@ impl Section {
 pub enum PageError {
     Japanese(usize),
     Size(usize),
-    Frequency(usize),
+    Repeat(usize),
+    Copy(usize),
 }
 
 impl PageError {
+    pub fn index(&self) -> usize {
+        match self {
+            PageError::Japanese(i)
+            | PageError::Size(i)
+            | PageError::Repeat(i)
+            | PageError::Copy(i) => *i,
+        }
+    }
+
     pub fn error_button<T: 'static + Clone>(
         &self,
         on_press: &impl Fn(usize) -> Option<T>,
@@ -259,7 +282,8 @@ impl PageError {
         match self {
             PageError::Japanese(i) => make_btn(format!("Japanese error: {:2}", i + 1), *i),
             PageError::Size(i) => make_btn(format!("Size error: {:2}", i + 1), *i),
-            PageError::Frequency(i) => make_btn(format!("Frequency error: {:2}", i + 1), *i),
+            PageError::Repeat(i) => make_btn(format!("Repeat error: {:2}", i + 1), *i),
+            PageError::Copy(i) => make_btn(format!("Copy error: {:2}", i + 1), *i),
         }
     }
 }
