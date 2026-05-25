@@ -90,23 +90,22 @@ impl Translation {
                     Ok(path) => Task::done(TransAction::SavePages(path).into()),
                     Err(err) => Task::future(display_error(err)).discard(),
                 }),
-            TransAction::RecoverPages(pages) => self.recover_pages(pages).into(),
+            TransAction::RecoverPages(pages) => match self.recover_pages(pages) {
+                Ok(_) => Task::none(),
+                Err(err) => err.display_error(),
+            },
             TransAction::Recover => Task::future(load_recovery())
                 .and_then(|pages| Task::done(TransAction::RecoverPages(pages))),
         }
     }
 
-    pub fn recover_pages(&mut self, pages: Vec<Page>) {
-        let mut pages: HashMap<_, _> = pages
-            .into_iter()
-            .filter(|p| !p.sections.iter().all(|s| s.content.is_empty()))
-            .map(|p| (p.path.clone(), p))
-            .collect();
+    pub fn recover_pages(&mut self, pages: Vec<Page>) -> Result<()> {
+        let mut sections: HashMap<_, _> = pages.into_iter().map(|p| (p.path, p.sections)).collect();
 
         let mut last_section = String::new();
         for page in self.pages.iter_mut() {
-            if let Some(p) = pages.get_mut(&page.path) {
-                mem::swap(&mut page.sections, &mut p.sections);
+            if let Some(current) = sections.get_mut(&page.path) {
+                mem::swap(&mut page.sections, current);
                 page.check_page(&last_section);
             }
             last_section = page
@@ -115,6 +114,8 @@ impl Translation {
                 .map(|s| s.content.clone())
                 .unwrap_or_default();
         }
+
+        Ok(())
     }
 
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {

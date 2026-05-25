@@ -85,7 +85,7 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
         .map(|path| {
             let html = epub
                 .get_resource_str_by_path(&path)
-                .ok_or(Error::GeneralError(format!(
+                .ok_or(Error::Error(format!(
                     "Invalid file in epub: {}",
                     path.to_string_lossy()
                 )))?;

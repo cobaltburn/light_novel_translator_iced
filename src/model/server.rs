@@ -155,7 +155,7 @@ impl Server {
         let current = pages.last().expect("dont pass an empty array");
         let candidates = candidates
             .get(current.file_stem().unwrap_or_default())
-            .ok_or(Error::GeneralError(String::from("missing candidate files")))?;
+            .ok_or(Error::Error(String::from("missing candidate files")))?;
 
         let handles = &mut self.handles;
         let tasks: Result<Vec<_>> = current
@@ -186,7 +186,7 @@ impl Server {
         let section = current.sections.get(part).unwrap();
         let page_candidates = candidates
             .get(&current.file_stem().unwrap_or_default())
-            .ok_or(Error::GeneralError(String::from("missing candidate file")))?;
+            .ok_or(Error::Error(String::from("missing candidate file")))?;
         let page_candidates: Vec<_> = page_candidates.iter().flat_map(|e| e.get(part)).collect();
         let prompt = consensus_prompt(&section.japanese, &page_candidates)?;
 

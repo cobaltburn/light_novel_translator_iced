@@ -11,11 +11,15 @@ use rayon::{
 };
 use rig_core::message::Message;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, ffi::OsStr, iter, path::PathBuf};
-use strsim::normalized_levenshtein;
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::OsStr,
+    iter,
+    path::PathBuf,
+};
 
 const SIZE_TOLERANCE: usize = 1000;
-const LEVENSHTEIN_TOLERANCE: f64 = 0.3;
+const JACCARD_TOLERANCE: f64 = 0.25;
 const FREQUENCY_TOLERANCE: f64 = 10.0;
 const SIZE_FLOOR: usize = 5000;
 const SIZE_MAX: usize = 9000;
@@ -110,16 +114,13 @@ impl Page {
             .collect()
     }
 
-    fn check_text_difference(&self, last_section: &str) -> Vec<PageError> {
+    fn check_jaccard(&self, last_section: &str) -> Vec<PageError> {
         let sections = self.sections.iter().map(|s| s.content.as_str());
         let sections: Vec<_> = iter::once(last_section).chain(sections).collect();
 
         let errors = sections.par_windows(2).enumerate().flat_map(|(i, w)| {
             let [a, b] = w else { panic!() };
-            if a.is_empty() || b.is_empty() {
-                return None;
-            }
-            if normalized_levenshtein(a, b) < LEVENSHTEIN_TOLERANCE {
+            if a.is_empty() || b.is_empty() || jaccard(a, b) <= JACCARD_TOLERANCE {
                 return None;
             }
             Some(PageError::Copy(i))
@@ -133,7 +134,7 @@ impl Page {
             self.check_size(),
             self.check_japanese(),
             self.check_frequency(),
-            self.check_text_difference(last_section),
+            self.check_jaccard(last_section),
         ]
         .concat();
 
@@ -174,6 +175,18 @@ impl Page {
         right(errors.spacing(5).align_x(Horizontal::Right))
             .padding(20)
             .into()
+    }
+}
+
+fn jaccard(a: &str, b: &str) -> f64 {
+    let set_a: HashSet<&str> = a.split_whitespace().collect();
+    let set_b: HashSet<&str> = b.split_whitespace().collect();
+    let intersection = set_a.intersection(&set_b).count() as f64;
+    let union = set_a.union(&set_b).count() as f64;
+    if union == 0.0 {
+        0.0
+    } else {
+        intersection / union
     }
 }
 
