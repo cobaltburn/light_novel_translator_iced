@@ -6,15 +6,15 @@ pub fn remove_think_tags(text: &str) -> String {
     rg.replace_all(text, "").to_string()
 }
 
-pub fn partition_text(text: &str) -> Vec<String> {
-    let mut messages = Vec::with_capacity(text.len() / 2000);
-    let mut msg = String::with_capacity(2500);
-    let sentences = text.lines();
+const PARTITION_SIZE: usize = 8000;
 
-    for sentence in sentences {
-        if msg.len() < 2500 {
-            msg.push_str(sentence);
-            msg.push_str("\n");
+pub fn partition_text(text: &str) -> Vec<String> {
+    let mut messages = Vec::with_capacity(10);
+    let mut msg = String::with_capacity(PARTITION_SIZE + 500);
+
+    for sentence in text.lines() {
+        if msg.len() < PARTITION_SIZE {
+            msg.push_str(&format!("{sentence}\n"));
         } else {
             messages.push(msg.trim().to_string());
             msg.clear();

@@ -99,8 +99,7 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
             result.map(|(path, markdown)| {
                 let partitioned = partition_text(&markdown);
                 let sections = partitioned
-                    .chunks(3)
-                    .map(|x| x.join(" "))
+                    .into_iter()
                     .filter(|e| !e.trim_matches('#').is_empty())
                     .collect();
                 Page::new(path, sections)

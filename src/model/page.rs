@@ -6,7 +6,7 @@ use iced::{
 };
 use phf::phf_map;
 use rayon::{
-    iter::{IndexedParallelIterator, ParallelIterator},
+    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
 };
 use rig_core::message::Message;
@@ -79,7 +79,7 @@ impl Page {
 
     pub fn check_frequency(&self) -> Vec<PageError> {
         self.sections
-            .iter()
+            .par_iter()
             .enumerate()
             .filter(|(_, e)| check_char_frequency(&e.content))
             .map(|(i, _)| PageError::Repeat(i))
@@ -118,15 +118,16 @@ impl Page {
         let sections = self.sections.iter().map(|s| s.content.as_str());
         let sections: Vec<_> = iter::once(last_section).chain(sections).collect();
 
-        let errors = sections.par_windows(2).enumerate().flat_map(|(i, w)| {
-            let [a, b] = w else { panic!() };
-            if a.is_empty() || b.is_empty() || jaccard(a, b) <= JACCARD_TOLERANCE {
-                return None;
-            }
-            Some(PageError::Copy(i))
-        });
-
-        errors.collect()
+        sections
+            .par_array_windows()
+            .enumerate()
+            .flat_map(|(i, &[a, b])| {
+                if a.is_empty() || b.is_empty() || jaccard(a, b) <= JACCARD_TOLERANCE {
+                    return None;
+                }
+                Some(PageError::Copy(i))
+            })
+            .collect()
     }
 
     pub fn check_page(&mut self, last_section: &str) {
@@ -138,10 +139,10 @@ impl Page {
         ]
         .concat();
 
-        self.activity = if self.check_incomplete() {
-            Activity::Incomplete
-        } else if let Some(error) = self.errors.first() {
+        self.activity = if let Some(error) = self.errors.first() {
             Activity::Error(error.index() + 1)
+        } else if self.check_incomplete() {
+            Activity::Incomplete
         } else {
             Activity::Complete
         };
@@ -167,8 +168,8 @@ impl Page {
 
         let errors = self.errors.iter().map(|e| e.error_button(&on_press));
 
-        let errors = errors
-            .chain(empty_sections)
+        let errors = empty_sections
+            .chain(errors)
             .map(Into::into)
             .collect::<Column<_>>();
 

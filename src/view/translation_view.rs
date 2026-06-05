@@ -28,7 +28,7 @@ pub fn translation_view(
 
     let mut tabs = TabBar::with_tab_labels(tabs, Message::SelectTab)
         .set_active_tab(&tab_id)
-        .padding(Padding::new(0.0))
+        .padding(0.0)
         .height(Length::Fixed(40.0))
         .text_size(13.0)
         .style(|theme, status| match status {

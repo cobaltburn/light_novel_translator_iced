@@ -150,11 +150,13 @@ impl Translation {
     }
 
     fn check_complete(&mut self, page: usize) {
-        let last_section = self
-            .pages
-            .get(page - 1)
-            .and_then(|p| Some(p.sections.last()?.content.clone()))
+        let last_section = page
+            .checked_sub(1)
+            .and_then(|i| self.pages.get(i))
+            .and_then(|p| p.sections.last())
+            .map(|c| c.content.clone())
             .unwrap_or_default();
+
         if let Some(page) = self.pages.get_mut(page) {
             page.check_page(&last_section);
         };

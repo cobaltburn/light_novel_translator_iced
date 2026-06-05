@@ -17,7 +17,6 @@ use rig_core::{
 };
 use serde_json::Value;
 use std::{
-    ops::Not,
     sync::{Arc, Mutex},
     time::Duration,
 };
@@ -27,7 +26,7 @@ const TOP_P: f64 = 0.8;
 const REPEAT_PENALTY: f64 = 1.05;
 const RETRY_DURATION: Duration = Duration::from_secs(240);
 const MIN_RETRY_INTERVAL: Duration = Duration::from_secs(2);
-const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(20);
+const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 pub type SharedHistory = Arc<Mutex<Vec<Message>>>;
 
@@ -189,7 +188,7 @@ impl Client {
     }
 
     pub fn connected(&self) -> bool {
-        matches!(self, Client::Disconnected).not()
+        !matches!(self, Client::Disconnected)
     }
 }
 

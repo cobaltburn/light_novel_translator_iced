@@ -15,20 +15,20 @@ use epub::doc::{EpubDoc, ResourceItem};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};
 use quick_xml::{
     Reader, Writer,
-    escape::escape,
     events::{BytesDecl, BytesStart, Event},
 };
 use std::collections::VecDeque;
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet},
-    ffi::OsStr,
     io::{self, Cursor},
     mem,
     path::PathBuf,
 };
 
 const XHTML_MIME: &str = "application/xhtml+xml";
+const CSS_MIME: &str = "text/css";
+const JS_MIME: &str = "application/javascript";
 
 #[derive(Debug)]
 pub struct DocBuilder {
@@ -75,6 +75,7 @@ impl DocBuilder {
         self.add_images()?;
         self.add_cover_image()?;
         self.add_style_sheets()?;
+        self.add_js()?;
 
         for content in self.collect_contents()? {
             self.builder.add_content(content)?;
@@ -106,15 +107,14 @@ impl DocBuilder {
 
     pub fn add_images(&mut self) -> Result<()> {
         let folder = PathBuf::from("Images");
-        let image_resources: Vec<_> = self
-            .get_images()
-            .into_iter()
-            .flat_map(|ResourceItem { path, mime, .. }| {
-                let content = self.epub.get_resource_by_path(&path)?;
-                let path = folder.join(path.file_name()?);
-                Some((path, content, mime))
-            })
-            .collect();
+        let image_resources =
+            self.get_images()
+                .into_iter()
+                .flat_map(|ResourceItem { path, mime, .. }| {
+                    let content = self.epub.get_resource_by_path(&path)?;
+                    let path = folder.join(path.file_name()?);
+                    Some((path, content, mime))
+                });
 
         for (path, content, mime) in image_resources {
             if let Err(error) = self.builder.add_resource(path, &*content, mime) {
@@ -135,21 +135,48 @@ impl DocBuilder {
             .collect()
     }
 
-    fn add_style_sheets(&mut self) -> Result<()> {
-        let mime = "text/css";
-        let folder = PathBuf::from("Styles");
-        let style_sheets: Vec<_> = self
-            .get_style_sheets()
+    fn add_js(&mut self) -> Result<()> {
+        let folder = PathBuf::from("js");
+        let js = self
+            .get_js()
             .into_iter()
             .flat_map(|ResourceItem { path, .. }| {
                 let content = self.epub.get_resource_by_path(&path)?;
                 let path = folder.join(path.file_name()?);
                 Some((path, content))
-            })
-            .collect();
+            });
+
+        for (path, content) in js {
+            if let Err(error) = self.builder.add_resource(path, &*content, JS_MIME) {
+                log::error!("{:#?}", error);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn get_js(&self) -> Vec<ResourceItem> {
+        self.epub
+            .resources
+            .iter()
+            .filter(|(_, e)| e.mime == JS_MIME)
+            .map(|(_, e)| e.to_owned())
+            .collect()
+    }
+
+    fn add_style_sheets(&mut self) -> Result<()> {
+        let folder = PathBuf::from("Styles");
+        let style_sheets =
+            self.get_style_sheets()
+                .into_iter()
+                .flat_map(|ResourceItem { path, .. }| {
+                    let content = self.epub.get_resource_by_path(&path)?;
+                    let path = folder.join(path.file_name()?);
+                    Some((path, content))
+                });
 
         for (path, content) in style_sheets {
-            if let Err(error) = self.builder.add_resource(path, &*content, mime) {
+            if let Err(error) = self.builder.add_resource(path, &*content, CSS_MIME) {
                 log::error!("{:#?}", error);
             }
         }
@@ -161,7 +188,7 @@ impl DocBuilder {
         self.epub
             .resources
             .iter()
-            .filter(|(_, e)| e.mime == "text/css")
+            .filter(|(_, e)| e.mime == CSS_MIME)
             .map(|(_, e)| e.to_owned())
             .collect()
     }
@@ -205,10 +232,10 @@ impl DocBuilder {
                 }
             };
 
-            let file_name = href.file_name().unwrap();
+            let file_name = href.file_name().unwrap().to_string_lossy().into_owned();
             let mut content =
                 EpubContent::new(href.to_string_lossy(), Cursor::new(html.into_bytes()));
-            if chapter_file_names.contains(file_name) {
+            if chapter_file_names.contains(&file_name) {
                 count += 1;
                 content = content.title(format!("Chapter: {}", count));
             }
@@ -229,11 +256,12 @@ impl DocBuilder {
             .collect()
     }
 
-    pub fn chapter_file_names(&self) -> HashSet<&OsStr> {
+    pub fn chapter_file_names(&self) -> HashSet<String> {
         self.epub
             .toc
             .iter()
-            .map(|n| n.content.file_name().unwrap())
+            .filter_map(|n| n.content.file_name())
+            .filter_map(|p| p.to_string_lossy().split('#').next().map(|e| e.to_string()))
             .collect()
     }
 }
@@ -255,12 +283,10 @@ fn to_text_path(path: &PathBuf) -> PathBuf {
 fn build_html(html: &str, content: &str) -> Result<String> {
     let content = remove_part_tags(content);
     let content = replace_jp_symbols(&content);
-    let content = escape(content);
     let content = to_xml(&content);
 
-    let lines = count_lines(&content)?;
     let images = image_position(html)?;
-    let content = add_image_tags(&content, lines, images)?;
+    let content = add_image_tags(&content, images)?;
 
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
@@ -332,26 +358,44 @@ fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, content: &str) -> Result<()>
     Ok(())
 }
 
-fn add_image_tags(content: &str, lines: i32, images: Vec<(BytesStart<'_>, f64)>) -> Result<String> {
+fn add_image_tags(content: &str, mut images: Vec<(BytesStart<'_>, f64)>) -> Result<String> {
+    let lines = count_lines(&content)?;
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
 
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
-    let mut count = 0;
+    let mut line_count = 0;
+    images.sort_by(|(_, a), (_, b)| a.total_cmp(b));
     let mut images = VecDeque::from(images);
 
     loop {
         match reader.read_event()? {
             Event::Start(tag) if tag.name().as_ref() == b"p" => {
-                if let Some((tag, _)) =
-                    images.pop_front_if(|(_, i)| (count as f64 / lines as f64) >= *i)
+                line_count += 1;
+                let mut image_tags = Vec::new();
+                while let Some((tag, _)) =
+                    images.pop_front_if(|&mut (_, i)| (line_count as f64 / lines as f64) >= i)
                 {
-                    writer.write_event(Event::Empty(tag))?;
+                    image_tags.push(tag);
+                }
+
+                if image_tags.len() != 0 {
+                    writer
+                        .create_element("div")
+                        .with_attribute(("style", "text-align: center;"))
+                        .write_inner_content(|writer| {
+                            writer.create_element("p").write_inner_content(|writer| {
+                                for tag in image_tags {
+                                    writer.write_event(Event::Empty(tag))?;
+                                }
+                                Ok(())
+                            })?;
+                            Ok(())
+                        })?;
                 }
 
                 writer.write_event(Event::Start(tag))?;
-                count += 1;
             }
             Event::Eof => break,
             e => writer.write_event(e)?,

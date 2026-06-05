@@ -3,26 +3,23 @@ use bstr::ByteSlice;
 use pulldown_cmark::{Options, Parser, html::push_html};
 use quick_xml::{
     Reader, Writer,
+    escape::escape,
     events::{BytesStart, Event},
 };
 use regex::Regex;
 use std::{borrow::Cow, io::Cursor, os::unix::ffi::OsStrExt, path::PathBuf};
 
 pub fn to_xml(markdown: &str) -> String {
+    let markdown = escape(markdown);
     let mut html = String::with_capacity(markdown.len());
-    let parser = Parser::new_ext(markdown, Options::all());
+    let parser = Parser::new_ext(&markdown, Options::all());
     push_html(&mut html, parser);
     html
 }
 
-pub fn remove_think_tags(input: &str) -> String {
-    let rg = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
-    rg.replace_all(input, "").to_string()
-}
-
-pub fn remove_part_tags(input: &str) -> String {
+pub fn remove_part_tags(content: &str) -> Cow<'_, str> {
     let rg = Regex::new(r"(?s)<part>.*?</part>\s*").unwrap();
-    rg.replace_all(input, "").to_string()
+    rg.replace_all(content, "")
 }
 
 pub fn strip_syosetu_tags(html: &str) -> Result<String> {
@@ -77,8 +74,8 @@ pub fn strip_tags(html: &str) -> Result<String> {
 
 pub const SRC: &str = "src";
 pub const XLINK: &str = "xlink:href";
-pub const IMG: &str = "img";
-pub const IMAGE: &str = "image";
+pub const IMG_BYTES: &[u8] = b"img";
+pub const IMAGE_BYTES: &[u8] = b"image";
 
 pub fn update_image_paths(html: &str) -> Result<String> {
     let folder = PathBuf::from("../Images");
@@ -88,11 +85,11 @@ pub fn update_image_paths(html: &str) -> Result<String> {
 
     loop {
         match reader.read_event()? {
-            Event::Empty(tag) if tag.name().as_ref() == IMG.as_bytes() => {
+            Event::Empty(tag) if tag.name().as_ref() == IMG_BYTES => {
                 let tag = update_tag_path(tag, &folder, SRC)?;
                 writer.write_event(Event::Empty(tag))?;
             }
-            Event::Empty(tag) if tag.name().as_ref() == IMAGE.as_bytes() => {
+            Event::Empty(tag) if tag.name().as_ref() == IMAGE_BYTES => {
                 let tag = update_tag_path(tag, &folder, XLINK)?;
                 writer.write_event(Event::Empty(tag))?;
             }
@@ -177,7 +174,7 @@ pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
     }
 }
 
-pub fn count_lines(html: &str) -> Result<i32> {
+pub fn count_lines(html: &str) -> Result<usize> {
     let mut reader = Reader::from_str(html);
     let mut count = 0;
     loop {
@@ -200,11 +197,11 @@ pub fn image_position(html: &str) -> Result<Vec<(BytesStart<'_>, f64)>> {
     loop {
         match reader.read_event()? {
             Event::Start(tag) if tag.name().as_ref() == b"p" => count += 1,
-            Event::Empty(tag) if tag.name().as_ref() == IMG.as_bytes() => {
+            Event::Empty(tag) if tag.name().as_ref() == IMG_BYTES => {
                 let tag = update_tag_path(tag, &folder, SRC)?;
                 images.push((tag, count))
             }
-            Event::Empty(tag) if tag.name().as_ref() == IMAGE.as_bytes() => {
+            Event::Empty(tag) if tag.name().as_ref() == IMAGE_BYTES => {
                 let tag = update_tag_path(tag, &folder, XLINK)?;
                 images.push((tag, count))
             }
@@ -216,7 +213,7 @@ pub fn image_position(html: &str) -> Result<Vec<(BytesStart<'_>, f64)>> {
     images.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
     let images = images
         .into_iter()
-        .map(|(b, i)| (b, i as f64 / count as f64))
+        .map(|(tag, i)| (tag, i as f64 / count as f64))
         .collect();
     Ok(images)
 }

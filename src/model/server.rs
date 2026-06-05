@@ -19,7 +19,7 @@ use std::{
 };
 
 const BATCH_SIZE: usize = 6;
-const DEFAULT_CONTEXT_WINDOW: usize = 5;
+const DEFAULT_CONTEXT_WINDOW: usize = 3;
 
 #[derive(Default, Debug)]
 pub struct Server {

@@ -12,8 +12,6 @@ use iced::{
 use iced::{Element, color};
 use std::fmt;
 
-use crate::controller::part_tag;
-
 pub mod consensus_view;
 pub mod doc_view;
 pub mod format_view;
@@ -90,7 +88,7 @@ pub fn rich_text_scrollable<E: 'static>(content: Vec<Span>) -> Element<E> {
 
 pub fn part_span(i: usize, t: &str) -> [Span<'_>; 2] {
     [
-        span(format!("{} Count: {}\n\n", part_tag(i + 1), t.len())).color(color!(0xff0000)),
+        span(format!("\n\nPart: {}\nCount: {}\n\n", i + 1, t.len())).color(color!(0xff0000)),
         span(t),
     ]
 }
