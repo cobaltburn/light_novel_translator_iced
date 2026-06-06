@@ -35,13 +35,14 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
     };
 
     let error_cards = page.map(|p| p.error_cards(error_press));
+
     let sections = page.map(|p| p.sections.as_slice()).unwrap_or_default();
     let content = sections
         .iter()
-        .map(|s| &s.content)
+        .map(|s| s.span_content(model.display))
         .enumerate()
-        .flat_map(|(i, t)| part_span(i, t))
-        .collect::<Vec<_>>();
+        .flat_map(|(i, content)| part_span(i, content))
+        .collect();
 
     container(column![
         vertical(),

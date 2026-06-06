@@ -1,4 +1,4 @@
-use crate::{actions::contains_japanese, model::Activity};
+use crate::{actions::contains_japanese, model::Activity, view::DisplayType};
 use iced::{
     Element,
     alignment::Horizontal,
@@ -261,6 +261,20 @@ impl Section {
             Message::user(self.japanese.clone()),
             Message::assistant(self.content.clone()),
         ]
+    }
+
+    pub fn span_content(&self, display: DisplayType) -> String {
+        match display {
+            DisplayType::End => {
+                let lines: Vec<_> = self.content.lines().collect();
+                lines
+                    .get(lines.len().saturating_sub(10)..)
+                    .unwrap_or_default()
+                    .join("\n")
+            }
+            DisplayType::Full => self.content.clone(),
+            DisplayType::Japanese => self.japanese.clone(),
+        }
     }
 }
 

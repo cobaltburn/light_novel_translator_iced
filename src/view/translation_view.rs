@@ -2,22 +2,21 @@ use crate::{
     actions::trans_action::TransAction,
     message::Message,
     model::{server::Server, translation::Translation},
-    view::{menu_button, part_span, rich_text_scrollable},
+    view::{DisplayType, menu_button, part_span, rich_text_scrollable},
     widget::{
+        context_menu_button,
         page_sidebar::build_path_buttons,
         server_widget::{context_window_input, execution_selector, ollama_input, think_selector},
     },
 };
+use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::Vertical,
+    border::Radius,
     widget::{Button, Container, Row, container::transparent, lazy, space::vertical, stack},
 };
-use iced::{
-    border::Radius,
-    widget::{button, column, container, row, scrollable, text},
-};
-use iced_aw::{Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
+use iced_aw::{ContextMenu, Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
 use std::collections::BTreeMap;
 
 pub fn translation_view(
@@ -87,8 +86,9 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
     let sections = page.map(|p| p.sections.as_slice()).unwrap_or_default();
     let content = sections
         .iter()
+        .map(|s| s.span_content(model.display))
         .enumerate()
-        .flat_map(|(i, t)| part_span(i, &t.content))
+        .flat_map(|(i, content)| part_span(i, content))
         .collect();
 
     container(column![
@@ -97,7 +97,23 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
             menu_bar(model),
             row![
                 side_bar(model),
-                stack![rich_text_scrollable(content), error_cards]
+                stack![
+                    ContextMenu::new(rich_text_scrollable(content), || container(column![
+                        context_menu_button(text("full").color(Color::WHITE))
+                            .width(Length::Fill)
+                            .on_press(TransAction::SetDisplay(DisplayType::Full)),
+                        context_menu_button(text("end").color(Color::WHITE))
+                            .width(Length::Fill)
+                            .on_press(TransAction::SetDisplay(DisplayType::End)),
+                        context_menu_button(text("japanese").color(Color::WHITE))
+                            .width(Length::Fill)
+                            .on_press(TransAction::SetDisplay(DisplayType::Japanese)),
+                    ])
+                    .style(container::rounded_box)
+                    .width(100)
+                    .into()),
+                    error_cards
+                ]
             ]
             .spacing(10)
         ]

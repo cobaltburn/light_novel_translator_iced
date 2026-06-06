@@ -1,6 +1,7 @@
 use crate::{
     actions::trans_action::TransAction,
     model::{page::Page, server::Server},
+    view::DisplayType,
     widget::page_sidebar::{SidebarAction, SidebarDeps, SidebarRow},
 };
 use iced_aw::TabLabel;
@@ -12,6 +13,7 @@ pub struct Translation {
     pub file_path: PathBuf,
     pub current_page: usize,
     pub pages: Vec<Page>,
+    pub display: DisplayType,
 }
 
 impl Translation {

@@ -7,6 +7,7 @@ use crate::{
     error::{Error, Result},
     message::{display_error, select_epub},
     model::{Activity, page::Page, translation::Translation},
+    view::DisplayType,
 };
 use iced::Task;
 use std::{collections::HashMap, mem, path::PathBuf};
@@ -48,6 +49,7 @@ pub enum TransAction {
     CancelTranslate,
     SaveTranslation(String),
     ServerAction(ServerAction),
+    SetDisplay(DisplayType),
 }
 
 impl Translation {
@@ -96,7 +98,12 @@ impl Translation {
             },
             TransAction::Recover => Task::future(load_recovery())
                 .and_then(|pages| Task::done(TransAction::RecoverPages(pages))),
+            TransAction::SetDisplay(display) => self.set_display(display).into(),
         }
+    }
+
+    fn set_display(&mut self, display: DisplayType) {
+        self.display = display;
     }
 
     pub fn recover_pages(&mut self, pages: Vec<Page>) -> Result<()> {

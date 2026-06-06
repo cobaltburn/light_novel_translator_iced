@@ -1,6 +1,7 @@
 use crate::{
     actions::consensus_action::ConsensusAction,
     model::{page::Page, server::Server},
+    view::DisplayType,
     widget::page_sidebar::{SidebarAction, SidebarDeps, SidebarRow},
 };
 use iced::widget::button::Status;
@@ -20,6 +21,7 @@ pub struct Consensus {
     pub candidates: Vec<Candidate>,
     pub pages: Vec<Page>,
     pub translations: Vec<Vec<String>>,
+    pub display: DisplayType,
 }
 
 impl Consensus {

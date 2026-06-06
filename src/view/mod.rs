@@ -1,15 +1,15 @@
-use iced::widget::container::transparent;
-use iced::widget::text::{Span, Wrapping};
 use iced::widget::{button, container, rich_text, scrollable, span, text};
 use iced::{
-    Border, Color, Length, Padding,
+    Border, Color, Element, Length, Padding,
     alignment::{Horizontal, Vertical},
+    color,
     widget::{
         Button, Container,
         button::{Status, primary},
+        container::transparent,
+        text::{Span, Wrapping},
     },
 };
-use iced::{Element, color};
 use std::fmt;
 
 pub mod consensus_view;
@@ -86,10 +86,10 @@ pub fn rich_text_scrollable<E: 'static>(content: Vec<Span>) -> Element<E> {
     .into()
 }
 
-pub fn part_span(i: usize, t: &str) -> [Span<'_>; 2] {
+pub fn part_span(i: usize, content: String) -> [Span<'static>; 2] {
     [
-        span(format!("\n\nPart: {}\nCount: {}\n\n", i + 1, t.len())).color(color!(0xff0000)),
-        span(t),
+        span(format!("\n\nPart: {}\nCount: {}\n\n", i + 1, content.len())).color(color!(0xff0000)),
+        span(content),
     ]
 }
 
@@ -98,4 +98,12 @@ pub fn menu_button<'a, T: 'a>(button_text: &'_ str) -> Button<'_, T> {
         Status::Disabled => primary(theme, Status::Active),
         _ => primary(theme, status),
     })
+}
+
+#[derive(Default, Debug, Clone, Copy)]
+pub enum DisplayType {
+    #[default]
+    Full,
+    End,
+    Japanese,
 }

@@ -1,26 +1,23 @@
-use crate::controller::xml::{count_lines, image_position};
-use crate::error::{Error, Result};
-use crate::model::format::FormatPage;
 use crate::{
     controller::{
         DEFAULT_STYLESHEET, get_ordered_path,
         xml::{
-            extract_head, remove_part_tags, to_xml, update_image_paths, update_style_path,
-            update_tag_path,
+            count_lines, extract_head, image_position, remove_part_tags, to_xml,
+            update_image_paths, update_style_path, update_tag_path,
         },
     },
-    model::format::EpubMetadata,
+    error::{Error, Result},
+    model::format::{EpubMetadata, FormatPage},
 };
 use epub::doc::{EpubDoc, ResourceItem};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};
 use quick_xml::{
     Reader, Writer,
-    events::{BytesDecl, BytesStart, Event},
+    events::{BytesDecl, BytesEnd, BytesStart, Event},
 };
-use std::collections::VecDeque;
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     io::{self, Cursor},
     mem,
     path::PathBuf,
@@ -339,6 +336,9 @@ pub fn write_head(writer: &mut Writer<Cursor<Vec<u8>>>, head: Cow<'_, str>) -> R
     Ok(())
 }
 
+const ANCHOR_TAG: &[u8] = b"a";
+const DIV: &str = "div";
+
 fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, content: &str) -> Result<()> {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
@@ -349,6 +349,14 @@ fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, content: &str) -> Result<()>
         .write_inner_content(|writer| {
             loop {
                 match reader.read_event().map_err(io::Error::other)? {
+                    Event::Start(tag) if tag.name().as_ref() == ANCHOR_TAG => {
+                        writer.write_event(Event::Start(BytesStart::new(DIV)))?;
+                        writer.write_event(Event::Start(tag))?;
+                    }
+                    Event::End(tag) if tag.name().as_ref() == ANCHOR_TAG => {
+                        writer.write_event(Event::End(tag))?;
+                        writer.write_event(Event::End(BytesEnd::new(DIV)))?;
+                    }
                     Event::Eof => break,
                     e => writer.write_event(e)?,
                 }
