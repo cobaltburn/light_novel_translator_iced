@@ -68,18 +68,18 @@ impl Translation {
                 page,
                 part,
             } => self.update_content(content, page, part).into(),
-            TransAction::Translate(page) => self
-                .translate(page)
-                .unwrap_or_else(|error| error.display_error()),
+            TransAction::Translate(page) => {
+                self.translate(page).unwrap_or_else(Error::display_error)
+            }
             TransAction::TranslatePage(page) => self
                 .translate_page(page)
-                .unwrap_or_else(|error| error.display_error()),
+                .unwrap_or_else(Error::display_error),
             TransAction::TranslatePart { page, part } => self
                 .translate_part(page, part)
-                .unwrap_or_else(|error| error.display_error()),
-            TransAction::SaveRecovery(path) => self
-                .save_json(path)
-                .unwrap_or_else(|error| error.display_error()),
+                .unwrap_or_else(Error::display_error),
+            TransAction::SaveRecovery(path) => {
+                self.save_json(path).unwrap_or_else(Error::display_error)
+            }
             TransAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .then(|doc| match doc {
@@ -179,9 +179,7 @@ impl Translation {
                     .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
                     .collect();
 
-                let name = format!("{}.md", name);
-
-                Task::future(save_file(name, content)).discard()
+                Task::future(save_file(format!("{name}.md"), content)).discard()
             }
             None => Task::none(),
         }

@@ -2,7 +2,7 @@ use crate::{
     actions::trans_action::TransAction,
     message::Message,
     model::{server::Server, translation::Translation},
-    view::{DisplayType, menu_button, part_span, rich_text_scrollable},
+    view::{DisplayType, menu_button, rich_text_scrollable},
     widget::{
         context_menu_button,
         page_sidebar::build_path_buttons,
@@ -83,13 +83,7 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
     };
 
     let error_cards = page.map(|p| p.error_cards(error_press));
-    let sections = page.map(|p| p.sections.as_slice()).unwrap_or_default();
-    let content = sections
-        .iter()
-        .map(|s| s.span_content(model.display))
-        .enumerate()
-        .flat_map(|(i, content)| part_span(i, content))
-        .collect();
+    let content = page.map(|p| p.spans(model.display)).unwrap_or_default();
 
     container(column![
         vertical(),
@@ -100,14 +94,14 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
                 stack![
                     ContextMenu::new(rich_text_scrollable(content), || container(column![
                         context_menu_button(text("full").color(Color::WHITE))
-                            .width(Length::Fill)
-                            .on_press(TransAction::SetDisplay(DisplayType::Full)),
+                            .on_press(TransAction::SetDisplay(DisplayType::Full))
+                            .width(Length::Fill),
                         context_menu_button(text("end").color(Color::WHITE))
-                            .width(Length::Fill)
-                            .on_press(TransAction::SetDisplay(DisplayType::End)),
+                            .on_press(TransAction::SetDisplay(DisplayType::End))
+                            .width(Length::Fill),
                         context_menu_button(text("japanese").color(Color::WHITE))
+                            .on_press(TransAction::SetDisplay(DisplayType::Japanese))
                             .width(Length::Fill)
-                            .on_press(TransAction::SetDisplay(DisplayType::Japanese)),
                     ])
                     .style(container::rounded_box)
                     .width(100)

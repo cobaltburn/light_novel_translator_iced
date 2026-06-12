@@ -1,8 +1,9 @@
 use crate::{actions::contains_japanese, model::Activity, view::DisplayType};
 use iced::{
-    Element,
+    Color, Element,
     alignment::Horizontal,
-    widget::{Button, Column, button, right, text},
+    color,
+    widget::{Button, Column, button, right, span, text},
 };
 use phf::phf_map;
 use rayon::{
@@ -176,6 +177,38 @@ impl Page {
         right(errors.spacing(5).align_x(Horizontal::Right))
             .padding(20)
             .into()
+    }
+
+    pub fn spans(&self, display: DisplayType) -> Vec<text::Span<'static>> {
+        self.sections
+            .iter()
+            .enumerate()
+            .flat_map(|(i, section)| {
+                let mut content = section.span_content(display);
+                let mut spans = vec![
+                    span(format!("\n\nPart: {}\n", i + 1)).color(color!(0xff0000)),
+                    span(format!("Count: {}\n\n", content.len())).color(color!(0xff0000)),
+                ];
+
+                match display {
+                    DisplayType::End => {
+                        let end = content.pop();
+                        spans.push(span(content));
+                        if let Some(end) = end {
+                            let highlight = end != ',' && end.is_ascii_punctuation();
+                            spans.push(
+                                span(end)
+                                    .color_maybe(highlight.then_some(Color::BLACK))
+                                    .background_maybe(highlight.then_some(color!(0xffff00))),
+                            );
+                        }
+                    }
+                    DisplayType::Full | DisplayType::Japanese => spans.push(span(content)),
+                }
+
+                spans
+            })
+            .collect()
     }
 }
 

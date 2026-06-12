@@ -4,7 +4,7 @@ use crate::{
         consensus::Consensus,
         server::{Method, Server},
     },
-    view::{menu_button, part_span, rich_text_scrollable},
+    view::{menu_button, rich_text_scrollable},
     widget::{
         page_sidebar::build_path_buttons,
         server_widget::{ollama_input, think_selector},
@@ -36,13 +36,7 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
 
     let error_cards = page.map(|p| p.error_cards(error_press));
 
-    let sections = page.map(|p| p.sections.as_slice()).unwrap_or_default();
-    let content = sections
-        .iter()
-        .map(|s| s.span_content(model.display))
-        .enumerate()
-        .flat_map(|(i, content)| part_span(i, content))
-        .collect();
+    let content = page.map(|p| p.spans(model.display)).unwrap_or_default();
 
     container(column![
         vertical(),

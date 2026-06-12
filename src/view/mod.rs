@@ -65,13 +65,13 @@ pub fn rich_text_scrollable<E: 'static>(content: Vec<Span>) -> Element<E> {
     container(
         scrollable(
             rich_text(content)
-                .width(Length::Fill)
                 .align_x(Horizontal::Left)
-                .align_y(Vertical::Center),
+                .align_y(Vertical::Center)
+                .width(Length::Fill),
         )
         .spacing(5)
-        .anchor_top()
-        .width(Length::Fill),
+        .width(Length::Fill)
+        .anchor_top(),
     )
     .style(|theme| {
         transparent(theme).border(Border {
@@ -87,13 +87,11 @@ pub fn rich_text_scrollable<E: 'static>(content: Vec<Span>) -> Element<E> {
 }
 
 pub fn part_span(i: usize, content: String) -> [Span<'static>; 2] {
-    [
-        span(format!("\n\nPart: {}\nCount: {}\n\n", i + 1, content.len())).color(color!(0xff0000)),
-        span(content),
-    ]
+    let text = format!("\n\nPart: {}\nCount: {}\n\n", i + 1, content.len());
+    [span(text).color(color!(0xff0000)), span(content)]
 }
 
-pub fn menu_button<'a, T: 'a>(button_text: &'_ str) -> Button<'_, T> {
+pub fn menu_button<'a, T: 'a>(button_text: &str) -> Button<'_, T> {
     button(text(button_text).center()).style(|theme, status| match status {
         Status::Disabled => primary(theme, Status::Active),
         _ => primary(theme, status),
