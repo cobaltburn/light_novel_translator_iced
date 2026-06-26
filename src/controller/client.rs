@@ -106,7 +106,7 @@ impl Client {
 
     pub fn translate(
         &self,
-        prompt: String,
+        prompt: &str,
         model: &str,
         think: Think,
         page: usize,
@@ -122,6 +122,7 @@ impl Client {
             .additional_params(agent_params(think))
             .build();
 
+        let prompt = prompt.to_string();
         let stream =
             Task::future(async move { agent.stream_prompt(prompt).await }).then(Task::stream);
         Ok(handle_stream::<TransAction, _>(stream, None, 0, page, part))
@@ -129,7 +130,7 @@ impl Client {
 
     pub fn translate_history(
         &self,
-        prompt: String,
+        prompt: &str,
         model: &str,
         history: SharedHistory,
         context_window: usize,
@@ -148,6 +149,7 @@ impl Client {
             .build();
 
         let chat_history = history.clone();
+        let prompt = prompt.to_string();
         let stream = Task::future(async move {
             let chat_history = chat_history.lock().unwrap().to_vec();
             agent.stream_chat(prompt, chat_history).await

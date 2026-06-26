@@ -97,7 +97,8 @@ impl DocBuilder {
             .ok_or(Error::BuildError("Invalid file name found"))?;
         let path = PathBuf::from("Images").join(file_name);
 
-        self.builder.add_cover_image(path, &*content, mime)?;
+        self.builder
+            .add_cover_image(path, content.as_slice(), mime)?;
 
         Ok(())
     }

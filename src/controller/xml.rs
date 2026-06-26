@@ -2,7 +2,7 @@ use crate::error::{Error, Result};
 use bstr::ByteSlice;
 use pulldown_cmark::{Options, Parser, html::push_html};
 use quick_xml::{
-    Reader, Writer,
+    Reader, Writer, XmlVersion,
     escape::escape,
     events::{BytesStart, Event},
 };
@@ -130,7 +130,7 @@ pub fn update_tag_path(
         return Ok(tag.into_owned());
     };
 
-    let path = PathBuf::from(link.unescape_value()?.as_ref());
+    let path = PathBuf::from(link.normalized_value(XmlVersion::Implicit1_0)?.as_ref());
     let file_name = path.file_name().unwrap();
     let path = folder.join(file_name);
     let path = path.as_os_str();
@@ -148,25 +148,12 @@ pub fn update_tag_path(
     Ok(tag)
 }
 
-pub fn extract_body(html: &str) -> Result<Cow<'_, str>> {
-    let mut reader = Reader::from_str(html);
-    loop {
-        match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"body" => {
-                return Ok(reader.read_text(tag.name())?);
-            }
-            Event::Eof => return Err(Error::BuildError("No body tag found")),
-            _ => (),
-        }
-    }
-}
-
 pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
     let mut reader = Reader::from_str(html);
     loop {
         match reader.read_event()? {
             Event::Start(tag) if tag.name().as_ref() == b"head" => {
-                return Ok(reader.read_text(tag.name())?);
+                return Ok(reader.read_text(tag.name())?.decode()?);
             }
             Event::Eof => return Err(Error::BuildError("No head tag found")),
             _ => (),

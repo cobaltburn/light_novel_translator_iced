@@ -77,7 +77,6 @@ pub async fn load_recovery() -> Option<Vec<Page>> {
 
 pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<Page>)> {
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
-
     let paths = get_ordered_path(&epub);
 
     let pages: Result<Vec<_>> = paths
@@ -85,10 +84,7 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
         .map(|path| {
             let html = epub
                 .get_resource_str_by_path(&path)
-                .ok_or(Error::Error(format!(
-                    "Invalid file in epub: {}",
-                    path.to_string_lossy()
-                )))?;
+                .ok_or(Error::Error(format!("Invalid file in epub: {:#?}", path)))?;
             let html = strip_syosetu_tags(&html)?;
             let html = strip_tags(&html)?;
             let markdown = rewrite_html(&html, false);

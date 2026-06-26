@@ -109,7 +109,7 @@ impl Translation {
     pub fn recover_pages(&mut self, pages: Vec<Page>) -> Result<()> {
         let mut sections: HashMap<_, _> = pages.into_iter().map(|p| (p.path, p.sections)).collect();
 
-        let mut last_section = String::new();
+        let mut last_section = "";
         for page in self.pages.iter_mut() {
             if let Some(current) = sections.get_mut(&page.path) {
                 mem::swap(&mut page.sections, current);
@@ -118,7 +118,7 @@ impl Translation {
             last_section = page
                 .sections
                 .last()
-                .map(|s| s.content.clone())
+                .map(|s| s.content.as_str())
                 .unwrap_or_default();
         }
 
@@ -230,7 +230,7 @@ impl Translation {
         let Some(pages) = self.pages.get_mut(..page + 1) else {
             let file_name = self.file_name();
             self.server.abort();
-            return Ok(Task::future(complete_dialog(file_name.clone())).discard());
+            return Ok(Task::future(complete_dialog(file_name)).discard());
         };
 
         let current_page = pages.last_mut().unwrap();
@@ -300,7 +300,7 @@ impl Translation {
         current.sections.get_mut(part).unwrap().content.clear();
         current.errors.clear();
 
-        let task = self.server.translate_part(pages, model, page, part)?;
+        let task = self.server.translate_part(pages, &model, page, part)?;
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
 
@@ -313,7 +313,8 @@ impl Translation {
     fn clean_text(&mut self, page: usize, part: usize) {
         if let Some(page) = self.pages.get_mut(page) {
             if let Some(section) = page.sections.get_mut(part) {
-                section.content = clean_invisible_chars(&section.content)
+                section.content = clean_invisible_chars(&section.content);
+                section.content = section.content.replace(['“', '”'], "\"");
             }
         };
     }

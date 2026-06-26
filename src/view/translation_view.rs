@@ -27,7 +27,7 @@ pub fn translation_view(
 
     let mut tabs = TabBar::with_tab_labels(tabs, Message::SelectTab)
         .set_active_tab(&tab_id)
-        .padding(0.0)
+        .padding(Padding::new(0.0).left(1))
         .height(Length::Fixed(40.0))
         .text_size(13.0)
         .style(|theme, status| match status {
@@ -75,15 +75,17 @@ fn tab(model: &Translation) -> Element<'_, TransAction> {
     let can_translate = model.server.handles.is_empty()
         && model.server.connected()
         && !model.file_name().is_empty();
-    let error_press = move |part| {
+    let on_press = move |part| {
         can_translate.then_some(TransAction::TranslatePart {
             page: current_page,
             part,
         })
     };
 
-    let error_cards = page.map(|p| p.error_cards(error_press));
-    let content = page.map(|p| p.spans(model.display)).unwrap_or_default();
+    let error_cards = page.map(|p| p.error_cards(on_press));
+    let content = page
+        .map(|p| p.spans(model.display, on_press))
+        .unwrap_or_default();
 
     container(column![
         vertical(),

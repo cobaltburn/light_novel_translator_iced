@@ -292,7 +292,8 @@ impl Consensus {
     fn clean_text(&mut self, page: usize, part: usize) {
         if let Some(page) = self.pages.get_mut(page) {
             if let Some(section) = page.sections.get_mut(part) {
-                section.content = clean_invisible_chars(&section.content)
+                section.content = clean_invisible_chars(&section.content);
+                section.content = section.content.replace(['“', '”'], "\"");
             }
         };
     }

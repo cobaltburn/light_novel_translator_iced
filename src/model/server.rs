@@ -62,13 +62,8 @@ impl Server {
             .iter()
             .enumerate()
             .map(|(part, section)| {
-                self.client.translate(
-                    section.japanese.clone(),
-                    model,
-                    self.settings.think,
-                    page,
-                    part,
-                )
+                self.client
+                    .translate(&section.japanese, model, self.settings.think, page, part)
             })
             .map(|task| task.map(|task| bind(handles, task)))
             .collect();
@@ -82,10 +77,11 @@ impl Server {
         model: &str,
         page: usize,
     ) -> Result<Task<TransAction>> {
-        let history = build_history(pages, self.settings.context_window);
+        let (current, pages) = pages.split_last().unwrap();
+        let sections: Vec<_> = pages.iter().map(|p| p.sections.as_slice()).collect();
+        let history = build_history(&sections, self.settings.context_window);
         let history = Arc::new(Mutex::new(history));
 
-        let current = pages.last().expect("dont pass an empty array");
         let handles = &mut self.handles;
         let tasks: Result<Vec<_>> = current
             .sections
@@ -93,7 +89,7 @@ impl Server {
             .enumerate()
             .map(|(part, section)| {
                 self.client.translate_history(
-                    section.japanese.clone(),
+                    &section.japanese,
                     model,
                     history.clone(),
                     self.settings.context_window,
@@ -111,20 +107,28 @@ impl Server {
     pub fn translate_part(
         &mut self,
         pages: &[Page],
-        model: String,
+        model: &str,
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
-        let current = pages.last().unwrap();
-        let section = current.sections.get(part).unwrap().clone();
+        let (Page { sections, .. }, pages) = pages.split_last().unwrap();
+        let (section, current_sections) = sections
+            .get(..part + 1)
+            .and_then(|p| p.split_last())
+            .unwrap();
+        let sections: Vec<_> = pages
+            .iter()
+            .map(|p| p.sections.as_slice())
+            .chain(iter::once(current_sections))
+            .collect();
 
         let task = match self.method {
             Method::History => {
-                let history = build_history(pages, self.settings.context_window);
+                let history = build_history(&sections, self.settings.context_window);
                 let history = Arc::new(Mutex::new(history));
 
                 self.client.translate_history(
-                    section.japanese.clone(),
+                    &section.japanese,
                     &model,
                     history,
                     self.settings.context_window,
@@ -133,13 +137,10 @@ impl Server {
                     part,
                 )?
             }
-            _ => self.client.translate(
-                section.japanese.clone(),
-                &model,
-                self.settings.think,
-                page,
-                part,
-            )?,
+            _ => {
+                self.client
+                    .translate(&section.japanese, &model, self.settings.think, page, part)?
+            }
         };
 
         Ok(self.bind_handle(task))
@@ -204,19 +205,11 @@ fn bind<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
     task
 }
 
-fn build_history(pages: &[Page], context_window: usize) -> Vec<Message> {
-    let (current, history_pages) = pages.split_last().expect("dont pass an empty array");
-
-    let mut recent: Vec<&Section> = current
-        .sections
+fn build_history(sections: &[&[Section]], context_window: usize) -> Vec<Message> {
+    let mut recent: Vec<_> = sections
         .iter()
         .rev()
-        .chain(
-            history_pages
-                .iter()
-                .rev()
-                .flat_map(|p| p.sections.iter().rev()),
-        )
+        .flat_map(|&p| p.iter().rev())
         .filter(|s| !s.content.is_empty())
         .take(context_window)
         .collect();

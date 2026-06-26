@@ -39,7 +39,6 @@ pub fn build_path_buttons<A: SidebarAction>(deps: &SidebarDeps) -> Column<'stati
         .enumerate()
         .map(|(i, entry)| {
             let name = entry.name.clone();
-            let activity = entry.activity.clone();
             let section_count = entry.section_count;
 
             let button_text =
@@ -54,7 +53,7 @@ pub fn build_path_buttons<A: SidebarAction>(deps: &SidebarDeps) -> Column<'stati
                     });
 
             let button_content = row![button_text]
-                .push(match activity {
+                .push(match entry.activity {
                     Activity::Incomplete => None,
                     Activity::Complete => Some(check_mark()),
                     Activity::Error(e) => Some(row![text(e), cross_mark()].spacing(5).into()),

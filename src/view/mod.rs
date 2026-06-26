@@ -61,10 +61,12 @@ pub fn text_scrollable<'a, T: fmt::Display, E: 'a>(content: T) -> Container<'a, 
         .padding(Padding::new(10.0).right(5))
 }
 
-pub fn rich_text_scrollable<E: 'static>(content: Vec<Span>) -> Element<E> {
+pub fn rich_text_scrollable<E: Clone + 'static>(content: Vec<Span<E>>) -> Element<E> {
     container(
         scrollable(
             rich_text(content)
+                .on_link_click(|e| e)
+                .wrapping(Wrapping::WordOrGlyph)
                 .align_x(Horizontal::Left)
                 .align_y(Vertical::Center)
                 .width(Length::Fill),

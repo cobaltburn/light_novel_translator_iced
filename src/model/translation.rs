@@ -48,7 +48,7 @@ impl Translation {
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned(),
-                activity: p.activity.clone(),
+                activity: p.activity,
                 section_count: p.sections.len(),
             })
             .collect();

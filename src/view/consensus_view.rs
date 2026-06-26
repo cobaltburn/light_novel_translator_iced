@@ -27,16 +27,17 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
     let can_consensus = page.is_some_and(|page| {
         !page.active() && model.server.connected() && !model.file_name().is_empty()
     });
-    let error_press = move |part| {
+    let on_press = move |part| {
         can_consensus.then_some(ConsensusAction::ConsensusPart {
             page: current_page,
             part,
         })
     };
 
-    let error_cards = page.map(|p| p.error_cards(error_press));
-
-    let content = page.map(|p| p.spans(model.display)).unwrap_or_default();
+    let error_cards = page.map(|p| p.error_cards(on_press));
+    let content = page
+        .map(|p| p.spans(model.display, on_press))
+        .unwrap_or_default();
 
     container(column![
         vertical(),

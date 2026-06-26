@@ -13,18 +13,19 @@ use rayon::{
 use rig_core::message::Message;
 use serde::{Deserialize, Serialize};
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     ffi::OsStr,
     iter,
+    ops::Not,
     path::PathBuf,
 };
 
-const SIZE_TOLERANCE: usize = 1000;
 const JACCARD_TOLERANCE: f64 = 0.25;
 const FREQUENCY_TOLERANCE: f64 = 10.0;
-const SIZE_FLOOR: usize = 5000;
-const SIZE_MAX: usize = 9000;
 const SECTION_CAPACITY: usize = 8 * 1024;
+const MIN_PERCENT: f64 = 70.0;
+const MAX_PERCENT: f64 = 100.0;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -45,7 +46,6 @@ impl Page {
             .collect();
 
         Page {
-            activity: Activity::Incomplete,
             path,
             sections,
             ..Default::default()
@@ -88,30 +88,21 @@ impl Page {
     }
 
     pub fn check_size(&self) -> Vec<PageError> {
-        let lengths: Vec<_> = self.sections.iter().map(|e| e.content.len()).collect();
-        let mid = lengths.len() / 2;
-        let mut sorted = lengths.clone();
-        let (_, median, _) = sorted.select_nth_unstable(mid);
-        let median = *median;
-
-        let max = median + SIZE_TOLERANCE;
-        let min = median.saturating_sub(SIZE_TOLERANCE);
-
-        let last_index = lengths.len() - 1;
-
-        lengths
-            .into_iter()
+        let last = self.sections.len() - 1;
+        self.sections
+            .iter()
             .enumerate()
-            .filter(|&(i, count)| {
-                if count == 0 {
-                    return false;
-                }
-                if i == last_index {
-                    return count > max || count > SIZE_MAX;
-                }
-                count < SIZE_FLOOR || count > SIZE_MAX || count > max || count < min
+            .filter(|(_, s)| !s.content.is_empty())
+            .filter_map(|(i, Section { japanese, content })| {
+                let p = (content.len() as f64 / japanese.len() as f64) * 100.0;
+                let (min, max) = if i == last {
+                    (MIN_PERCENT - 5.0, MAX_PERCENT + 5.0)
+                } else {
+                    (MIN_PERCENT, MAX_PERCENT)
+                };
+                let valid = p > min && p < max;
+                valid.not().then_some(PageError::Size(i))
             })
-            .map(|(i, _)| PageError::Size(i))
             .collect()
     }
 
@@ -122,7 +113,7 @@ impl Page {
         sections
             .par_array_windows()
             .enumerate()
-            .flat_map(|(i, &[a, b])| {
+            .filter_map(|(i, &[a, b])| {
                 if a.is_empty() || b.is_empty() || jaccard(a, b) <= JACCARD_TOLERANCE {
                     return None;
                 }
@@ -179,19 +170,25 @@ impl Page {
             .into()
     }
 
-    pub fn spans(&self, display: DisplayType) -> Vec<text::Span<'static>> {
+    pub fn spans<Link: 'static + Clone>(
+        &self,
+        display: DisplayType,
+        on_press: impl Fn(usize) -> Option<Link> + 'static,
+    ) -> Vec<text::Span<'_, Link>> {
         self.sections
             .iter()
             .enumerate()
             .flat_map(|(i, section)| {
-                let mut content = section.span_content(display);
+                let content = section.span_content(display);
                 let mut spans = vec![
-                    span(format!("\n\nPart: {}\n", i + 1)).color(color!(0xff0000)),
-                    span(format!("Count: {}\n\n", content.len())).color(color!(0xff0000)),
+                    span(format!("\n\nPart: {}\nCount: {}\n\n", i + 1, content.len()))
+                        .color(color!(0xff0000))
+                        .link_maybe(on_press(i)),
                 ];
 
                 match display {
                     DisplayType::End => {
+                        let mut content = content.into_owned();
                         let end = content.pop();
                         spans.push(span(content));
                         if let Some(end) = end {
@@ -291,12 +288,12 @@ impl Section {
 
     pub fn history_message(&self) -> [Message; 2] {
         [
-            Message::user(self.japanese.clone()),
-            Message::assistant(self.content.clone()),
+            Message::user(&self.japanese),
+            Message::assistant(&self.content),
         ]
     }
 
-    pub fn span_content(&self, display: DisplayType) -> String {
+    pub fn span_content(&self, display: DisplayType) -> Cow<'_, str> {
         match display {
             DisplayType::End => {
                 let lines: Vec<_> = self.content.lines().collect();
@@ -304,9 +301,10 @@ impl Section {
                     .get(lines.len().saturating_sub(10)..)
                     .unwrap_or_default()
                     .join("\n")
+                    .into()
             }
-            DisplayType::Full => self.content.clone(),
-            DisplayType::Japanese => self.japanese.clone(),
+            DisplayType::Full => self.content.as_str().into(),
+            DisplayType::Japanese => self.japanese.as_str().into(),
         }
     }
 }
