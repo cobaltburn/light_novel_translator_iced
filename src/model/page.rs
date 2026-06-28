@@ -6,10 +6,7 @@ use iced::{
     widget::{Button, Column, button, right, span, text},
 };
 use phf::phf_map;
-use rayon::{
-    iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::ParallelSlice,
-};
+use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rig_core::message::Message;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -108,16 +105,21 @@ impl Page {
 
     fn check_jaccard(&self, last_section: &str) -> Vec<PageError> {
         let sections = self.sections.iter().map(|s| s.content.as_str());
-        let sections: Vec<_> = iter::once(last_section).chain(sections).collect();
-
-        sections
-            .par_array_windows()
+        let full_sections: Vec<_> = iter::once(last_section).chain(sections).collect();
+        self.sections
+            .par_iter()
+            .map(|s| s.content.as_str())
             .enumerate()
-            .filter_map(|(i, &[a, b])| {
-                if a.is_empty() || b.is_empty() || jaccard(a, b) <= JACCARD_TOLERANCE {
+            .filter_map(|(i, a)| {
+                if a.is_empty() {
                     return None;
                 }
-                Some(PageError::Copy(i))
+                full_sections
+                    .par_iter()
+                    .enumerate()
+                    .filter(|&(j, b)| i + 1 != j && !b.is_empty())
+                    .any(|(_, b)| jaccard(a, b) > JACCARD_TOLERANCE)
+                    .then_some(PageError::Copy(i))
             })
             .collect()
     }
