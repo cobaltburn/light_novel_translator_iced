@@ -4,8 +4,9 @@ use crate::{
         consensus::Consensus,
         server::{Method, Server},
     },
-    view::{menu_button, rich_text_scrollable},
+    view::{DisplayType, menu_button, rich_text_scrollable},
     widget::{
+        context_menu_button,
         page_sidebar::build_path_buttons,
         server_widget::{ollama_input, think_selector},
     },
@@ -18,15 +19,15 @@ use iced::{
         text,
     },
 };
-use iced_aw::{Menu, MenuBar, menu::Item};
+use iced_aw::{ContextMenu, Menu, MenuBar, menu::Item};
 use std::ops::Not;
 
 pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
     let page = model.current_page();
     let current_page = model.current_page;
-    let can_consensus = page.is_some_and(|page| {
-        !page.active() && model.server.connected() && !model.file_name().is_empty()
-    });
+    let can_consensus = model.server.handles.is_empty()
+        && model.server.connected()
+        && !model.file_name().is_empty();
     let on_press = move |part| {
         can_consensus.then_some(ConsensusAction::ConsensusPart {
             page: current_page,
@@ -45,7 +46,23 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
             menu_bar(model),
             row![
                 side_bar(model),
-                stack![rich_text_scrollable(content), error_cards]
+                stack![
+                    ContextMenu::new(rich_text_scrollable(content), || container(column![
+                        context_menu_button(text("full").color(Color::WHITE))
+                            .on_press(ConsensusAction::SetDisplay(DisplayType::Full))
+                            .width(Length::Fill),
+                        context_menu_button(text("end").color(Color::WHITE))
+                            .on_press(ConsensusAction::SetDisplay(DisplayType::End))
+                            .width(Length::Fill),
+                        context_menu_button(text("japanese").color(Color::WHITE))
+                            .on_press(ConsensusAction::SetDisplay(DisplayType::Japanese))
+                            .width(Length::Fill)
+                    ])
+                    .style(container::rounded_box)
+                    .width(100)
+                    .into()),
+                    error_cards
+                ]
             ]
             .spacing(10)
         ]

@@ -11,6 +11,7 @@ use crate::{
         consensus::{Candidate, Consensus},
         page::Page,
     },
+    view::DisplayType,
 };
 use iced::Task;
 use regex::Regex;
@@ -63,6 +64,7 @@ pub enum ConsensusAction {
         pages: Vec<(PathBuf, String)>,
     },
     DropCandidate(usize),
+    SetDisplay(DisplayType),
 }
 
 impl Consensus {
@@ -117,7 +119,12 @@ impl Consensus {
             }
             ConsensusAction::CleanText { page, part } => self.clean_text(page, part).into(),
             ConsensusAction::DropCandidate(i) => self.drop_candidate(i).into(),
+            ConsensusAction::SetDisplay(display) => self.set_display(display).into(),
         }
+    }
+
+    fn set_display(&mut self, display: DisplayType) {
+        self.display = display;
     }
 
     fn check_ready(&self) -> Result<String> {

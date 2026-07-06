@@ -97,8 +97,7 @@ impl Page {
                 } else {
                     (MIN_PERCENT, MAX_PERCENT)
                 };
-                let valid = p > min && p < max;
-                valid.not().then_some(PageError::Size(i))
+                (p > min && p < max).not().then_some(PageError::Size(i))
             })
             .collect()
     }
