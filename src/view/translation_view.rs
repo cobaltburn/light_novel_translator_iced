@@ -1,12 +1,18 @@
 use crate::{
-    actions::trans_action::TransAction,
+    actions::{server_action::ServerAction, trans_action::TransAction},
     message::Message,
-    model::{server::Server, translation::Translation},
+    model::{
+        server::{Server, Settings},
+        translation::Translation,
+    },
     view::{DisplayType, menu_button, rich_text_scrollable},
     widget::{
         context_menu_button,
         page_sidebar::build_path_buttons,
-        server_widget::{context_window_input, execution_selector, ollama_input, think_selector},
+        server_widget::{
+            context_window_input, execution_selector, ollama_input, server_setting_input,
+            think_selector,
+        },
     },
 };
 use iced::widget::{button, column, container, row, scrollable, text};
@@ -171,6 +177,12 @@ fn translate_button(model: &Translation) -> Button<'_, TransAction> {
 }
 
 fn server_menu(state: &Server) -> Item<'_, TransAction, Theme, Renderer> {
+    let Settings {
+        temperature,
+        top_p,
+        repeat_penalty,
+        ..
+    } = state.settings;
     Item::with_menu(
         menu_button("server"),
         Menu::new(vec![
@@ -178,6 +190,23 @@ fn server_menu(state: &Server) -> Item<'_, TransAction, Theme, Renderer> {
             Item::new(think_selector(state).map(Into::into)),
             Item::new(execution_selector(state).map(Into::into)),
             Item::new(context_window_input(state).map(Into::into)),
+            Item::new(
+                server_setting_input("Tempature:", temperature, 0.0..=2.0, ServerAction::SetTemp)
+                    .map(Into::into),
+            ),
+            Item::new(
+                server_setting_input("Top p:", top_p, 0.0..=1.0, ServerAction::SetTopP)
+                    .map(Into::into),
+            ),
+            Item::new(
+                server_setting_input(
+                    "Repeat Penalty:",
+                    repeat_penalty,
+                    0.0..=2.0,
+                    ServerAction::SetRepeatPenalty,
+                )
+                .map(Into::into),
+            ),
         ])
         .padding(10)
         .spacing(10)

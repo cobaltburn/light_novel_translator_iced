@@ -11,6 +11,9 @@ pub enum ServerAction {
     SetMethod(Method),
     SetThink(Think),
     SetWindow(usize),
+    SetTemp(f64),
+    SetTopP(f64),
+    SetRepeatPenalty(f64),
     Connect,
     Abort,
 }
@@ -25,6 +28,9 @@ impl Server {
             ServerAction::SetWindow(window) => self.set_window(window).into(),
             ServerAction::Connect => self.connect(),
             ServerAction::Abort => self.abort().into(),
+            ServerAction::SetTemp(temp) => self.set_temp(temp).into(),
+            ServerAction::SetTopP(top_p) => self.set_top_p(top_p).into(),
+            ServerAction::SetRepeatPenalty(penalty) => self.set_repeat_penalty(penalty).into(),
         }
     }
 
@@ -56,6 +62,18 @@ impl Server {
 
     fn set_window(&mut self, window: usize) {
         self.settings.context_window = window;
+    }
+
+    fn set_temp(&mut self, temp: f64) {
+        self.settings.temperature = temp;
+    }
+
+    fn set_top_p(&mut self, top_p: f64) {
+        self.settings.top_p = top_p;
+    }
+
+    fn set_repeat_penalty(&mut self, penalty: f64) {
+        self.settings.repeat_penalty = penalty;
     }
 
     pub fn abort(&mut self) {

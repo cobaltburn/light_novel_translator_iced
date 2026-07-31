@@ -2,7 +2,7 @@ use crate::{
     actions::{consensus_action::ConsensusAction, trans_action::TransAction},
     controller::prompts::{CONSENSUS_PROMPT, TRANSLATION_PROMPT},
     error::{Error, Result},
-    model::server::Think,
+    model::server::{Settings, Think},
 };
 use iced::Task;
 use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
@@ -108,7 +108,7 @@ impl Client {
         &self,
         prompt: &str,
         model: &str,
-        think: Think,
+        settings: Settings,
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
@@ -118,8 +118,8 @@ impl Client {
         let agent = client
             .agent(model)
             .preamble(TRANSLATION_PROMPT)
-            .temperature(TEMPERATURE)
-            .additional_params(agent_params(think))
+            .temperature(settings.temperature)
+            .additional_params(settings.agent_params())
             .build();
 
         let prompt = prompt.to_string();
@@ -133,8 +133,7 @@ impl Client {
         prompt: &str,
         model: &str,
         history: SharedHistory,
-        context_window: usize,
-        think: Think,
+        settings: Settings,
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
@@ -144,8 +143,8 @@ impl Client {
         let agent = client
             .agent(model)
             .preamble(TRANSLATION_PROMPT)
-            .temperature(TEMPERATURE)
-            .additional_params(agent_params(think))
+            .temperature(settings.temperature)
+            .additional_params(settings.agent_params())
             .build();
 
         let chat_history = history.clone();
@@ -158,7 +157,7 @@ impl Client {
         Ok(handle_stream::<TransAction, _>(
             stream,
             Some(history),
-            context_window,
+            settings.context_window,
             page,
             part,
         ))

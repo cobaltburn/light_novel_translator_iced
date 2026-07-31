@@ -172,40 +172,51 @@ impl Translation {
     pub fn save_page(&mut self, name: String, page: usize) -> Task<TransAction> {
         match self.pages.get(page) {
             Some(page) => {
-                let content: String = page
+                let text: String = page
                     .sections
                     .iter()
                     .enumerate()
                     .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
                     .collect();
+                let contents = remove_think_tags(&text);
 
-                Task::future(save_file(format!("{name}.md"), content)).discard()
+                Task::future(save_file(format!("{name}.md"), contents)).discard()
             }
             None => Task::none(),
         }
     }
 
     pub fn save_pages(&self, path: PathBuf) -> Task<TransAction> {
-        let tasks = self.pages.iter().map(|page| {
-            let file_path = path
-                .join(page.path.file_name().unwrap())
-                .with_extension("md");
+        let pages: Vec<_> = self
+            .pages
+            .iter()
+            .map(|page| {
+                let file_path = path
+                    .join(page.path.file_name().unwrap())
+                    .with_extension("md");
 
-            let text: String = page
-                .sections
-                .iter()
-                .enumerate()
-                .map(|(i, s)| format!("{}{}\n", part_tag(i + 1), s.content))
-                .collect();
-            let contents = remove_think_tags(&text);
-
-            Task::future(fs::write(file_path, contents)).then(|r| match r {
-                Ok(_) => Task::none(),
-                Err(error) => Task::future(display_error(error)),
+                let text: String = page
+                    .sections
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| format!("{}{}\n", part_tag(i + 1), s.content))
+                    .collect();
+                let contents = remove_think_tags(&text);
+                (file_path, contents)
             })
-        });
+            .collect();
 
-        Task::batch(tasks).discard()
+        Task::future(async move {
+            for (path, contents) in pages {
+                fs::write(path, contents).await?
+            }
+            Ok(())
+        })
+        .then(|r: Result<()>| match r {
+            Ok(_) => Task::none(),
+            Err(error) => Task::future(display_error(error)),
+        })
+        .discard()
     }
 
     pub fn set_epub(&mut self, path: PathBuf, pages: Vec<Page>) {

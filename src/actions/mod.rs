@@ -32,7 +32,7 @@ pub async fn pick_save_folder(file_name: String) -> Option<PathBuf> {
     Some(handle.path().to_path_buf())
 }
 
-pub async fn save_file(file_name: String, content: String) -> Result<()> {
+pub async fn save_file(file_name: String, contents: String) -> Result<()> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("save translation")
         .set_file_name(file_name)
@@ -40,7 +40,7 @@ pub async fn save_file(file_name: String, content: String) -> Result<()> {
         .await;
 
     if let Some(handle) = handle {
-        handle.write(content.as_bytes()).await?
+        handle.write(contents.as_bytes()).await?
     }
     Ok(())
 }

@@ -10,6 +10,7 @@ use iced::{Element, Task, task::Handle, widget::pick_list};
 use quick_xml::{Writer, events::BytesText};
 use rig_core::message::Message;
 use serde::{Serialize, Serializer};
+use serde_json::Value;
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -18,6 +19,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+const TEMPERATURE: f64 = 0.5;
+const TOP_P: f64 = 0.8;
+const REPEAT_PENALTY: f64 = 1.05;
 const BATCH_SIZE: usize = 6;
 const DEFAULT_CONTEXT_WINDOW: usize = 3;
 
@@ -63,7 +67,7 @@ impl Server {
             .enumerate()
             .map(|(part, section)| {
                 self.client
-                    .translate(&section.japanese, model, self.settings.think, page, part)
+                    .translate(&section.japanese, model, self.settings.clone(), page, part)
             })
             .map(|task| task.map(|task| bind(handles, task)))
             .collect();
@@ -92,8 +96,7 @@ impl Server {
                     &section.japanese,
                     model,
                     history.clone(),
-                    self.settings.context_window,
-                    self.settings.think,
+                    self.settings.clone(),
                     page,
                     part,
                 )
@@ -131,16 +134,18 @@ impl Server {
                     &section.japanese,
                     &model,
                     history,
-                    self.settings.context_window,
-                    self.settings.think,
+                    self.settings.clone(),
                     page,
                     part,
                 )?
             }
-            _ => {
-                self.client
-                    .translate(&section.japanese, &model, self.settings.think, page, part)?
-            }
+            _ => self.client.translate(
+                &section.japanese,
+                &model,
+                self.settings.clone(),
+                page,
+                part,
+            )?,
         };
 
         Ok(self.bind_handle(task))
@@ -282,6 +287,9 @@ impl Server {
 pub struct Settings {
     pub think: Think,
     pub context_window: usize,
+    pub temperature: f64,
+    pub top_p: f64,
+    pub repeat_penalty: f64,
 }
 
 impl Default for Settings {
@@ -289,7 +297,20 @@ impl Default for Settings {
         Self {
             think: Default::default(),
             context_window: DEFAULT_CONTEXT_WINDOW,
+            temperature: TEMPERATURE,
+            top_p: TOP_P,
+            repeat_penalty: REPEAT_PENALTY,
         }
+    }
+}
+
+impl Settings {
+    pub fn agent_params(&self) -> Value {
+        serde_json::json!({
+            "top_p": &self.top_p,
+            "repeat_penalty": &self.repeat_penalty,
+            "think": &self.think,
+        })
     }
 }
 

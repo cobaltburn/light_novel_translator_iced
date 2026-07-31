@@ -1,3 +1,5 @@
+use std::ops::RangeBounds;
+
 use crate::{
     actions::server_action::ServerAction,
     model::server::{Method, Server, Think},
@@ -62,6 +64,27 @@ pub fn context_window_input(state: &Server) -> Element<'_, ServerAction> {
                 2..=10,
                 ServerAction::SetWindow
             )
+        ]
+        .align_y(Vertical::Center)
+        .spacing(10),
+    )
+    .align_left(Length::Fill)
+    .padding(Padding::default().bottom(5))
+    .into()
+}
+
+pub fn server_setting_input<'a>(
+    setting: &'a str,
+    value: f64,
+    range: impl RangeBounds<f64>,
+    on_change: impl 'a + Fn(f64) -> ServerAction + Clone,
+) -> Element<'a, ServerAction> {
+    container(
+        row![
+            text(setting),
+            NumberInput::new(&value, range, on_change)
+                .ignore_buttons(true)
+                .ignore_scroll(true),
         ]
         .align_y(Vertical::Center)
         .spacing(10),
