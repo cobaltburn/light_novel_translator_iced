@@ -197,10 +197,19 @@ pub fn image_position(html: &str) -> Result<Vec<(BytesStart<'_>, f64)>> {
         }
     }
 
-    images.sort_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap());
+    images.sort_by_key(|(_, i)| *i);
+    // A page with images but no <p> tags has nothing to position against, so
+    // the images lead the page instead of becoming NaN ratios that never match.
     let images = images
         .into_iter()
-        .map(|(tag, i)| (tag, i as f64 / count as f64))
+        .map(|(tag, i)| {
+            let position = if count == 0 {
+                0.0
+            } else {
+                i as f64 / count as f64
+            };
+            (tag, position)
+        })
         .collect();
     Ok(images)
 }
