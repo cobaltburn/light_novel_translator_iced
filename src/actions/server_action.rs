@@ -1,5 +1,6 @@
 use crate::{
     controller::client::Client,
+    error::TaskResultExt,
     model::server::{Method, Server, Think},
 };
 use iced::Task;
@@ -37,10 +38,8 @@ impl Server {
     pub fn connect(&mut self) -> Task<ServerAction> {
         self.client = Client::ollama();
         let client = self.client.clone();
-        Task::future(async move { client.get_models().await }).then(|models| match models {
-            Ok(models) => Task::done(ServerAction::SetModels(models)),
-            Err(error) => error.display_error(),
-        })
+        Task::future(async move { client.get_models().await })
+            .ok_or_display(|models| Task::done(ServerAction::SetModels(models)))
     }
 
     fn set_model(&mut self, model: String) {

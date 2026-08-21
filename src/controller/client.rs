@@ -29,6 +29,7 @@ const MIN_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 pub type SharedHistory = Arc<Mutex<Vec<Message>>>;
+pub type Ollama = rig_core::client::Client<OllamaExt, ClientWithMiddleware>;
 
 pub trait StreamAction: 'static + Send + Clone {
     fn update(content: String, page: usize, part: usize) -> Self;
@@ -73,7 +74,7 @@ impl StreamAction for ConsensusAction {
 pub enum Client {
     #[default]
     Disconnected,
-    Ollama(rig_core::client::Client<OllamaExt, ClientWithMiddleware>),
+    Ollama(Ollama),
 }
 
 impl Client {
@@ -84,18 +85,18 @@ impl Client {
         let http = MiddlewareBuilder::new(Default::default())
             .with(RetryTransientMiddleware::new_with_policy(policy))
             .build();
-        let client = ollama::Client::builder()
+        let ollama = ollama::Client::builder()
             .api_key(OllamaApiKey::from(Nothing))
             .http_client(http)
             .build()
             .unwrap();
-        Client::Ollama(client)
+        Client::Ollama(ollama)
     }
 
     pub async fn get_models(&self) -> Result<Vec<String>> {
         match self {
-            Client::Ollama(client) => {
-                let models = client.list_models().await?;
+            Client::Ollama(ollama) => {
+                let models = ollama.list_models().await?;
                 let mut models: Vec<_> = models.into_iter().map(|model| model.id).collect();
                 models.sort();
                 Ok(models)
@@ -112,10 +113,10 @@ impl Client {
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
-        let Client::Ollama(client) = self else {
+        let Client::Ollama(ollama) = self else {
             return Err(Error::ServerError("server not connected"));
         };
-        let agent = client
+        let agent = ollama
             .agent(model)
             .preamble(TRANSLATION_PROMPT)
             .temperature(settings.temperature)
@@ -137,10 +138,10 @@ impl Client {
         page: usize,
         part: usize,
     ) -> Result<Task<TransAction>> {
-        let Client::Ollama(client) = self else {
+        let Client::Ollama(ollama) = self else {
             return Err(Error::ServerError("server not connected"));
         };
-        let agent = client
+        let agent = ollama
             .agent(model)
             .preamble(TRANSLATION_PROMPT)
             .temperature(settings.temperature)
@@ -171,10 +172,10 @@ impl Client {
         page: usize,
         part: usize,
     ) -> Result<Task<ConsensusAction>> {
-        let Client::Ollama(client) = self else {
+        let Client::Ollama(ollama) = self else {
             return Err(Error::ServerError("server not connected"));
         };
-        let agent = client
+        let agent = ollama
             .agent(&model)
             .preamble(CONSENSUS_PROMPT)
             .temperature(TEMPERATURE)

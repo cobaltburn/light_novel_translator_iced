@@ -125,7 +125,9 @@ pub async fn complete_dialog(file_name: String) {
         .await;
 }
 
-pub async fn select_format_folder(dir: PathBuf) -> Option<(String, Vec<(PathBuf, String)>)> {
+pub async fn select_format_folder(
+    dir: impl AsRef<Path>,
+) -> Option<(String, Vec<(PathBuf, String)>)> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("select translated folder")
         .set_directory(dir)

@@ -81,7 +81,7 @@ impl DocBuilder {
         let mut content = Vec::new();
         self.builder.generate(&mut content)?;
 
-        Ok((content, mem::take(&mut self.name)))
+        Ok((content, self.name))
     }
 
     pub fn add_cover_image(&mut self) -> Result<()> {
@@ -139,7 +139,7 @@ impl DocBuilder {
                 .builder
                 .add_resource(folder.join(file_name), &*content, mime)
             {
-                log::warn!("{:#?}", error);
+                log::warn!("{}", error);
             }
         }
 
@@ -147,7 +147,6 @@ impl DocBuilder {
     }
 
     pub fn add_images(&mut self) -> Result<()> {
-        // The cover is added separately by `add_cover_image`.
         let cover_id = self.epub.get_cover_id();
         self.add_resources("Images", |id, resource| {
             resource.mime.starts_with("image") && Some(id) != cover_id.as_deref()
@@ -385,8 +384,6 @@ fn add_image_tags(content: &str, mut images: Vec<(BytesStart<'_>, f64)>) -> Resu
         }
     }
 
-    // Content without any <p> tags never reaches the branch above, so anything
-    // still queued is placed at the end rather than dropped.
     let remaining: Vec<_> = images.into_iter().map(|(tag, _)| tag).collect();
     write_image_tags(&mut writer, remaining)?;
 

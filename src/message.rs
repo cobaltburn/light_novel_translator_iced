@@ -22,22 +22,20 @@ pub enum Message {
     SelectTab(usize),
     CloseTab(usize),
     AddTab,
-    Log(String),
 }
 
 impl Translator {
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::DocAction(action) => self.doc.perform(action),
-            Message::TransAction(tab, action) => self.translation_action(tab, action),
-            Message::FormatAction(action) => self.format.perform(action),
+            Message::DocAction(action) => self.doc.perform(action).map(Into::into),
+            Message::FormatAction(action) => self.format.perform(action).map(Into::into),
             Message::ConsensusAction(action) => self.consensus.perform(action).map(Into::into),
+            Message::TransAction(tab, action) => self.translation_action(tab, action),
             Message::SetView(view) => self.set_view(view).into(),
             Message::ToggleSideBar => self.toggle_side_bar_collapse().into(),
             Message::SelectTab(tab) => self.set_tab(tab).into(),
             Message::CloseTab(tab) => self.close_tab(tab).into(),
             Message::AddTab => self.add_tab().into(),
-            Message::Log(message) => log::info!("test message: {}", message).into(),
         }
     }
 }

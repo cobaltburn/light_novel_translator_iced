@@ -4,8 +4,8 @@ use crate::{
         save_file, server_action::ServerAction,
     },
     controller::{parse::remove_think_tags, part_tag},
-    error::{Error, Result},
-    message::{display_error, select_epub},
+    error::{Error, Result, ResultTaskExt as _, TaskResultExt},
+    message::select_epub,
     model::{Activity, page::Page, translation::Translation},
     view::DisplayType,
 };
@@ -68,34 +68,21 @@ impl Translation {
                 page,
                 part,
             } => self.update_content(content, page, part).into(),
-            TransAction::Translate(page) => {
-                self.translate(page).unwrap_or_else(Error::display_error)
+            TransAction::Translate(page) => self.translate(page).ok_or_display(),
+            TransAction::TranslatePage(page) => self.translate_page(page).ok_or_display(),
+            TransAction::TranslatePart { page, part } => {
+                self.translate_part(page, part).ok_or_display()
             }
-            TransAction::TranslatePage(page) => self
-                .translate_page(page)
-                .unwrap_or_else(Error::display_error),
-            TransAction::TranslatePart { page, part } => self
-                .translate_part(page, part)
-                .unwrap_or_else(Error::display_error),
-            TransAction::SaveRecovery(path) => {
-                self.save_json(path).unwrap_or_else(Error::display_error)
-            }
+            TransAction::SaveRecovery(path) => self.save_json(path),
             TransAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
-                .then(|doc| match doc {
-                    Ok((name, pages)) => Task::done(TransAction::SetEpub { name, pages }),
-                    Err(error) => error.display_error(),
-                }),
+                .ok_or_display(|(name, pages)| Task::done(TransAction::SetEpub { name, pages })),
+
             TransAction::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
-                .then(|path| match path {
-                    Ok(path) => Task::done(TransAction::SavePages(path).into()),
-                    Err(err) => Task::future(display_error(err)).discard(),
-                }),
-            TransAction::RecoverPages(pages) => match self.recover_pages(pages) {
-                Ok(_) => Task::none(),
-                Err(err) => err.display_error(),
-            },
+                .map_err(Error::from)
+                .ok_or_display(|path| Task::done(TransAction::SavePages(path).into())),
+            TransAction::RecoverPages(pages) => self.recover_pages(pages).ok_or_display(),
             TransAction::Recover => Task::future(load_recovery())
                 .and_then(|pages| Task::done(TransAction::RecoverPages(pages))),
             TransAction::SetDisplay(display) => self.set_display(display).into(),
@@ -113,7 +100,7 @@ impl Translation {
         for page in self.pages.iter_mut() {
             if let Some(current) = sections.get_mut(&page.path) {
                 mem::swap(&mut page.sections, current);
-                page.check_page(&last_section);
+                page.check_page(last_section);
             }
             last_section = page
                 .sections
@@ -133,12 +120,11 @@ impl Translation {
         };
     }
 
-    fn save_json(&self, path: PathBuf) -> Result<Task<TransAction>> {
-        let contents = serde_json::to_string_pretty(&self.pages)?;
-        Ok(Task::future(fs::write(path, contents)).then(|e| match e {
-            Err(error) => Error::from(error).display_error(),
-            Ok(_) => Task::none(),
-        }))
+    fn save_json(&self, path: PathBuf) -> Task<TransAction> {
+        let contents = serde_json::to_string_pretty(&self.pages);
+        Task::future(async move { fs::write(path, contents?).await })
+            .map_err(Error::from)
+            .ok_or_display(Into::into)
     }
 
     fn cancel(&mut self) -> Task<TransAction> {
@@ -170,8 +156,9 @@ impl Translation {
     }
 
     pub fn save_page(&mut self, name: String, page: usize) -> Task<TransAction> {
-        match self.pages.get(page) {
-            Some(page) => {
+        self.pages
+            .get(page)
+            .map(|page| {
                 let text: String = page
                     .sections
                     .iter()
@@ -181,9 +168,8 @@ impl Translation {
                 let contents = remove_think_tags(&text);
 
                 Task::future(save_file(format!("{name}.md"), contents)).discard()
-            }
-            None => Task::none(),
-        }
+            })
+            .unwrap_or_default()
     }
 
     pub fn save_pages(&self, path: PathBuf) -> Task<TransAction> {
@@ -201,8 +187,7 @@ impl Translation {
                     .enumerate()
                     .map(|(i, s)| format!("{}{}\n", part_tag(i + 1), s.content))
                     .collect();
-                let contents = remove_think_tags(&text);
-                (file_path, contents)
+                (file_path, remove_think_tags(&text))
             })
             .collect();
 
@@ -212,11 +197,7 @@ impl Translation {
             }
             Ok(())
         })
-        .then(|r: Result<()>| match r {
-            Ok(_) => Task::none(),
-            Err(error) => Task::future(display_error(error)),
-        })
-        .discard()
+        .ok_or_display(Into::into)
     }
 
     pub fn set_epub(&mut self, path: PathBuf, pages: Vec<Page>) {
@@ -289,7 +270,6 @@ impl Translation {
         current_page.clear();
 
         let task = self.server.translate(pages, &model, page)?;
-
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
 

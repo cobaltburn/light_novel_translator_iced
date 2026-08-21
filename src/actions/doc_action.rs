@@ -3,7 +3,8 @@ use crate::{
         parse::{join_partition, partition_text},
         xml::{strip_syosetu_tags, strip_tags},
     },
-    message::{Message, display_error, select_epub},
+    error::{Result, ResultTaskExt},
+    message::select_epub,
     model::doc::Doc,
 };
 use epub::doc::EpubDoc;
@@ -22,11 +23,13 @@ pub enum DocAction {
 }
 
 impl Doc {
-    pub fn perform(&mut self, action: DocAction) -> Task<Message> {
+    pub fn perform(&mut self, action: DocAction) -> Task<DocAction> {
         match action {
             DocAction::OpenEpub => Task::future(select_epub())
-                .and_then(|(name, buf)| Task::done(DocAction::SetEpub(name, buf).into())),
-            DocAction::SetEpub(file_name, buffer) => self.set_epub(file_name, buffer),
+                .and_then(|(name, buf)| Task::done(DocAction::SetEpub(name, buf))),
+            DocAction::SetEpub(file_name, buffer) => {
+                self.set_epub(file_name, buffer).ok_or_display()
+            }
             DocAction::SetPage(page) => self.set_page(page).into(),
             DocAction::Inc => self.inc_page().into(),
             DocAction::Dec => self.dec_page().into(),
@@ -34,28 +37,21 @@ impl Doc {
     }
 
     pub fn inc_page(&mut self) {
-        if let Some(page) = self.current_page {
-            let page = page + 1;
-            if page < self.total_pages {
-                self.set_page(page);
-            }
-        }
-    }
-
-    pub fn dec_page(&mut self) {
-        let Some(page) = self.current_page else {
-            return;
-        };
-        if let Some(page) = page.checked_sub(1) {
+        if let Some(page) = self.current_page.map(|p| p + 1)
+            && page < self.total_pages
+        {
             self.set_page(page);
         }
     }
 
-    pub fn set_epub(&mut self, file_name: PathBuf, buffer: Vec<u8>) -> Task<Message> {
-        let epub = match EpubDoc::from_reader(Cursor::new(buffer)) {
-            Ok(epub) => epub,
-            Err(error) => return Task::future(display_error(error)).discard(),
+    pub fn dec_page(&mut self) {
+        if let Some(page) = self.current_page.and_then(|p| p.checked_sub(1)) {
+            self.set_page(page);
         };
+    }
+
+    pub fn set_epub(&mut self, file_name: PathBuf, buffer: Vec<u8>) -> Result<()> {
+        let epub = EpubDoc::from_reader(Cursor::new(buffer))?;
         self.current_page = Some(0);
         self.total_pages = epub.get_num_chapters();
 
@@ -65,8 +61,7 @@ impl Doc {
 
         self.epub = Some(epub);
         self.set_page(0);
-
-        Task::none()
+        Ok(())
     }
 
     pub fn get_page(&mut self, page: usize) -> Option<String> {

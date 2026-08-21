@@ -4,7 +4,7 @@ use crate::{
         select_format_folder, server_action::ServerAction,
     },
     controller::{parse::remove_think_tags, part_tag},
-    error::{Error, Result},
+    error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::{display_error, select_epub},
     model::{
         Activity,
@@ -15,12 +15,7 @@ use crate::{
 };
 use iced::Task;
 use regex::Regex;
-use std::{
-    collections::HashMap,
-    ffi::OsStr,
-    path::{Path, PathBuf},
-    sync::LazyLock,
-};
+use std::{collections::HashMap, ffi::OsStr, path::PathBuf, sync::LazyLock};
 use tokio::fs;
 
 static PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<part>\d+</part>").unwrap());
@@ -71,25 +66,18 @@ impl Consensus {
     pub fn perform(&mut self, action: ConsensusAction) -> Task<ConsensusAction> {
         match action {
             ConsensusAction::ServerAction(action) => self.server.perform(action).map(Into::into),
-            ConsensusAction::Consensus(page) => self
-                .consensus(page)
-                .unwrap_or_else(|error| Task::future(display_error(error)).discard()),
-            ConsensusAction::ConsensusPage(page) => self
-                .consensus_page(page)
-                .unwrap_or_else(|error| Task::future(display_error(error)).discard()),
-            ConsensusAction::ConsensusPart { page, part } => self
-                .consensus_part(page, part)
-                .unwrap_or_else(|error| Task::future(display_error(error)).discard()),
+            ConsensusAction::Consensus(page) => self.consensus(page).ok_or_display(),
+            ConsensusAction::ConsensusPage(page) => self.consensus_page(page).ok_or_display(),
+            ConsensusAction::ConsensusPart { page, part } => {
+                self.consensus_part(page, part).ok_or_display()
+            }
             ConsensusAction::SaveTranslation(file_name) => {
                 Task::future(pick_save_folder(file_name))
                     .and_then(|path| {
                         Task::future(async { fs::create_dir(&path).await.map(|_| path) })
-                            .map_err(|error| Error::from(error))
                     })
-                    .then(|path| match path {
-                        Ok(path) => Task::done(ConsensusAction::SavePages(path).into()),
-                        Err(err) => err.display_error(),
-                    })
+                    .map_err(Error::from)
+                    .ok_or_display(|path| Task::done(ConsensusAction::SavePages(path)))
             }
             ConsensusAction::SavePages(path) => self.save_pages(path),
             ConsensusAction::SavePage { name, page } => self.save_page(name, page),
@@ -102,14 +90,13 @@ impl Consensus {
             ConsensusAction::SetEpub { path: name, pages } => self.set_epub(name, pages).into(),
             ConsensusAction::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
-                .then(|doc| match doc {
-                    Ok((name, pages)) => Task::done(ConsensusAction::SetEpub { path: name, pages }),
-                    Err(error) => Task::future(display_error(error)).discard(),
+                .ok_or_display(|(path, pages)| {
+                    Task::done(ConsensusAction::SetEpub { path, pages })
                 }),
             ConsensusAction::CancelConsensus => self.cancel().into(),
             ConsensusAction::SetPage(page) => self.set_page(page).into(),
             ConsensusAction::SelectCandidate(i) => Task::future(select_format_folder(
-                self.file_path.parent().unwrap_or(Path::new("")).into(),
+                self.file_path.parent().map_or(PathBuf::new(), Into::into),
             ))
             .and_then(move |(name, pages)| {
                 Task::done(ConsensusAction::SetCandidate { i, name, pages })
@@ -209,12 +196,12 @@ impl Consensus {
         let task = self
             .server
             .consensus_part(pages, candidates, model, page, part)?;
+        let complete_task = self
+            .server
+            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
 
         Ok(task
-            .chain(
-                self.server
-                    .bind_handle(Task::done(ConsensusAction::PageComplete(page))),
-            )
+            .chain(complete_task)
             .chain(Task::done(ServerAction::Abort.into())))
     }
 
@@ -299,8 +286,7 @@ impl Consensus {
     fn clean_text(&mut self, page: usize, part: usize) {
         if let Some(page) = self.pages.get_mut(page) {
             if let Some(section) = page.sections.get_mut(part) {
-                section.content = clean_invisible_chars(&section.content);
-                section.content = section.content.replace(['“', '”'], "\"");
+                section.content = clean_invisible_chars(&section.content).replace(['“', '”'], "\"");
             }
         };
     }

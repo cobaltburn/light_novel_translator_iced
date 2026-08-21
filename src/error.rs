@@ -65,3 +65,41 @@ impl Error {
         Task::future(display_error(self)).discard()
     }
 }
+
+pub trait TaskResultExt<T> {
+    fn ok_or_display<M: Clone + MaybeSend + 'static>(
+        self,
+        f: impl Fn(T) -> Task<M> + MaybeSend + 'static,
+    ) -> Task<M>;
+}
+
+impl<T: MaybeSend + 'static> TaskResultExt<T> for Task<Result<T>> {
+    fn ok_or_display<M: Clone + MaybeSend + 'static>(
+        self,
+        f: impl Fn(T) -> Task<M> + MaybeSend + 'static,
+    ) -> Task<M> {
+        self.then(move |result| match result {
+            Ok(value) => f(value),
+            Err(error) => error.display_error(),
+        })
+    }
+}
+
+pub trait ResultTaskExt<T> {
+    fn ok_or_display(self) -> Task<T>;
+}
+
+impl<T: MaybeSend + 'static> ResultTaskExt<T> for Result<Task<T>> {
+    fn ok_or_display(self) -> Task<T> {
+        self.unwrap_or_else(Error::display_error)
+    }
+}
+
+impl<T: MaybeSend + 'static> ResultTaskExt<T> for Result<()> {
+    fn ok_or_display(self) -> Task<T> {
+        match self {
+            Ok(_) => Task::none(),
+            Err(error) => error.display_error(),
+        }
+    }
+}
