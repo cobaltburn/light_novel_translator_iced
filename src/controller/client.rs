@@ -21,9 +21,9 @@ use std::{
     time::Duration,
 };
 
-const TEMPERATURE: f64 = 0.5;
+const TEMPERATURE: f64 = 0.8;
 const TOP_P: f64 = 0.8;
-const REPEAT_PENALTY: f64 = 1.05;
+const REPEAT_PENALTY: f64 = 0.8;
 const RETRY_DURATION: Duration = Duration::from_secs(240);
 const MIN_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(30);

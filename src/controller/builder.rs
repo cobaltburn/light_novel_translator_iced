@@ -139,7 +139,7 @@ impl DocBuilder {
                 .builder
                 .add_resource(folder.join(file_name), &*content, mime)
             {
-                log::error!("{:#?}", error);
+                log::warn!("{:#?}", error);
             }
         }
 
