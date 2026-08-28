@@ -1,12 +1,9 @@
 use crate::{
     error::Result,
     message::Message,
-    model::translator::Translator,
-    view::{
-        View, consensus_view::consensus_view, doc_view::doc_view, format_view::format_view,
-        translation_view::translation_view,
-    },
-    widget::side_bar::side_bar_container,
+    model::Translator,
+    view::{View, consensus_view, doc_view, format_view, translation_view},
+    widget::side_bar_container,
 };
 use iced::{
     Element, Length, Theme,

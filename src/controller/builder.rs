@@ -1,13 +1,10 @@
 use crate::{
     controller::{
-        DEFAULT_STYLESHEET, get_ordered_path,
-        xml::{
-            count_lines, extract_head, image_position, remove_part_tags, to_xml,
-            update_image_paths, update_style_path, update_tag_path,
-        },
+        DEFAULT_STYLESHEET, count_lines, extract_head, get_ordered_path, image_position,
+        remove_part_tags, to_xml, update_image_paths, update_style_path, update_tag_path,
     },
     error::{Error, Result},
-    model::format::{EpubMetadata, FormatPage},
+    model::{EpubMetadata, FormatPage},
 };
 use epub::doc::{EpubDoc, ResourceItem};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, ZipLibrary};

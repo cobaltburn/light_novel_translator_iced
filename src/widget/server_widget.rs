@@ -1,8 +1,8 @@
 use std::ops::RangeBounds;
 
 use crate::{
-    actions::server_action::ServerAction,
-    model::server::{Method, Server, Think},
+    actions::server,
+    model::{Method, Server, Think},
 };
 use iced::{
     Element, Length, Padding,
@@ -11,11 +11,11 @@ use iced::{
 };
 use iced_aw::NumberInput;
 
-pub fn ollama_input() -> Element<'static, ServerAction> {
+pub fn ollama_input() -> Element<'static, server::Action> {
     container(
         row![
             text("Ollama: ").center(),
-            button("connect").on_press(ServerAction::Connect),
+            button("connect").on_press(server::Action::Connect),
         ]
         .align_y(Vertical::Center)
         .spacing(5),
@@ -25,7 +25,7 @@ pub fn ollama_input() -> Element<'static, ServerAction> {
     .into()
 }
 
-pub fn think_selector(state: &Server) -> Element<'_, ServerAction> {
+pub fn think_selector(state: &Server) -> Element<'_, server::Action> {
     let selection = [
         ("None", Think::None),
         ("Low", Think::Low),
@@ -34,13 +34,13 @@ pub fn think_selector(state: &Server) -> Element<'_, ServerAction> {
     ];
     let radio_buttons = selection
         .into_iter()
-        .map(|(l, t)| radio(l, t, Some(state.settings.think), ServerAction::SetThink).into());
+        .map(|(l, t)| radio(l, t, Some(state.settings.think), server::Action::SetThink).into());
     container(row![text("Think:")].extend(radio_buttons).spacing(10))
         .align_left(Length::Fill)
         .into()
 }
 
-pub fn execution_selector(state: &Server) -> Element<'_, ServerAction> {
+pub fn execution_selector(state: &Server) -> Element<'_, server::Action> {
     let selection = [
         ("Chain", Method::Chain),
         ("Batch", Method::Batch),
@@ -48,21 +48,21 @@ pub fn execution_selector(state: &Server) -> Element<'_, ServerAction> {
     ];
     let radio_buttons = selection
         .into_iter()
-        .map(|(l, t)| radio(l, t, Some(state.method), ServerAction::SetMethod).into());
+        .map(|(l, t)| radio(l, t, Some(state.method), server::Action::SetMethod).into());
 
     container(row![text("Execution:")].extend(radio_buttons).spacing(10))
         .align_left(Length::Fill)
         .into()
 }
 
-pub fn context_window_input(state: &Server) -> Element<'_, ServerAction> {
+pub fn context_window_input(state: &Server) -> Element<'_, server::Action> {
     container(
         row![
             text("Context window:"),
             NumberInput::new(
                 &state.settings.context_window,
                 2..=10,
-                ServerAction::SetWindow
+                server::Action::SetWindow
             )
         ]
         .align_y(Vertical::Center)
@@ -77,8 +77,8 @@ pub fn server_setting_input<'a>(
     setting: &'a str,
     value: f64,
     range: impl RangeBounds<f64>,
-    on_change: impl 'a + Fn(f64) -> ServerAction + Clone,
-) -> Element<'a, ServerAction> {
+    on_change: impl 'a + Fn(f64) -> server::Action + Clone,
+) -> Element<'a, server::Action> {
     container(
         row![
             text(setting),

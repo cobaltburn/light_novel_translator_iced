@@ -1,11 +1,17 @@
 use epub::doc::EpubDoc;
 use std::{io::Cursor, path::PathBuf};
 
-pub mod builder;
-pub mod client;
-pub mod parse;
-pub mod prompts;
-pub mod xml;
+mod builder;
+mod client;
+mod parse;
+mod prompts;
+mod xml;
+
+pub use builder::*;
+pub use client::*;
+pub use parse::*;
+pub use prompts::*;
+pub use xml::*;
 
 pub fn get_ordered_path(epub: &EpubDoc<Cursor<Vec<u8>>>) -> Vec<PathBuf> {
     epub.spine

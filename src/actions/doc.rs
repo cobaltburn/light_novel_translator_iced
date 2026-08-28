@@ -1,11 +1,8 @@
 use crate::{
-    controller::{
-        parse::{join_partition, partition_text},
-        xml::{strip_syosetu_tags, strip_tags},
-    },
+    controller::{join_partition, partition_text, strip_syosetu_tags, strip_tags},
     error::{Result, ResultTaskExt},
     message::select_epub,
-    model::doc::Doc,
+    model::Doc,
 };
 use epub::doc::EpubDoc;
 use html2md::rewrite_html;
@@ -14,7 +11,7 @@ use std::{io::Cursor, path::PathBuf};
 
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq)]
-pub enum DocAction {
+pub enum Action {
     SetEpub(PathBuf, Vec<u8>),
     OpenEpub,
     SetPage(usize),
@@ -23,16 +20,14 @@ pub enum DocAction {
 }
 
 impl Doc {
-    pub fn perform(&mut self, action: DocAction) -> Task<DocAction> {
+    pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
-            DocAction::OpenEpub => Task::future(select_epub())
-                .and_then(|(name, buf)| Task::done(DocAction::SetEpub(name, buf))),
-            DocAction::SetEpub(file_name, buffer) => {
-                self.set_epub(file_name, buffer).ok_or_display()
-            }
-            DocAction::SetPage(page) => self.set_page(page).into(),
-            DocAction::Inc => self.inc_page().into(),
-            DocAction::Dec => self.dec_page().into(),
+            Action::OpenEpub => Task::future(select_epub())
+                .and_then(|(name, buf)| Task::done(Action::SetEpub(name, buf))),
+            Action::SetEpub(file_name, buffer) => self.set_epub(file_name, buffer).ok_or_display(),
+            Action::SetPage(page) => self.set_page(page).into(),
+            Action::Inc => self.inc_page().into(),
+            Action::Dec => self.dec_page().into(),
         }
     }
 

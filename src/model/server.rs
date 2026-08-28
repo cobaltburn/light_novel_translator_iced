@@ -1,10 +1,8 @@
 use crate::{
-    actions::{
-        consensus_action::ConsensusAction, server_action::ServerAction, trans_action::TransAction,
-    },
-    controller::client::Client,
+    actions::{consensus, server, translation},
+    controller::Client,
     error::{Error, Result},
-    model::page::{Page, Section},
+    model::{Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
 use quick_xml::{Writer, events::BytesText};
@@ -19,11 +17,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-const TEMPERATURE: f64 = 0.5;
-const TOP_P: f64 = 0.8;
-const REPEAT_PENALTY: f64 = 1.05;
-const BATCH_SIZE: usize = 6;
-const DEFAULT_CONTEXT_WINDOW: usize = 3;
+pub const TEMPERATURE: f64 = 0.8;
+pub const TOP_P: f64 = 0.8;
+pub const REPEAT_PENALTY: f64 = 1.05;
+pub const BATCH_SIZE: usize = 6;
+pub const DEFAULT_CONTEXT_WINDOW: usize = 3;
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -45,7 +43,7 @@ impl Server {
         pages: &[Page],
         model: &str,
         page: usize,
-    ) -> Result<Task<TransAction>> {
+    ) -> Result<Task<translation::Action>> {
         match self.method {
             Method::History => self.translation_history(pages, model, page),
             _ => self.translation(pages, model, page),
@@ -57,7 +55,7 @@ impl Server {
         pages: &[Page],
         model: &str,
         page: usize,
-    ) -> Result<Task<TransAction>> {
+    ) -> Result<Task<translation::Action>> {
         let current = pages.last().expect("dont pass an empty array");
 
         let handles = &mut self.handles;
@@ -80,7 +78,7 @@ impl Server {
         pages: &[Page],
         model: &str,
         page: usize,
-    ) -> Result<Task<TransAction>> {
+    ) -> Result<Task<translation::Action>> {
         let (current, pages) = pages.split_last().unwrap();
         let sections: Vec<_> = pages.iter().map(|p| p.sections.as_slice()).collect();
         let history = build_history(&sections, self.settings.context_window);
@@ -113,7 +111,7 @@ impl Server {
         model: &str,
         page: usize,
         part: usize,
-    ) -> Result<Task<TransAction>> {
+    ) -> Result<Task<translation::Action>> {
         let (Page { sections, .. }, pages) = pages.split_last().unwrap();
         let (section, current_sections) = sections
             .get(..part + 1)
@@ -157,7 +155,7 @@ impl Server {
         candidates: HashMap<&OsStr, Vec<&[String]>>,
         model: &str,
         page: usize,
-    ) -> Result<Task<ConsensusAction>> {
+    ) -> Result<Task<consensus::Action>> {
         let current = pages.last().expect("dont pass an empty array");
         let candidates = candidates
             .get(current.file_stem().unwrap_or_default())
@@ -187,7 +185,7 @@ impl Server {
         model: String,
         page: usize,
         part: usize,
-    ) -> Result<Task<ConsensusAction>> {
+    ) -> Result<Task<consensus::Action>> {
         let current = pages.last().expect("dont pass an empty array");
         let section = current.sections.get(part).unwrap();
         let page_candidates = candidates
@@ -257,11 +255,11 @@ pub fn consensus_prompt(section: &str, candidates: &[&String]) -> Result<String>
 }
 
 impl Server {
-    pub fn model_pick_list(&self) -> Element<'_, ServerAction> {
+    pub fn model_pick_list(&self) -> Element<'_, server::Action> {
         pick_list(
             self.models.as_slice(),
             self.current_model.as_ref(),
-            ServerAction::SelectModel,
+            server::Action::SelectModel,
         )
         .width(250)
         .into()

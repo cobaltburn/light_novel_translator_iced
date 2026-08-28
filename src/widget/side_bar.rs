@@ -1,6 +1,4 @@
-use crate::{
-    app::ICONS, message::Message, model::translator::Translator, view::View, widget::text_button,
-};
+use crate::{app::ICONS, message::Message, model::Translator, view::View, widget::text_button};
 use iced::widget::{Button, Container};
 use iced::{
     Border, Color, Length,

@@ -4,9 +4,13 @@ use iced::widget::button::Status;
 use iced::widget::{Button, button, container, svg};
 use iced::{Border, Element, Renderer, Theme, advanced};
 
-pub mod page_sidebar;
-pub mod server_widget;
-pub mod side_bar;
+mod page_sidebar;
+mod server_widget;
+mod side_bar;
+
+pub use page_sidebar::*;
+pub use server_widget::*;
+pub use side_bar::*;
 
 pub fn text_button<'a, T: 'a>(content: impl Into<Element<'a, T>>) -> Button<'a, T>
 where

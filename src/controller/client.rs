@@ -1,8 +1,8 @@
 use crate::{
-    actions::{consensus_action::ConsensusAction, trans_action::TransAction},
-    controller::prompts::{CONSENSUS_PROMPT, TRANSLATION_PROMPT},
+    actions::{consensus, translation},
+    controller::{CONSENSUS_PROMPT, TRANSLATION_PROMPT},
     error::{Error, Result},
-    model::server::{Settings, Think},
+    model::{REPEAT_PENALTY, Settings, TEMPERATURE, TOP_P, Think},
 };
 use iced::Task;
 use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
@@ -21,9 +21,6 @@ use std::{
     time::Duration,
 };
 
-const TEMPERATURE: f64 = 0.8;
-const TOP_P: f64 = 0.8;
-const REPEAT_PENALTY: f64 = 0.8;
 const RETRY_DURATION: Duration = Duration::from_secs(240);
 const MIN_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -37,35 +34,37 @@ pub trait StreamAction: 'static + Send + Clone {
     fn clean(page: usize, part: usize) -> Self;
 }
 
-impl StreamAction for TransAction {
+impl StreamAction for translation::Action {
     fn update(content: String, page: usize, part: usize) -> Self {
-        TransAction::UpdateContent {
+        translation::Action::UpdateContent {
             content,
             page,
             part,
         }
     }
     fn cancel() -> Self {
-        TransAction::CancelTranslate
+        translation::Action::CancelTranslate
     }
     fn clean(page: usize, part: usize) -> Self {
-        TransAction::CleanText { page, part }
+        translation::Action::CleanText { page, part }
     }
 }
 
-impl StreamAction for ConsensusAction {
+impl StreamAction for consensus::Action {
     fn update(content: String, page: usize, part: usize) -> Self {
-        ConsensusAction::UpdateContent {
+        consensus::Action::UpdateContent {
             content,
             page,
             part,
         }
     }
+
     fn cancel() -> Self {
-        ConsensusAction::CancelConsensus
+        consensus::Action::CancelConsensus
     }
+
     fn clean(page: usize, part: usize) -> Self {
-        ConsensusAction::CleanText { page, part }
+        consensus::Action::CleanText { page, part }
     }
 }
 
@@ -112,7 +111,7 @@ impl Client {
         settings: Settings,
         page: usize,
         part: usize,
-    ) -> Result<Task<TransAction>> {
+    ) -> Result<Task<translation::Action>> {
         let Client::Ollama(ollama) = self else {
             return Err(Error::ServerError("server not connected"));
         };
@@ -126,7 +125,9 @@ impl Client {
         let prompt = prompt.to_string();
         let stream =
             Task::future(async move { agent.stream_prompt(prompt).await }).then(Task::stream);
-        Ok(handle_stream::<TransAction, _>(stream, None, 0, page, part))
+        Ok(handle_stream::<translation::Action, _>(
+            stream, None, 0, page, part,
+        ))
     }
 
     pub fn translate_history(
@@ -137,7 +138,7 @@ impl Client {
         settings: Settings,
         page: usize,
         part: usize,
-    ) -> Result<Task<TransAction>> {
+    ) -> Result<Task<translation::Action>> {
         let Client::Ollama(ollama) = self else {
             return Err(Error::ServerError("server not connected"));
         };
@@ -155,7 +156,7 @@ impl Client {
             agent.stream_chat(prompt, chat_history).await
         })
         .then(Task::stream);
-        Ok(handle_stream::<TransAction, _>(
+        Ok(handle_stream::<translation::Action, _>(
             stream,
             Some(history),
             settings.context_window,
@@ -171,7 +172,7 @@ impl Client {
         think: Think,
         page: usize,
         part: usize,
-    ) -> Result<Task<ConsensusAction>> {
+    ) -> Result<Task<consensus::Action>> {
         let Client::Ollama(ollama) = self else {
             return Err(Error::ServerError("server not connected"));
         };
@@ -184,7 +185,7 @@ impl Client {
 
         let stream =
             Task::future(async move { agent.stream_prompt(prompt).await }).then(Task::stream);
-        Ok(handle_stream::<ConsensusAction, _>(
+        Ok(handle_stream::<consensus::Action, _>(
             stream, None, 0, page, part,
         ))
     }

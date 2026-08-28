@@ -1,8 +1,8 @@
 use crate::{
-    actions::trans_action::TransAction,
-    model::{page::Page, server::Server},
+    actions::translation::Action,
+    model::{Page, Server},
     view::DisplayType,
-    widget::page_sidebar::{SidebarAction, SidebarDeps, SidebarRow},
+    widget::{SidebarAction, SidebarDeps, SidebarRow},
 };
 use iced_aw::TabLabel;
 use std::path::PathBuf;
@@ -60,21 +60,21 @@ impl Translation {
     }
 }
 
-impl SidebarAction for TransAction {
+impl SidebarAction for Action {
     fn set_page(page: usize) -> Self {
-        TransAction::SetPage(page)
+        Action::SetPage(page)
     }
     fn save_page(name: String, page: usize) -> Self {
-        TransAction::SavePage { name, page }
+        Action::SavePage { name, page }
     }
     fn translate(page: usize) -> Self {
-        TransAction::Translate(page)
+        Action::Translate(page)
     }
     fn translate_page(page: usize) -> Self {
-        TransAction::TranslatePage(page)
+        Action::TranslatePage(page)
     }
     fn translate_part(page: usize, part: usize) -> Self {
-        TransAction::TranslatePart { page, part }
+        Action::TranslatePart { page, part }
     }
 }
 

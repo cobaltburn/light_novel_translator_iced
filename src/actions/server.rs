@@ -1,12 +1,12 @@
 use crate::{
-    controller::client::Client,
+    controller::Client,
     error::TaskResultExt,
-    model::server::{Method, Server, Think},
+    model::{Method, Server, Think},
 };
 use iced::Task;
 
 #[derive(Debug, Clone)]
-pub enum ServerAction {
+pub enum Action {
     SelectModel(String),
     SetModels(Vec<String>),
     SetMethod(Method),
@@ -20,26 +20,26 @@ pub enum ServerAction {
 }
 
 impl Server {
-    pub fn perform(&mut self, action: ServerAction) -> Task<ServerAction> {
+    pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
-            ServerAction::SelectModel(model) => self.set_model(model).into(),
-            ServerAction::SetThink(think) => self.set_think(think).into(),
-            ServerAction::SetMethod(method) => self.set_method(method).into(),
-            ServerAction::SetModels(models) => self.set_models(models).into(),
-            ServerAction::SetWindow(window) => self.set_window(window).into(),
-            ServerAction::Connect => self.connect(),
-            ServerAction::Abort => self.abort().into(),
-            ServerAction::SetTemp(temp) => self.set_temp(temp).into(),
-            ServerAction::SetTopP(top_p) => self.set_top_p(top_p).into(),
-            ServerAction::SetRepeatPenalty(penalty) => self.set_repeat_penalty(penalty).into(),
+            Action::SelectModel(model) => self.set_model(model).into(),
+            Action::SetThink(think) => self.set_think(think).into(),
+            Action::SetMethod(method) => self.set_method(method).into(),
+            Action::SetModels(models) => self.set_models(models).into(),
+            Action::SetWindow(window) => self.set_window(window).into(),
+            Action::Connect => self.connect(),
+            Action::Abort => self.abort().into(),
+            Action::SetTemp(temp) => self.set_temp(temp).into(),
+            Action::SetTopP(top_p) => self.set_top_p(top_p).into(),
+            Action::SetRepeatPenalty(penalty) => self.set_repeat_penalty(penalty).into(),
         }
     }
 
-    pub fn connect(&mut self) -> Task<ServerAction> {
+    pub fn connect(&mut self) -> Task<Action> {
         self.client = Client::ollama();
         let client = self.client.clone();
         Task::future(async move { client.get_models().await })
-            .ok_or_display(|models| Task::done(ServerAction::SetModels(models)))
+            .ok_or_display(|models| Task::done(Action::SetModels(models)))
     }
 
     fn set_model(&mut self, model: String) {

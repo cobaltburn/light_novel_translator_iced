@@ -1,4 +1,4 @@
-use crate::{actions::doc_action::DocAction, model::doc::Doc, view::text_scrollable};
+use crate::{actions::doc::Action, model::Doc, view::text_scrollable};
 use iced::widget::{button, column, container, pick_list, row, text};
 use iced::{
     Element, Length, Padding,
@@ -6,7 +6,7 @@ use iced::{
     widget::{Container, space::vertical},
 };
 
-pub fn doc_view(model: &Doc) -> Element<'_, DocAction> {
+pub fn doc_view(model: &Doc) -> Element<'_, Action> {
     container(column![
         vertical(),
         column![epub_select_button(), text_scrollable(&model.content),]
@@ -22,23 +22,23 @@ pub fn doc_view(model: &Doc) -> Element<'_, DocAction> {
     .into()
 }
 
-pub fn page_selector(model: &Doc) -> Container<'_, DocAction> {
+pub fn page_selector(model: &Doc) -> Container<'_, Action> {
     container(row![
-        button(text("◀")).on_press(DocAction::Dec),
+        button(text("◀")).on_press(Action::Dec),
         pick_list(
             (0..model.total_pages).collect::<Vec<usize>>(),
             model.current_page,
-            DocAction::SetPage
+            Action::SetPage
         ),
-        button(text("▶")).on_press(DocAction::Inc)
+        button(text("▶")).on_press(Action::Inc)
     ])
     .width(Length::Fill)
     .align_x(Horizontal::Center)
     .padding(10)
 }
 
-pub fn epub_select_button() -> Container<'static, DocAction> {
-    container(button(text("epub").center()).on_press(DocAction::OpenEpub))
+pub fn epub_select_button() -> Container<'static, Action> {
+    container(button(text("epub").center()).on_press(Action::OpenEpub))
         .align_x(Horizontal::Center)
         .padding(Padding::new(0.0).bottom(15))
 }

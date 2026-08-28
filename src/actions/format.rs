@@ -1,9 +1,9 @@
 use crate::{
     actions::select_format_folder,
-    controller::builder::DocBuilder,
+    controller::DocBuilder,
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::select_epub,
-    model::format::{Format, FormatPage},
+    model::{Format, FormatPage},
 };
 use epub::doc::EpubDoc;
 use iced::{Task, widget::image::Handle};
@@ -11,7 +11,7 @@ use std::{io::Cursor, mem, path::PathBuf};
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
-pub enum FormatAction {
+pub enum Action {
     SelectFolder,
     SetPages {
         name: String,
@@ -28,19 +28,19 @@ pub enum FormatAction {
 }
 
 impl Format {
-    pub fn perform(&mut self, action: FormatAction) -> Task<FormatAction> {
+    pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
-            FormatAction::SetTitle(title) => self.set_title(title).into(),
-            FormatAction::SetAuthors(authors) => self.set_authors(authors).into(),
-            FormatAction::SetPages { name, pages } => self.set_pages(name, pages).into(),
-            FormatAction::SelectEpub => Task::future(select_epub())
-                .and_then(|(path, buffer)| Task::done(FormatAction::SetEpub { path, buffer })),
-            FormatAction::SelectFolder => Task::future(select_format_folder(
+            Action::SetTitle(title) => self.set_title(title).into(),
+            Action::SetAuthors(authors) => self.set_authors(authors).into(),
+            Action::SetPages { name, pages } => self.set_pages(name, pages).into(),
+            Action::SelectEpub => Task::future(select_epub())
+                .and_then(|(path, buffer)| Task::done(Action::SetEpub { path, buffer })),
+            Action::SelectFolder => Task::future(select_format_folder(
                 self.epub_path.parent().map_or(PathBuf::new(), Into::into),
             ))
-            .and_then(|(name, pages)| Task::done(FormatAction::SetPages { name, pages })),
-            FormatAction::SetEpub { path, buffer } => self.set_epub(path, buffer).ok_or_display(),
-            FormatAction::Build => Task::done(self.get_build_content())
+            .and_then(|(name, pages)| Task::done(Action::SetPages { name, pages })),
+            Action::SetEpub { path, buffer } => self.set_epub(path, buffer).ok_or_display(),
+            Action::Build => Task::done(self.get_build_content())
                 .and_then(|builder| Task::done(builder.build()))
                 .and_then(|(content, name)| Task::future(save_epub(content, name)))
                 .ok_or_display(Into::into),

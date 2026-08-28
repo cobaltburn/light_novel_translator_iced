@@ -1,4 +1,4 @@
-use crate::{actions::format_action::FormatAction, model::format::Format};
+use crate::{actions::format::Action, model::Format};
 use iced::alignment::Horizontal;
 use iced::widget::{Column, image, text_input};
 use iced::widget::{button, column, container, row, scrollable, space::vertical, text};
@@ -8,12 +8,12 @@ use iced::{
     widget::{Row, container::transparent},
 };
 
-pub fn format_view(model: &Format) -> Element<'_, FormatAction> {
+pub fn format_view(model: &Format) -> Element<'_, Action> {
     let build = model
         .epub
         .as_ref()
         .filter(|_| !model.pages.is_empty())
-        .map(|_| FormatAction::Build);
+        .map(|_| Action::Build);
 
     container(column![
         vertical(),
@@ -36,16 +36,16 @@ pub fn format_view(model: &Format) -> Element<'_, FormatAction> {
     .into()
 }
 
-fn format_menu_bar(model: &Format) -> Row<'_, FormatAction> {
+fn format_menu_bar(model: &Format) -> Row<'_, Action> {
     row![epub_button(model), content_button(model),]
         .width(Length::Fill)
         .spacing(10)
         .padding(Padding::default().bottom(15))
 }
 
-fn content_button(model: &Format) -> Row<'_, FormatAction> {
+fn content_button(model: &Format) -> Row<'_, Action> {
     row![
-        button(text("content")).on_press(FormatAction::SelectFolder),
+        button(text("content")).on_press(Action::SelectFolder),
         container(text(&model.source_folder).center())
             .width(Length::Fill)
             .padding(5)
@@ -60,14 +60,14 @@ fn content_button(model: &Format) -> Row<'_, FormatAction> {
     .spacing(10)
 }
 
-fn epub_button(model: &Format) -> Row<'_, FormatAction> {
+fn epub_button(model: &Format) -> Row<'_, Action> {
     let name = model
         .epub_path
         .file_name()
         .map(|e| e.to_string_lossy())
         .unwrap_or_default();
     row![
-        button(text("epub").center()).on_press(FormatAction::SelectEpub),
+        button(text("epub").center()).on_press(Action::SelectEpub),
         container(text(name).center())
             .width(Length::Fill)
             .padding(5)
@@ -82,7 +82,7 @@ fn epub_button(model: &Format) -> Row<'_, FormatAction> {
     .spacing(10)
 }
 
-fn epub_image(model: &Format) -> Element<'_, FormatAction> {
+fn epub_image(model: &Format) -> Element<'_, Action> {
     let cover_image = model.cover.as_ref().map(|handle| image(handle));
     container(cover_image)
         .padding(10)
@@ -99,21 +99,21 @@ fn epub_image(model: &Format) -> Element<'_, FormatAction> {
         .into()
 }
 
-fn epub_metadata(model @ Format { metadata, .. }: &Format) -> Element<'_, FormatAction> {
+fn epub_metadata(model @ Format { metadata, .. }: &Format) -> Element<'_, Action> {
     let label_width = 80;
     let content = column![
         row![
             container(text("Title: "))
                 .align_right(Length::Fill)
                 .width(label_width),
-            text_input("Title", &metadata.title).on_input(FormatAction::SetTitle)
+            text_input("Title", &metadata.title).on_input(Action::SetTitle)
         ]
         .align_y(Vertical::Center),
         row![
             container(text("Author(s): "))
                 .align_right(Length::Fill)
                 .width(label_width),
-            text_input("Author(s)", &metadata.authors).on_input(FormatAction::SetAuthors)
+            text_input("Author(s)", &metadata.authors).on_input(Action::SetAuthors)
         ]
         .align_y(Vertical::Center),
         content_files(model)
@@ -128,7 +128,7 @@ fn epub_metadata(model @ Format { metadata, .. }: &Format) -> Element<'_, Format
         .into()
 }
 
-fn content_files(Format { pages, .. }: &Format) -> Element<'_, FormatAction> {
+fn content_files(Format { pages, .. }: &Format) -> Element<'_, Action> {
     let pages: Column<_> = pages
         .iter()
         .filter_map(|p| p.path.file_stem())

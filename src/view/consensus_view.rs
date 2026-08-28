@@ -1,15 +1,8 @@
 use crate::{
-    actions::{consensus_action::ConsensusAction, server_action::ServerAction},
-    model::{
-        consensus::Consensus,
-        server::{Method, Server},
-    },
+    actions::{consensus, server},
+    model::{Consensus, Method, Server},
     view::{DisplayType, menu_button, rich_text_scrollable},
-    widget::{
-        context_menu_button,
-        page_sidebar::build_path_buttons,
-        server_widget::{ollama_input, think_selector},
-    },
+    widget::{build_path_buttons, context_menu_button, ollama_input, think_selector},
 };
 use iced::{
     Border, Color, Element, Length, Padding, Renderer, Theme,
@@ -22,14 +15,14 @@ use iced::{
 use iced_aw::{ContextMenu, Menu, MenuBar, menu::Item};
 use std::ops::Not;
 
-pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
+pub fn consensus_view(model: &Consensus) -> Element<'_, consensus::Action> {
     let page = model.current_page();
     let current_page = model.current_page;
     let can_consensus = model.server.handles.is_empty()
         && model.server.connected()
         && !model.file_name().is_empty();
     let on_press = move |part| {
-        can_consensus.then_some(ConsensusAction::ConsensusPart {
+        can_consensus.then_some(consensus::Action::ConsensusPart {
             page: current_page,
             part,
         })
@@ -49,13 +42,13 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
                 stack![
                     ContextMenu::new(rich_text_scrollable(content), || container(column![
                         context_menu_button(text("full").color(Color::WHITE))
-                            .on_press(ConsensusAction::SetDisplay(DisplayType::Full))
+                            .on_press(consensus::Action::SetDisplay(DisplayType::Full))
                             .width(Length::Fill),
                         context_menu_button(text("end").color(Color::WHITE))
-                            .on_press(ConsensusAction::SetDisplay(DisplayType::End))
+                            .on_press(consensus::Action::SetDisplay(DisplayType::End))
                             .width(Length::Fill),
                         context_menu_button(text("japanese").color(Color::WHITE))
-                            .on_press(ConsensusAction::SetDisplay(DisplayType::Japanese))
+                            .on_press(consensus::Action::SetDisplay(DisplayType::Japanese))
                             .width(Length::Fill)
                     ])
                     .style(container::rounded_box)
@@ -78,7 +71,7 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, ConsensusAction> {
     .into()
 }
 
-fn side_bar(model: &Consensus) -> Container<'_, ConsensusAction> {
+fn side_bar(model: &Consensus) -> Container<'_, consensus::Action> {
     let buttons = lazy(model.sidebar_deps(), |deps| {
         build_path_buttons(deps).width(250).spacing(10)
     });
@@ -94,7 +87,7 @@ fn side_bar(model: &Consensus) -> Container<'_, ConsensusAction> {
         })
 }
 
-fn menu_bar(model @ Consensus { server, .. }: &Consensus) -> Element<'_, ConsensusAction> {
+fn menu_bar(model @ Consensus { server, .. }: &Consensus) -> Element<'_, consensus::Action> {
     row![
         MenuBar::new(vec![
             epub_menu(model),
@@ -111,16 +104,16 @@ fn menu_bar(model @ Consensus { server, .. }: &Consensus) -> Element<'_, Consens
     .into()
 }
 
-fn consensus_button(model: &Consensus) -> Element<'_, ConsensusAction> {
+fn consensus_button(model: &Consensus) -> Element<'_, consensus::Action> {
     let (button_text, message) = if !model.server.handles.is_empty() {
-        ("cancel", Some(ConsensusAction::CancelConsensus))
+        ("cancel", Some(consensus::Action::CancelConsensus))
     } else if !model.server.connected()
         || model.file_name().is_empty()
         || model.candidates.is_empty()
     {
         ("translate", None)
     } else {
-        let msg = ConsensusAction::Consensus(model.current_page);
+        let msg = consensus::Action::Consensus(model.current_page);
         ("translate", Some(msg))
     };
 
@@ -129,7 +122,7 @@ fn consensus_button(model: &Consensus) -> Element<'_, ConsensusAction> {
         .into()
 }
 
-fn server_menu(state: &Server) -> Item<'_, ConsensusAction, Theme, Renderer> {
+fn server_menu(state: &Server) -> Item<'_, consensus::Action, Theme, Renderer> {
     Item::with_menu(
         menu_button("server"),
         Menu::new(vec![
@@ -142,7 +135,7 @@ fn server_menu(state: &Server) -> Item<'_, ConsensusAction, Theme, Renderer> {
     )
 }
 
-pub fn execution_selector(state: &Server) -> Element<'_, ServerAction> {
+pub fn execution_selector(state: &Server) -> Element<'_, server::Action> {
     container(
         row![
             text("Execution:"),
@@ -150,13 +143,13 @@ pub fn execution_selector(state: &Server) -> Element<'_, ServerAction> {
                 "Chain",
                 Method::Chain,
                 Some(state.method),
-                ServerAction::SetMethod
+                server::Action::SetMethod
             ),
             radio(
                 "Batch",
                 Method::Batch,
                 Some(state.method),
-                ServerAction::SetMethod
+                server::Action::SetMethod
             ),
         ]
         .spacing(10),
@@ -165,7 +158,7 @@ pub fn execution_selector(state: &Server) -> Element<'_, ServerAction> {
     .into()
 }
 
-fn epub_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {
+fn epub_menu(model: &Consensus) -> Item<'_, consensus::Action, Theme, Renderer> {
     Item::with_menu(
         menu_button("epub"),
         Menu::new(vec![
@@ -177,10 +170,10 @@ fn epub_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {
     )
 }
 
-fn save_button(model: &Consensus) -> Element<'_, ConsensusAction> {
+fn save_button(model: &Consensus) -> Element<'_, consensus::Action> {
     let file_name = model.file_name();
     let not_empty = file_name.is_empty().not();
-    let save_message = not_empty.then_some(ConsensusAction::SaveTranslation(file_name));
+    let save_message = not_empty.then_some(consensus::Action::SaveTranslation(file_name));
 
     button(text("save").center())
         .on_press_maybe(save_message)
@@ -188,9 +181,9 @@ fn save_button(model: &Consensus) -> Element<'_, ConsensusAction> {
         .into()
 }
 
-fn epub_select(model: &Consensus) -> Element<'_, ConsensusAction> {
+fn epub_select(model: &Consensus) -> Element<'_, consensus::Action> {
     row![
-        button(text("epub").center()).on_press(ConsensusAction::OpenEpub),
+        button(text("epub").center()).on_press(consensus::Action::OpenEpub),
         container(text(model.file_name()))
             .width(Length::Fill)
             .padding(5)
@@ -206,7 +199,7 @@ fn epub_select(model: &Consensus) -> Element<'_, ConsensusAction> {
     .into()
 }
 
-fn candidate_menu(model: &Consensus) -> Item<'_, ConsensusAction, Theme, Renderer> {
+fn candidate_menu(model: &Consensus) -> Item<'_, consensus::Action, Theme, Renderer> {
     Item::with_menu(
         menu_button("candidate"),
         Menu::new(model.candidate_items())

@@ -1,7 +1,7 @@
 use crate::{
-    actions::trans_action::TransAction,
+    actions::translation::Action,
     message::Message,
-    model::{consensus::Consensus, doc::Doc, format::Format, translation::Translation},
+    model::{Consensus, Doc, Format, Translation},
     view::View,
 };
 use iced::{Function, Task};
@@ -70,7 +70,7 @@ impl Translator {
         }
     }
 
-    pub fn translation_action(&mut self, tab: usize, action: TransAction) -> Task<Message> {
+    pub fn translation_action(&mut self, tab: usize, action: Action) -> Task<Message> {
         match self.translations.get_mut(&tab) {
             Some(model) => model.perform(action).map(Message::TransAction.with(tab)),
             None => Task::none(),

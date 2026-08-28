@@ -1,11 +1,7 @@
 use crate::{
-    controller::{
-        get_ordered_path,
-        parse::partition_text,
-        xml::{strip_syosetu_tags, strip_tags},
-    },
+    controller::{get_ordered_path, partition_text, strip_syosetu_tags, strip_tags},
     error::{Error, Result},
-    model::page::Page,
+    model::Page,
 };
 use epub::doc::EpubDoc;
 use html2md::rewrite_html;
@@ -16,11 +12,11 @@ use std::{
 };
 use tokio::fs::{self, read_dir, read_to_string};
 
-pub mod consensus_action;
-pub mod doc_action;
-pub mod format_action;
-pub mod server_action;
-pub mod trans_action;
+pub mod consensus;
+pub mod doc;
+pub mod format;
+pub mod server;
+pub mod translation;
 
 pub async fn pick_save_folder(file_name: String) -> Option<PathBuf> {
     let file_name = Path::new(&file_name).file_stem()?.to_str()?;

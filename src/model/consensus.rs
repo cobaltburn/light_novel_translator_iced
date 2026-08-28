@@ -1,8 +1,8 @@
 use crate::{
-    actions::consensus_action::ConsensusAction,
-    model::{page::Page, server::Server},
+    actions::consensus,
+    model::{Page, Server},
     view::DisplayType,
-    widget::page_sidebar::{SidebarAction, SidebarDeps, SidebarRow},
+    widget::{SidebarAction, SidebarDeps, SidebarRow},
 };
 use iced::widget::button::Status;
 use iced::{
@@ -37,7 +37,7 @@ impl Consensus {
             .to_string()
     }
 
-    pub fn candidate_items(&self) -> Vec<Item<'_, ConsensusAction, Theme, Renderer>> {
+    pub fn candidate_items(&self) -> Vec<Item<'_, consensus::Action, Theme, Renderer>> {
         self.candidates
             .iter()
             .enumerate()
@@ -70,36 +70,36 @@ impl Consensus {
     }
 }
 
-impl SidebarAction for ConsensusAction {
+impl SidebarAction for consensus::Action {
     fn set_page(page: usize) -> Self {
-        ConsensusAction::SetPage(page)
+        consensus::Action::SetPage(page)
     }
     fn save_page(name: String, page: usize) -> Self {
-        ConsensusAction::SavePage { name, page }
+        consensus::Action::SavePage { name, page }
     }
     fn translate(page: usize) -> Self {
-        ConsensusAction::Consensus(page)
+        consensus::Action::Consensus(page)
     }
     fn translate_page(page: usize) -> Self {
-        ConsensusAction::ConsensusPage(page)
+        consensus::Action::ConsensusPage(page)
     }
     fn translate_part(page: usize, part: usize) -> Self {
-        ConsensusAction::ConsensusPart { page, part }
+        consensus::Action::ConsensusPart { page, part }
     }
 }
 
-fn candidate_select(i: Option<usize>, folder: &str) -> Element<'_, ConsensusAction> {
+fn candidate_select(i: Option<usize>, folder: &str) -> Element<'_, consensus::Action> {
     let x_button = i.map(|i| {
         button(text("x").center())
             .style(|theme, status| match status {
                 Status::Hovered => button::primary(theme, status),
                 _ => button::text(theme, status),
             })
-            .on_press(ConsensusAction::DropCandidate(i))
+            .on_press(consensus::Action::DropCandidate(i))
     });
 
     row![
-        button(text("candidate").center()).on_press(ConsensusAction::SelectCandidate(i)),
+        button(text("candidate").center()).on_press(consensus::Action::SelectCandidate(i)),
         container(
             row![text(folder).width(Length::Fill)]
                 .push(x_button)

@@ -12,10 +12,15 @@ use iced::{
 };
 use std::fmt;
 
-pub mod consensus_view;
-pub mod doc_view;
-pub mod format_view;
-pub mod translation_view;
+mod consensus_view;
+mod doc_view;
+mod format_view;
+mod translation_view;
+
+pub use consensus_view::*;
+pub use doc_view::*;
+pub use format_view::*;
+pub use translation_view::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum View {

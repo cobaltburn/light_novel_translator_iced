@@ -1,16 +1,12 @@
 use crate::{
     actions::{
         clean_invisible_chars, complete_dialog, get_pages, pick_save_folder, save_file,
-        select_format_folder, server_action::ServerAction,
+        select_format_folder, server,
     },
-    controller::{parse::remove_think_tags, part_tag},
+    controller::{part_tag, remove_think_tags},
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::{display_error, select_epub},
-    model::{
-        Activity,
-        consensus::{Candidate, Consensus},
-        page::Page,
-    },
+    model::{Activity, Candidate, Consensus, Page},
     view::DisplayType,
 };
 use iced::Task;
@@ -21,8 +17,8 @@ use tokio::fs;
 static PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<part>\d+</part>").unwrap());
 
 #[derive(Debug, Clone)]
-pub enum ConsensusAction {
-    ServerAction(ServerAction),
+pub enum Action {
+    ServerAction(server::Action),
     UpdateContent {
         content: String,
         page: usize,
@@ -63,50 +59,38 @@ pub enum ConsensusAction {
 }
 
 impl Consensus {
-    pub fn perform(&mut self, action: ConsensusAction) -> Task<ConsensusAction> {
+    pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
-            ConsensusAction::ServerAction(action) => self.server.perform(action).map(Into::into),
-            ConsensusAction::Consensus(page) => self.consensus(page).ok_or_display(),
-            ConsensusAction::ConsensusPage(page) => self.consensus_page(page).ok_or_display(),
-            ConsensusAction::ConsensusPart { page, part } => {
-                self.consensus_part(page, part).ok_or_display()
-            }
-            ConsensusAction::SaveTranslation(file_name) => {
-                Task::future(pick_save_folder(file_name))
-                    .and_then(|path| {
-                        Task::future(async { fs::create_dir(&path).await.map(|_| path) })
-                    })
-                    .map_err(Error::from)
-                    .ok_or_display(|path| Task::done(ConsensusAction::SavePages(path)))
-            }
-            ConsensusAction::SavePages(path) => self.save_pages(path),
-            ConsensusAction::SavePage { name, page } => self.save_page(name, page),
-            ConsensusAction::UpdateContent {
+            Action::ServerAction(action) => self.server.perform(action).map(Into::into),
+            Action::Consensus(page) => self.consensus(page).ok_or_display(),
+            Action::ConsensusPage(page) => self.consensus_page(page).ok_or_display(),
+            Action::ConsensusPart { page, part } => self.consensus_part(page, part).ok_or_display(),
+            Action::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
+                .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
+                .map_err(Error::from)
+                .ok_or_display(|path| Task::done(Action::SavePages(path))),
+            Action::SavePages(path) => self.save_pages(path),
+            Action::SavePage { name, page } => self.save_page(name, page),
+            Action::UpdateContent {
                 content,
                 page,
                 part,
             } => self.update_content(content, page, part).into(),
-            ConsensusAction::PageComplete(page) => self.check_complete(page).into(),
-            ConsensusAction::SetEpub { path: name, pages } => self.set_epub(name, pages).into(),
-            ConsensusAction::OpenEpub => Task::future(select_epub())
+            Action::PageComplete(page) => self.check_complete(page).into(),
+            Action::SetEpub { path: name, pages } => self.set_epub(name, pages).into(),
+            Action::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
-                .ok_or_display(|(path, pages)| {
-                    Task::done(ConsensusAction::SetEpub { path, pages })
-                }),
-            ConsensusAction::CancelConsensus => self.cancel().into(),
-            ConsensusAction::SetPage(page) => self.set_page(page).into(),
-            ConsensusAction::SelectCandidate(i) => Task::future(select_format_folder(
+                .ok_or_display(|(path, pages)| Task::done(Action::SetEpub { path, pages })),
+            Action::CancelConsensus => self.cancel().into(),
+            Action::SetPage(page) => self.set_page(page).into(),
+            Action::SelectCandidate(i) => Task::future(select_format_folder(
                 self.file_path.parent().map_or(PathBuf::new(), Into::into),
             ))
-            .and_then(move |(name, pages)| {
-                Task::done(ConsensusAction::SetCandidate { i, name, pages })
-            }),
-            ConsensusAction::SetCandidate { i, name, pages } => {
-                self.set_candidate(i, name, pages).into()
-            }
-            ConsensusAction::CleanText { page, part } => self.clean_text(page, part).into(),
-            ConsensusAction::DropCandidate(i) => self.drop_candidate(i).into(),
-            ConsensusAction::SetDisplay(display) => self.set_display(display).into(),
+            .and_then(move |(name, pages)| Task::done(Action::SetCandidate { i, name, pages })),
+            Action::SetCandidate { i, name, pages } => self.set_candidate(i, name, pages).into(),
+            Action::CleanText { page, part } => self.clean_text(page, part).into(),
+            Action::DropCandidate(i) => self.drop_candidate(i).into(),
+            Action::SetDisplay(display) => self.set_display(display).into(),
         }
     }
 
@@ -124,7 +108,7 @@ impl Consensus {
             .ok_or(Error::ServerError("No model selected"))
     }
 
-    pub fn consensus(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
+    pub fn consensus(&mut self, page: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
         if let Some(page) = self.pages.get_mut(page) {
             page.activity = Activity::Active;
@@ -146,17 +130,17 @@ impl Consensus {
         Ok(task.chain(complete_task).chain(next_task))
     }
 
-    fn complete_task(&mut self, page: usize) -> Task<ConsensusAction> {
+    fn complete_task(&mut self, page: usize) -> Task<Action> {
         self.server
-            .bind_handle(Task::done(ConsensusAction::PageComplete(page)))
+            .bind_handle(Task::done(Action::PageComplete(page)))
     }
 
-    fn next_task(&mut self, page: usize) -> Task<ConsensusAction> {
+    fn next_task(&mut self, page: usize) -> Task<Action> {
         self.server
-            .bind_handle(Task::done(ConsensusAction::Consensus(page + 1)))
+            .bind_handle(Task::done(Action::Consensus(page + 1)))
     }
 
-    pub fn consensus_page(&mut self, page: usize) -> Result<Task<ConsensusAction>> {
+    pub fn consensus_page(&mut self, page: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
 
         if let Some(page) = self.pages.get_mut(page) {
@@ -165,7 +149,7 @@ impl Consensus {
         }
 
         let Some(pages) = self.pages.get(0..page + 1) else {
-            return Ok(Task::done(ServerAction::Abort.into()));
+            return Ok(Task::done(server::Action::Abort.into()));
         };
 
         let candidates = candidates_map(&self.candidates, page);
@@ -175,10 +159,10 @@ impl Consensus {
 
         Ok(task
             .chain(complete_task)
-            .chain(Task::done(ServerAction::Abort.into())))
+            .chain(Task::done(server::Action::Abort.into())))
     }
 
-    pub fn consensus_part(&mut self, page: usize, part: usize) -> Result<Task<ConsensusAction>> {
+    pub fn consensus_part(&mut self, page: usize, part: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
 
         if let Some(page) = self.pages.get_mut(page) {
@@ -188,7 +172,7 @@ impl Consensus {
         }
 
         let Some(pages) = self.pages.get(0..page + 1) else {
-            return Ok(Task::done(ServerAction::Abort.into()));
+            return Ok(Task::done(server::Action::Abort.into()));
         };
 
         let candidates = candidates_map(&self.candidates, page);
@@ -198,11 +182,11 @@ impl Consensus {
             .consensus_part(pages, candidates, model, page, part)?;
         let complete_task = self
             .server
-            .bind_handle(Task::done(ConsensusAction::PageComplete(page)));
+            .bind_handle(Task::done(Action::PageComplete(page)));
 
         Ok(task
             .chain(complete_task)
-            .chain(Task::done(ServerAction::Abort.into())))
+            .chain(Task::done(server::Action::Abort.into())))
     }
 
     fn set_page(&mut self, page: usize) {
@@ -242,7 +226,7 @@ impl Consensus {
         };
     }
 
-    pub fn save_pages(&mut self, path: PathBuf) -> Task<ConsensusAction> {
+    pub fn save_pages(&mut self, path: PathBuf) -> Task<Action> {
         let tasks = self.pages.iter().map(|page| {
             let file_path = path
                 .join(page.path.file_name().unwrap())
@@ -265,7 +249,7 @@ impl Consensus {
         Task::batch(tasks).discard()
     }
 
-    pub fn save_page(&mut self, name: String, page: usize) -> Task<ConsensusAction> {
+    pub fn save_page(&mut self, name: String, page: usize) -> Task<Action> {
         match self.pages.get(page) {
             Some(page) => {
                 let content: String = page
@@ -326,8 +310,8 @@ pub fn candidates_map(candidates: &Vec<Candidate>, page: usize) -> HashMap<&OsSt
     })
 }
 
-impl From<ServerAction> for ConsensusAction {
-    fn from(action: ServerAction) -> Self {
-        ConsensusAction::ServerAction(action)
+impl From<server::Action> for Action {
+    fn from(action: server::Action) -> Self {
+        Action::ServerAction(action)
     }
 }

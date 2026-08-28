@@ -1,10 +1,18 @@
-pub mod consensus;
-pub mod doc;
-pub mod format;
-pub mod page;
-pub mod server;
-pub mod translation;
-pub mod translator;
+mod consensus;
+mod doc;
+mod format;
+mod page;
+mod server;
+mod translation;
+mod translator;
+
+pub use consensus::*;
+pub use doc::*;
+pub use format::*;
+pub use page::*;
+pub use server::*;
+pub use translation::*;
+pub use translator::*;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, Default, Hash, PartialEq, Eq)]

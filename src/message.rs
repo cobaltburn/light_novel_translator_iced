@@ -1,10 +1,7 @@
 use crate::{
-    actions::{
-        consensus_action::ConsensusAction, doc_action::DocAction, format_action::FormatAction,
-        trans_action::TransAction,
-    },
+    actions::{consensus, doc, format, translation},
     error::Error,
-    model::translator::Translator,
+    model::Translator,
     view::View,
 };
 use iced::Task;
@@ -13,10 +10,10 @@ use std::path::PathBuf;
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum Message {
-    DocAction(DocAction),
-    TransAction(usize, TransAction),
-    FormatAction(FormatAction),
-    ConsensusAction(ConsensusAction),
+    DocAction(doc::Action),
+    TransAction(usize, translation::Action),
+    FormatAction(format::Action),
+    ConsensusAction(consensus::Action),
     SetView(View),
     ToggleSideBar,
     SelectTab(usize),
@@ -40,20 +37,20 @@ impl Translator {
     }
 }
 
-impl From<DocAction> for Message {
-    fn from(action: DocAction) -> Self {
+impl From<doc::Action> for Message {
+    fn from(action: doc::Action) -> Self {
         Message::DocAction(action)
     }
 }
 
-impl From<FormatAction> for Message {
-    fn from(action: FormatAction) -> Self {
+impl From<format::Action> for Message {
+    fn from(action: format::Action) -> Self {
         Message::FormatAction(action)
     }
 }
 
-impl From<ConsensusAction> for Message {
-    fn from(action: ConsensusAction) -> Self {
+impl From<consensus::Action> for Message {
+    fn from(action: consensus::Action) -> Self {
         Message::ConsensusAction(action)
     }
 }
