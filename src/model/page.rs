@@ -1,4 +1,8 @@
-use crate::{actions::contains_japanese, model::Activity, view::DisplayType};
+use crate::{
+    actions::{clean_invisible_chars, contains_japanese},
+    model::Activity,
+    view::DisplayType,
+};
 use iced::{
     Color, Element,
     alignment::Horizontal,
@@ -22,7 +26,7 @@ const JACCARD_TOLERANCE: f64 = 0.25;
 const FREQUENCY_TOLERANCE: f64 = 10.0;
 const SECTION_CAPACITY: usize = 8 * 1024;
 const MIN_PERCENT: f64 = 70.0;
-const MAX_PERCENT: f64 = 100.0;
+const MAX_PERCENT: f64 = 105.0;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -307,6 +311,29 @@ impl Section {
             DisplayType::Full => self.content.as_str().into(),
             DisplayType::Japanese => self.japanese.as_str().into(),
         }
+    }
+
+    pub fn clean(&mut self) {
+        self.content = clean_invisible_chars(&self.content);
+        self.content = self.content.replace(['“', '”'], "\"");
+        self.split_lines();
+    }
+
+    fn split_lines(&mut self) {
+        let lines: Vec<_> = self.content.lines().collect();
+        let mut text = Vec::new();
+        for [l1, l2] in lines.array_windows() {
+            text.push(*l1);
+            if !l1.is_empty() && !l2.is_empty() {
+                text.push("");
+            }
+        }
+
+        if let Some(last) = lines.last() {
+            text.push(last);
+        };
+
+        self.content = text.join("\n")
     }
 }
 

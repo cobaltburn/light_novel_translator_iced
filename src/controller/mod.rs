@@ -3,12 +3,14 @@ use std::{io::Cursor, path::PathBuf};
 
 mod builder;
 mod client;
+mod html_writer;
 mod parse;
 mod prompts;
 mod xml;
 
 pub use builder::*;
 pub use client::*;
+pub use html_writer::*;
 pub use parse::*;
 pub use prompts::*;
 pub use xml::*;

@@ -22,10 +22,7 @@ pub struct FormatPage {
 
 impl From<(PathBuf, String)> for FormatPage {
     fn from((path, content): (PathBuf, String)) -> Self {
-        FormatPage {
-            path,
-            content: content,
-        }
+        FormatPage { path, content }
     }
 }
 

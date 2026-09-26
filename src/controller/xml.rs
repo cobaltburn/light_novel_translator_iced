@@ -3,16 +3,15 @@ use bstr::ByteSlice;
 use pulldown_cmark::{Options, Parser, html::push_html};
 use quick_xml::{
     Reader, Writer, XmlVersion,
-    escape::escape,
     events::{BytesStart, Event},
 };
 use regex::Regex;
 use std::{borrow::Cow, io::Cursor, os::unix::ffi::OsStrExt, path::PathBuf};
 
-pub fn to_xml(markdown: &str) -> String {
-    let markdown = escape(markdown);
-    let mut html = String::with_capacity(markdown.len());
+pub fn to_html(markdown: &str) -> String {
+    // let markdown = escape(markdown);
     let parser = Parser::new_ext(&markdown, Options::all());
+    let mut html = String::with_capacity(markdown.len());
     push_html(&mut html, parser);
     html
 }
@@ -198,8 +197,6 @@ pub fn image_position(html: &str) -> Result<Vec<(BytesStart<'_>, f64)>> {
     }
 
     images.sort_by_key(|(_, i)| *i);
-    // A page with images but no <p> tags has nothing to position against, so
-    // the images lead the page instead of becoming NaN ratios that never match.
     let images = images
         .into_iter()
         .map(|(tag, i)| {

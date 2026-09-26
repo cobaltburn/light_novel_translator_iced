@@ -1,8 +1,5 @@
 use crate::{
-    actions::{
-        clean_invisible_chars, complete_dialog, get_pages, load_recovery, pick_save_folder,
-        save_file, server,
-    },
+    actions::{complete_dialog, get_pages, load_recovery, pick_save_folder, save_file, server},
     controller::{part_tag, remove_think_tags},
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::select_epub,
@@ -75,7 +72,6 @@ impl Translation {
             Action::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .ok_or_display(|(name, pages)| Task::done(Action::SetEpub { name, pages })),
-
             Action::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
                 .map_err(Error::from)
@@ -106,6 +102,10 @@ impl Translation {
                 .map(|s| s.content.as_str())
                 .unwrap_or_default();
         }
+
+        self.pages
+            .iter_mut()
+            .for_each(|p| p.sections.iter_mut().for_each(|s| s.clean()));
 
         Ok(())
     }
@@ -302,8 +302,7 @@ impl Translation {
     fn clean_text(&mut self, page: usize, part: usize) {
         if let Some(page) = self.pages.get_mut(page) {
             if let Some(section) = page.sections.get_mut(part) {
-                section.content = clean_invisible_chars(&section.content);
-                section.content = section.content.replace(['“', '”'], "\"");
+                section.clean();
             }
         };
     }

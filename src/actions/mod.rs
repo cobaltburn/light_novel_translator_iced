@@ -1,10 +1,9 @@
 use crate::{
-    controller::{get_ordered_path, partition_text, strip_syosetu_tags, strip_tags},
+    controller::{get_ordered_path, html_to_markdown, is_empty_section, partition_text},
     error::{Error, Result},
     model::Page,
 };
 use epub::doc::EpubDoc;
-use html2md::rewrite_html;
 use std::{
     ffi::OsStr,
     io::Cursor,
@@ -81,18 +80,14 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
             let html = epub
                 .get_resource_str_by_path(&path)
                 .ok_or(Error::Error(format!("Invalid file in epub: {:#?}", path)))?;
-            let html = strip_syosetu_tags(&html)?;
-            let html = strip_tags(&html)?;
-            let markdown = rewrite_html(&html, false);
-            let markdown: Vec<_> = markdown.lines().map(|s| s.trim()).collect();
-            Ok((path, markdown.join("\n")))
+            Ok((path, html_to_markdown(&html)?))
         })
         .map(|result| {
             result.map(|(path, markdown)| {
                 let partitioned = partition_text(&markdown);
                 let sections = partitioned
                     .into_iter()
-                    .filter(|e| !e.trim_matches('#').is_empty())
+                    .filter(|e| !is_empty_section(e))
                     .collect();
                 Page::new(path, sections)
             })
