@@ -130,7 +130,7 @@ impl Server {
 
                 self.client.translate_history(
                     &section.japanese,
-                    &model,
+                    model,
                     history,
                     self.settings.clone(),
                     page,
@@ -139,7 +139,7 @@ impl Server {
             }
             _ => self.client.translate(
                 &section.japanese,
-                &model,
+                model,
                 self.settings.clone(),
                 page,
                 part,

@@ -41,7 +41,7 @@ impl Consensus {
         self.candidates
             .iter()
             .enumerate()
-            .map(|(i, Candidate { name, .. })| Item::new(candidate_select(Some(i), &name)))
+            .map(|(i, Candidate { name, .. })| Item::new(candidate_select(Some(i), name)))
             .chain(once(Item::new(candidate_select(None, ""))))
             .collect()
     }

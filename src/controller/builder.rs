@@ -1,16 +1,14 @@
 use crate::{
     controller::{
-        DEFAULT_STYLESHEET, add_image_tags, get_ordered_path, image_position, insert_toc_ids,
-        partition_text, strip_syosetu_tags, strip_tags, to_html, update_image_paths,
-        update_style_path, write_body, write_header,
+        DEFAULT_STYLESHEET, Nav, TOC_PAGE_STEM, get_ordered_path, html_to_markdown, image_anchors,
+        insert_anchors, markdown_sections, parse_links, read_toc, strip_syosetu_tags, strip_tags,
+        to_html, update_image_paths, update_style_path, write_body, write_header,
     },
     error::{Error, Result},
     model::{EpubMetadata, FormatPage},
 };
-use epub::doc::{EpubDoc, NavPoint, ResourceItem};
+use epub::doc::{EpubDoc, ResourceItem};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, TocElement, ZipLibrary};
-use html2md::rewrite_html;
-use pulldown_cmark::{Parser, Tag, TagEnd};
 use quick_xml::{
     Reader, Writer, XmlVersion,
     events::{BytesDecl, BytesStart, Event},
@@ -27,7 +25,6 @@ use std::{
 const XHTML_MIME: &str = "application/xhtml+xml";
 const CSS_MIME: &str = "text/css";
 const JS_MIME: &str = "application/javascript";
-const NCX_MIME: &str = "application/x-dtbncx+xml";
 
 #[derive(Debug)]
 pub struct DocBuilder {
@@ -46,16 +43,9 @@ impl DocBuilder {
         pages: Vec<FormatPage>,
         metadata: EpubMetadata,
     ) -> Result<Self> {
-        use epub::doc::EpubVersion;
-
-        let toc = match epub.version {
-            EpubVersion::Version3_0 => get_nav_doc(&mut epub)
-                .and_then(|html| parse_nav_doc(&html).ok())
-                .unwrap_or_default(),
-            EpubVersion::Version2_0 | EpubVersion::Unknown(_) => get_ncx(&mut epub)
-                .and_then(|ncx| parse_ncx(&ncx).ok())
-                .unwrap_or_default(),
-        };
+        let toc = read_toc(&mut epub)
+            .map(|(_, navs)| navs)
+            .unwrap_or_default();
 
         Ok(DocBuilder {
             epub,
@@ -195,6 +185,9 @@ impl DocBuilder {
             })
             .collect::<Result<_>>()?;
 
+        let mut chapters = self.chapters();
+        let toc_ids = self.toc_ids();
+
         let pages: HashMap<_, _> = self
             .pages
             .iter()
@@ -203,8 +196,6 @@ impl DocBuilder {
 
         let mut count = 0;
         let mut contents = Vec::new();
-        let mut chapters = self.chapters();
-        let toc_ids = self.toc_ids();
 
         for (href, md_file, html) in file_parts {
             let md_name = md_file.file_name().unwrap_or_default();
@@ -229,7 +220,7 @@ impl DocBuilder {
                 let mut links = links.into_iter().enumerate();
                 let title = links.next().and_then(|(_, link)| link.title);
                 content = content.title(title.unwrap_or(format!("Chapter: {}", count)));
-                content = links.fold(content, |content, (i, Link { path, title })| {
+                content = links.fold(content, |content, (i, TocLink { path, title })| {
                     let title = title.unwrap_or(format!("Chapter: {}-{}", count, i + 1));
                     content.child(TocElement::new(format!("Text/{path}"), title))
                 });
@@ -252,8 +243,10 @@ impl DocBuilder {
             .collect()
     }
 
-    pub fn chapters(&self) -> HashMap<String, Vec<Link>> {
-        let mut titles = self.links();
+    pub fn chapters(&mut self) -> HashMap<String, Vec<TocLink>> {
+        let toc_links = self.get_toc_links().unwrap_or_default();
+        let mut links = self.links();
+        links.extend(toc_links);
         let mut chapters: HashMap<_, Vec<_>> = HashMap::new();
 
         for nav in &self.toc {
@@ -265,43 +258,33 @@ impl DocBuilder {
                 .split_once('#')
                 .map_or(path.as_str(), |(file, _)| file)
                 .to_string();
-            let title = titles.remove(&path);
+            let title = links.remove(&path);
 
-            chapters.entry(file).or_default().push(Link { path, title });
+            chapters
+                .entry(file)
+                .or_default()
+                .push(TocLink { path, title });
         }
 
         chapters
     }
 
     pub fn links(&self) -> HashMap<String, String> {
-        use pulldown_cmark::Event;
-
         let mut links = HashMap::new();
         for FormatPage { content, .. } in &self.pages {
-            let mut link: Option<(String, String)> = None;
-            for event in Parser::new(content) {
-                match event {
-                    Event::Start(Tag::Link { dest_url, .. }) => {
-                        link = Some((dest_url.into_string(), String::new()));
-                    }
-                    Event::Text(text) => {
-                        if let Some((_, title)) = &mut link {
-                            title.push_str(&text);
-                        }
-                    }
-                    Event::End(TagEnd::Link) => {
-                        if let Some((url, title)) = link.take()
-                            && !title.is_empty()
-                        {
-                            links.insert(url, title);
-                        }
-                    }
-                    _ => (),
-                }
-            }
+            links.extend(parse_links(content));
         }
 
         links
+    }
+
+    pub fn get_toc_links(&mut self) -> Option<HashMap<String, String>> {
+        let i = self
+            .pages
+            .iter()
+            .position(|p| p.path.file_stem() == Some(OsStr::new(TOC_PAGE_STEM)))?;
+
+        Some(parse_links(&self.pages.remove(i).content))
     }
 
     pub fn toc_ids(&self) -> Vec<String> {
@@ -315,33 +298,75 @@ impl DocBuilder {
 }
 
 #[derive(Debug)]
-pub struct IdPosition {
-    pub id: String,
+pub enum Anchor {
+    Id(String),
+    Image(BytesStart<'static>),
+}
+
+#[derive(Debug)]
+pub struct AnchorPosition {
+    pub anchor: Anchor,
     pub section: usize,
     pub line: usize,
     pub position: f64,
 }
 
-pub fn id_positions(html: &str, toc_ids: &[String]) -> Result<Vec<IdPosition>> {
-    let html = strip_syosetu_tags(html)?;
-    let html = strip_tags(&html)?;
-    let matched_ids = match_ids(&html, &toc_ids)?;
-    let markdown = rewrite_html(&html, false);
+/// Converts html to markdown and partitions it the same way it is partitioned for translation.
+fn section_markdown(html: &str) -> Result<Vec<String>> {
+    Ok(markdown_sections(&html_to_markdown(html)?))
+}
 
-    let positions = partition_text(&markdown)
+fn line_position(lines: &[&str], text: &str) -> Option<(usize, f64)> {
+    let line = lines.iter().position(|l| l.contains(text))?;
+    Some((line, line as f64 / lines.len() as f64))
+}
+
+pub fn id_positions(html: &str, toc_ids: &[String]) -> Result<Vec<AnchorPosition>> {
+    let sections = section_markdown(html)?;
+    let html = strip_tags(&strip_syosetu_tags(html)?)?;
+    let matched_ids = match_ids(&html, toc_ids)?;
+
+    let positions = sections
         .iter()
         .enumerate()
         .flat_map(|(section, content)| {
             let lines: Vec<_> = content.lines().collect();
             matched_ids.iter().filter_map(move |(id, text)| {
-                let line = lines.iter().position(|l| l.contains(text.as_str()))?;
-                Some(IdPosition {
-                    id: id.clone(),
+                let (line, position) = line_position(&lines, text)?;
+                Some(AnchorPosition {
+                    anchor: Anchor::Id(id.clone()),
                     section,
                     line,
-                    position: line as f64 / lines.len() as f64,
+                    position,
                 })
             })
+        })
+        .collect();
+
+    Ok(positions)
+}
+
+pub fn image_positions(html: &str) -> Result<Vec<AnchorPosition>> {
+    let sections = section_markdown(html)?;
+    let sections: Vec<Vec<_>> = sections.iter().map(|s| s.lines().collect()).collect();
+    let last_section = sections.len().saturating_sub(1);
+
+    let positions = image_anchors(html)?
+        .into_iter()
+        .map(|(tag, text)| {
+            let found = text.and_then(|text| {
+                sections.iter().enumerate().find_map(|(section, lines)| {
+                    let (line, position) = line_position(lines, &text)?;
+                    Some((section, line, position))
+                })
+            });
+            let (section, line, position) = found.unwrap_or((last_section, usize::MAX, 1.0));
+            AnchorPosition {
+                anchor: Anchor::Image(tag),
+                section,
+                line,
+                position,
+            }
         })
         .collect();
 
@@ -415,13 +440,11 @@ fn to_text_path(path: &Path) -> Result<PathBuf> {
 }
 
 pub fn build_html(html: &str, content: &str, toc_ids: &[String]) -> Result<String> {
-    let id_positions = id_positions(html, toc_ids)?;
-    let content = insert_toc_ids(&content, id_positions);
+    let mut anchors = id_positions(html, toc_ids)?;
+    anchors.extend(image_positions(html)?);
+    let content = insert_anchors(content, anchors)?;
     let content = replace_jp_symbols(&content);
     let content = to_html(&content);
-
-    let images = image_position(html)?;
-    let content = add_image_tags(&content, images)?;
 
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
@@ -446,125 +469,56 @@ pub fn replace_jp_symbols(text: &str) -> String {
         .replace("『", "\"")
 }
 
-pub fn get_nav_doc(epub: &mut EpubDoc<Cursor<Vec<u8>>>) -> Option<String> {
-    let ResourceItem { path, .. } = epub.resources.get("toc")?;
-    epub.get_resource_str_by_path(path.clone())
-}
-
-pub fn parse_nav_doc(html: &str) -> Result<Vec<Nav>> {
-    let mut reader = Reader::from_str(html);
-    reader.config_mut().trim_text(true);
-    let nav_xml = loop {
-        match reader.read_event()? {
-            Event::Start(tag) if is_nav_toc(&tag) => {
-                break reader.read_text(tag.name())?;
-            }
-            Event::Eof => return Ok(Vec::new()),
-            _ => (),
-        }
-    };
-
-    let nav_html = nav_xml.into_inner();
-    let mut reader = Reader::from_reader(nav_html.as_ref());
-    let mut navs: Vec<Nav> = Vec::new();
-    loop {
-        match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"a" => {
-                if let Some(href) = tag.try_get_attribute("href")? {
-                    let path = href.normalized_value(XmlVersion::Implicit1_0)?;
-                    let path = PathBuf::from(path.as_ref());
-                    let label = reader.read_text(tag.name())?.xml10_content()?.to_string();
-                    navs.push(Nav { label, path });
-                }
-            }
-            Event::Eof => break,
-            _ => (),
-        }
-    }
-    Ok(navs)
-}
-
-pub fn is_nav_toc(tag: &BytesStart<'_>) -> bool {
-    tag.try_get_attribute("epub:type")
-        .ok()
-        .flatten()
-        .and_then(|a| a.normalized_value(XmlVersion::Implicit1_0).ok())
-        .is_some_and(|a| a == "toc")
-}
-
-pub fn get_ncx(epub: &mut EpubDoc<Cursor<Vec<u8>>>) -> Option<String> {
-    let (_, ResourceItem { path, .. }) = epub.resources.iter().find(|(_, r)| r.mime == NCX_MIME)?;
-    epub.get_resource_str_by_path(path.clone())
-}
-
-pub fn parse_ncx(ncx: &str) -> Result<Vec<Nav>> {
-    let mut reader = Reader::from_str(ncx);
-    reader.config_mut().trim_text(true);
-
-    let mut navs: Vec<Nav> = Vec::new();
-    let mut open: Vec<usize> = Vec::new();
-    let mut in_label = false;
-
-    loop {
-        match reader.read_event()? {
-            Event::Start(tag) => match tag.name().as_ref() {
-                b"navPoint" => {
-                    open.push(navs.len());
-                    navs.push(Nav::default());
-                }
-                b"navLabel" => in_label = true,
-                _ => (),
-            },
-            Event::End(tag) => match tag.name().as_ref() {
-                b"navPoint" => {
-                    open.pop();
-                }
-                b"navLabel" => in_label = false,
-                _ => (),
-            },
-            Event::Text(text) if in_label => {
-                if let Some(&i) = open.last() {
-                    navs[i].label.push_str(&text.xml10_content()?);
-                }
-            }
-            Event::Empty(tag) if tag.name().as_ref() == b"content" => {
-                if let Some(&i) = open.last()
-                    && let Some(src) = tag.try_get_attribute("src")?
-                {
-                    let value = src.normalized_value(XmlVersion::Implicit1_0)?;
-                    navs[i].path = PathBuf::from(value.as_ref());
-                }
-            }
-            Event::Eof => break,
-            _ => (),
-        }
-    }
-
-    Ok(navs)
-}
-
 #[derive(Debug)]
-pub struct Link {
+pub struct TocLink {
     pub path: String,
     pub title: Option<String>,
 }
 
-#[derive(Debug, Default)]
-pub struct Nav {
-    pub label: String,
-    pub path: PathBuf,
-}
-
-impl From<NavPoint> for Nav {
-    fn from(NavPoint { label, content, .. }: NavPoint) -> Self {
-        Self {
-            label,
-            path: content,
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
-    // use super::*;
+    use super::*;
+
+    const HTML: &str = r#"<html><head><title>Title</title></head><body>
+<p>first line</p>
+<p><img src="a.jpg"/></p>
+<p>second line</p>
+<p>third line</p>
+<p><img src="b.jpg"/></p>
+</body></html>"#;
+
+    #[test]
+    fn image_anchors_use_following_text() {
+        let anchors = image_anchors(HTML).unwrap();
+        let texts: Vec<_> = anchors.iter().map(|(_, t)| t.as_deref()).collect();
+        assert_eq!(texts, [Some("second line"), None]);
+    }
+
+    #[test]
+    fn image_positions_are_section_relative() {
+        let positions = image_positions(HTML).unwrap();
+        assert_eq!(positions.len(), 2);
+        assert_eq!(positions[0].section, 0);
+        assert!(positions[0].position > 0.0 && positions[0].position < 1.0);
+        assert_eq!(positions[1].position, 1.0);
+    }
+
+    #[test]
+    fn insert_anchors_places_images_in_section() {
+        let content = "<part>1</part>\n\none\n\ntwo\n\n<part>2</part>\n\nthree\n\nfour\n";
+        let tag = BytesStart::new("img").with_attributes([("src", "../Images/a.jpg")]);
+        let anchors = vec![AnchorPosition {
+            anchor: Anchor::Image(tag.into_owned()),
+            section: 1,
+            line: 3,
+            position: 0.5,
+        }];
+        let output = insert_anchors(content, anchors).unwrap();
+        let image = output.find("<img").unwrap();
+        assert!(output.find("three").unwrap() < image);
+        assert!(image < output.find("four").unwrap());
+
+        let html = to_html(&output);
+        assert!(html.contains("<p>four</p>"));
+    }
 }

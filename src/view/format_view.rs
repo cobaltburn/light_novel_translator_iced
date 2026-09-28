@@ -83,7 +83,7 @@ fn epub_button(model: &Format) -> Row<'_, Action> {
 }
 
 fn epub_image(model: &Format) -> Element<'_, Action> {
-    let cover_image = model.cover.as_ref().map(|handle| image(handle));
+    let cover_image = model.cover.as_ref().map(image);
     container(cover_image)
         .padding(10)
         .height(Length::Fill)

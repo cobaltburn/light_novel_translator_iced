@@ -41,11 +41,7 @@ pub struct Page {
 
 impl Page {
     pub fn new(path: PathBuf, sections: Vec<String>) -> Self {
-        let sections = sections
-            .into_iter()
-            .map(|japanese| Section::new(japanese))
-            .collect();
-
+        let sections = sections.into_iter().map(Section::new).collect();
         Page {
             path,
             sections,

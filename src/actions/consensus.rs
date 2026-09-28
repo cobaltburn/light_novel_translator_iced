@@ -11,7 +11,12 @@ use crate::{
 };
 use iced::Task;
 use regex::Regex;
-use std::{collections::HashMap, ffi::OsStr, path::PathBuf, sync::LazyLock};
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::OsStr,
+    path::PathBuf,
+    sync::LazyLock,
+};
 use tokio::fs;
 
 static PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<part>\d+</part>").unwrap());
@@ -121,7 +126,7 @@ impl Consensus {
             return Ok(Task::future(complete_dialog(file_name.clone())).discard());
         };
 
-        let candidates = candidates_map(&self.candidates, page);
+        let candidates = candidates_map(&self.candidates, pages);
 
         let task = self.server.consensus(pages, candidates, &model, page)?;
         let complete_task = self.complete_task(page);
@@ -152,7 +157,7 @@ impl Consensus {
             return Ok(Task::done(server::Action::Abort.into()));
         };
 
-        let candidates = candidates_map(&self.candidates, page);
+        let candidates = candidates_map(&self.candidates, pages);
 
         let task = self.server.consensus(pages, candidates, &model, page)?;
         let complete_task = self.complete_task(page);
@@ -175,7 +180,7 @@ impl Consensus {
             return Ok(Task::done(server::Action::Abort.into()));
         };
 
-        let candidates = candidates_map(&self.candidates, page);
+        let candidates = candidates_map(&self.candidates, pages);
 
         let task = self
             .server
@@ -219,10 +224,10 @@ impl Consensus {
     }
 
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {
-        if let Some(page) = self.pages.get_mut(page) {
-            if let Some(section) = page.sections.get_mut(part) {
-                section.content.push_str(&content);
-            };
+        if let Some(page) = self.pages.get_mut(page)
+            && let Some(section) = page.sections.get_mut(part)
+        {
+            section.content.push_str(&content);
         };
     }
 
@@ -268,10 +273,10 @@ impl Consensus {
     }
 
     fn clean_text(&mut self, page: usize, part: usize) {
-        if let Some(page) = self.pages.get_mut(page) {
-            if let Some(section) = page.sections.get_mut(part) {
-                section.content = clean_invisible_chars(&section.content).replace(['“', '”'], "\"");
-            }
+        if let Some(page) = self.pages.get_mut(page)
+            && let Some(section) = page.sections.get_mut(part)
+        {
+            section.content = clean_invisible_chars(&section.content).replace(['“', '”'], "\"");
         };
     }
 
@@ -300,14 +305,24 @@ impl Consensus {
     }
 }
 
-pub fn candidates_map(candidates: &Vec<Candidate>, page: usize) -> HashMap<&OsStr, Vec<&[String]>> {
-    let candidates = candidates.iter().map(|e| &e.pages[..page + 1]).flatten();
+/// Groups candidate translations by file stem, keeping only the pages that
+/// match `pages` (matched by stem, since candidate folders are unordered and
+/// may contain fewer pages than the epub).
+pub fn candidates_map<'a>(
+    candidates: &'a [Candidate],
+    pages: &[Page],
+) -> HashMap<&'a OsStr, Vec<&'a [String]>> {
+    let stems: HashSet<_> = pages.iter().filter_map(|p| p.path.file_stem()).collect();
 
-    candidates.fold(HashMap::new(), |mut acc, (p, e)| {
-        let name = p.file_stem().unwrap();
-        acc.entry(name).or_insert_with(Vec::new).push(e);
-        acc
-    })
+    candidates
+        .iter()
+        .flat_map(|c| &c.pages)
+        .filter_map(|(p, e)| Some((p.file_stem()?, e)))
+        .filter(|(name, _)| stems.contains(name))
+        .fold(HashMap::new(), |mut acc, (name, e)| {
+            acc.entry(name).or_insert_with(Vec::new).push(e.as_slice());
+            acc
+        })
 }
 
 impl From<server::Action> for Action {

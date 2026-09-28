@@ -1,5 +1,8 @@
 use crate::{
-    controller::{get_ordered_path, html_to_markdown, is_empty_section, partition_text},
+    controller::{
+        TOC_PAGE_STEM, get_ordered_path, html_to_markdown, markdown_sections, nav_to_markdown,
+        read_toc,
+    },
     error::{Error, Result},
     model::Page,
 };
@@ -7,6 +10,7 @@ use epub::doc::EpubDoc;
 use std::{
     ffi::OsStr,
     io::Cursor,
+    iter,
     path::{Path, PathBuf},
 };
 use tokio::fs::{self, read_dir, read_to_string};
@@ -74,6 +78,12 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
     let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
     let paths = get_ordered_path(&epub);
 
+    let toc = read_toc(&mut epub).and_then(|(_, navs)| {
+        let markdown = nav_to_markdown(&navs).ok()?;
+        let path = PathBuf::from(TOC_PAGE_STEM).with_extension("xhtml");
+        (!markdown.is_empty()).then_some(Page::new(path, vec![markdown]))
+    });
+
     let pages: Result<Vec<_>> = paths
         .into_iter()
         .map(|path| {
@@ -82,20 +92,12 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
                 .ok_or(Error::Error(format!("Invalid file in epub: {:#?}", path)))?;
             Ok((path, html_to_markdown(&html)?))
         })
-        .map(|result| {
-            result.map(|(path, markdown)| {
-                let partitioned = partition_text(&markdown);
-                let sections = partitioned
-                    .into_iter()
-                    .filter(|e| !is_empty_section(e))
-                    .collect();
-                Page::new(path, sections)
-            })
-        })
+        .map(|result| result.map(|(path, markdown)| Page::new(path, markdown_sections(&markdown))))
         .collect();
 
-    let pages: Vec<_> = pages?
-        .into_iter()
+    let pages: Vec<_> = iter::once(toc)
+        .flatten()
+        .chain(pages?)
         .filter(|p| !p.sections.is_empty())
         .collect();
 

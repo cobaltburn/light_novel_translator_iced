@@ -6,6 +6,7 @@ mod client;
 mod html_writer;
 mod parse;
 mod prompts;
+mod toc;
 mod xml;
 
 pub use builder::*;
@@ -13,6 +14,7 @@ pub use client::*;
 pub use html_writer::*;
 pub use parse::*;
 pub use prompts::*;
+pub use toc::*;
 pub use xml::*;
 
 pub fn get_ordered_path(epub: &EpubDoc<Cursor<Vec<u8>>>) -> Vec<PathBuf> {

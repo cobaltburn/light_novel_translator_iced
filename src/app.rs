@@ -22,8 +22,6 @@ pub const ICONS: LazyCell<PathBuf> = LazyCell::new(|| {
         .join("icons")
 });
 
-pub const PID: LazyCell<u32> = LazyCell::new(|| std::process::id());
-
 pub const RECOVERY_DIR: LazyCell<PathBuf> =
     LazyCell::new(|| std::env::temp_dir().join("light_novel_translator"));
 

@@ -6,11 +6,15 @@ use quick_xml::{
     events::{BytesStart, Event},
 };
 use regex::Regex;
-use std::{borrow::Cow, io::Cursor, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{
+    borrow::Cow,
+    io::Cursor,
+    os::unix::ffi::OsStrExt,
+    path::{Path, PathBuf},
+};
 
 pub fn to_html(markdown: &str) -> String {
-    // let markdown = escape(markdown);
-    let parser = Parser::new_ext(&markdown, Options::all());
+    let parser = Parser::new_ext(markdown, Options::all());
     let mut html = String::with_capacity(markdown.len());
     push_html(&mut html, parser);
     html
@@ -122,7 +126,7 @@ pub fn update_style_path(html: &str) -> Result<String> {
 
 pub fn update_tag_path(
     tag: BytesStart<'_>,
-    folder: &PathBuf,
+    folder: &Path,
     attr: &str,
 ) -> Result<BytesStart<'static>> {
     let Some(link) = tag.try_get_attribute(attr)? else {
@@ -160,53 +164,38 @@ pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
     }
 }
 
-pub fn count_lines(html: &str) -> Result<usize> {
-    let mut reader = Reader::from_str(html);
-    let mut count = 0;
-    loop {
-        match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"p" => count += 1,
-            Event::Eof => break,
-            _ => (),
-        }
-    }
-
-    Ok(count)
-}
-
-pub fn image_position(html: &str) -> Result<Vec<(BytesStart<'_>, f64)>> {
+/// Pairs each image tag with the first non-empty text that follows it,
+/// or `None` if no text follows the image.
+pub fn image_anchors(html: &str) -> Result<Vec<(BytesStart<'static>, Option<String>)>> {
     let folder = PathBuf::from("../Images");
-    let mut reader = Reader::from_str(html);
-    let mut count = 0;
-    let mut images = vec![];
+    let html = strip_syosetu_tags(html)?;
+    let mut reader = Reader::from_str(&html);
+    let mut anchors = vec![];
+    let mut pending = vec![];
 
     loop {
         match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"p" => count += 1,
+            Event::Start(tag) if tag.name().as_ref() == b"head" => {
+                reader.read_to_end(tag.name())?;
+            }
             Event::Empty(tag) if tag.name().as_ref() == IMG_BYTES => {
-                let tag = update_tag_path(tag, &folder, SRC)?;
-                images.push((tag, count))
+                pending.push(update_tag_path(tag, &folder, SRC)?);
             }
             Event::Empty(tag) if tag.name().as_ref() == IMAGE_BYTES => {
-                let tag = update_tag_path(tag, &folder, XLINK)?;
-                images.push((tag, count))
+                pending.push(update_tag_path(tag, &folder, XLINK)?);
+            }
+            Event::Text(text) if !pending.is_empty() => {
+                let text = text.xml10_content()?;
+                let text = text.trim();
+                if !text.is_empty() {
+                    anchors.extend(pending.drain(..).map(|tag| (tag, Some(text.to_string()))));
+                }
             }
             Event::Eof => break,
             _ => (),
         }
     }
 
-    images.sort_by_key(|(_, i)| *i);
-    let images = images
-        .into_iter()
-        .map(|(tag, i)| {
-            let position = if count == 0 {
-                0.0
-            } else {
-                i as f64 / count as f64
-            };
-            (tag, position)
-        })
-        .collect();
-    Ok(images)
+    anchors.extend(pending.into_iter().map(|tag| (tag, None)));
+    Ok(anchors)
 }

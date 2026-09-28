@@ -1,5 +1,5 @@
 use crate::{
-    controller::{IdPosition, count_lines, extract_head, update_tag_path},
+    controller::{Anchor, AnchorPosition, extract_head, update_tag_path},
     error::Result,
 };
 use quick_xml::{
@@ -13,6 +13,7 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Write as _,
     io::{self, Cursor},
+    mem,
     path::PathBuf,
     sync::LazyLock,
 };
@@ -82,42 +83,6 @@ pub fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, content: &str) -> Result
     Ok(())
 }
 
-pub fn add_image_tags(content: &str, mut images: Vec<(BytesStart<'_>, f64)>) -> Result<String> {
-    let lines = count_lines(content)?;
-    let mut reader = Reader::from_str(content);
-    reader.config_mut().trim_text(true);
-
-    let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
-
-    let mut line_count = 0;
-    images.sort_by(|(_, a), (_, b)| a.total_cmp(b));
-    let mut images = VecDeque::from(images);
-
-    loop {
-        match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"p" => {
-                line_count += 1;
-                let position = line_count as f64 / lines as f64;
-
-                let mut image_tags = Vec::new();
-                while let Some((tag, _)) = images.pop_front_if(|&mut (_, i)| position >= i) {
-                    image_tags.push(tag);
-                }
-
-                write_image_tags(&mut writer, image_tags)?;
-                writer.write_event(Event::Start(tag))?;
-            }
-            Event::Eof => break,
-            e => writer.write_event(e)?,
-        }
-    }
-
-    let remaining: Vec<_> = images.into_iter().map(|(tag, _)| tag).collect();
-    write_image_tags(&mut writer, remaining)?;
-
-    Ok(String::from_utf8(writer.into_inner().into_inner())?)
-}
-
 fn write_image_tags(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     image_tags: Vec<BytesStart<'_>>,
@@ -144,10 +109,10 @@ fn write_image_tags(
 
 static PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<part>.*?</part>").unwrap());
 
-pub fn insert_toc_ids(content: &str, id_positions: Vec<IdPosition>) -> String {
-    let mut section_ids: HashMap<usize, Vec<IdPosition>> = HashMap::new();
-    for p in id_positions {
-        section_ids.entry(p.section).or_default().push(p);
+pub fn insert_anchors(content: &str, anchors: Vec<AnchorPosition>) -> Result<String> {
+    let mut section_anchors: HashMap<usize, Vec<AnchorPosition>> = HashMap::new();
+    for p in anchors {
+        section_anchors.entry(p.section).or_default().push(p);
     }
 
     let sections = PART_RE
@@ -157,31 +122,71 @@ pub fn insert_toc_ids(content: &str, id_positions: Vec<IdPosition>) -> String {
     let mut output = String::with_capacity(content.len());
 
     for (index, section) in sections.enumerate() {
-        let Some(mut ids) = section_ids.remove(&index) else {
+        let Some(mut anchors) = section_anchors.remove(&index) else {
             output.push_str(&section);
             continue;
         };
-        ids.sort_by(|a, b| a.position.total_cmp(&b.position));
-        let mut ids = VecDeque::from(ids);
+        anchors.sort_by(|a, b| a.position.total_cmp(&b.position));
+        let mut anchors = VecDeque::from(anchors);
 
         let line_count = section.lines().count();
         for (i, line) in section.lines().enumerate() {
             let position = i as f64 / line_count as f64;
-            while let Some(p) = ids.pop_front_if(|p| position >= p.position) {
-                write_id_div(&mut output, &p.id);
+            let mut popped = Vec::new();
+            while let Some(p) = anchors.pop_front_if(|p| position >= p.position) {
+                popped.push(p);
             }
+            write_anchors(&mut output, popped)?;
             output.push_str(line);
             output.push('\n');
         }
 
-        for p in ids {
-            write_id_div(&mut output, &p.id);
-        }
+        write_anchors(&mut output, anchors)?;
     }
 
-    output
+    // Anchors whose section is missing from the translated content are appended at the end
+    let mut remaining: Vec<_> = section_anchors.into_iter().collect();
+    remaining.sort_by_key(|(section, _)| *section);
+    for (_, mut anchors) in remaining {
+        anchors.sort_by(|a, b| a.position.total_cmp(&b.position));
+        write_anchors(&mut output, anchors)?;
+    }
+
+    Ok(output)
+}
+
+/// Writes anchors in order, grouping consecutive images into a single centered block.
+fn write_anchors(
+    output: &mut String,
+    anchors: impl IntoIterator<Item = AnchorPosition>,
+) -> Result<()> {
+    let mut images = Vec::new();
+    for AnchorPosition { anchor, .. } in anchors {
+        match anchor {
+            Anchor::Image(tag) => images.push(tag),
+            Anchor::Id(id) => {
+                write_image_block(output, mem::take(&mut images))?;
+                write_id_div(output, &id);
+            }
+        }
+    }
+    write_image_block(output, images)
 }
 
 fn write_id_div(output: &mut String, id: &str) {
     let _ = writeln!(output, "<div id=\"{}\"></div>", escape(id));
+}
+
+/// Writes the images as a markdown html block, followed by a blank line so the
+/// block is closed before the next line of text.
+fn write_image_block(output: &mut String, image_tags: Vec<BytesStart<'_>>) -> Result<()> {
+    if image_tags.is_empty() {
+        return Ok(());
+    }
+
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    write_image_tags(&mut writer, image_tags)?;
+    output.push_str(str::from_utf8(&writer.into_inner().into_inner())?);
+    output.push_str("\n\n");
+    Ok(())
 }

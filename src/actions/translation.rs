@@ -75,7 +75,7 @@ impl Translation {
             Action::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
                 .map_err(Error::from)
-                .ok_or_display(|path| Task::done(Action::SavePages(path).into())),
+                .ok_or_display(|path| Task::done(Action::SavePages(path))),
             Action::RecoverPages(pages) => self.recover_pages(pages).ok_or_display(),
             Action::Recover => Task::future(load_recovery())
                 .and_then(|pages| Task::done(Action::RecoverPages(pages))),
@@ -111,10 +111,10 @@ impl Translation {
     }
 
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {
-        if let Some(page) = self.pages.get_mut(page) {
-            if let Some(section) = page.sections.get_mut(part) {
-                section.content.push_str(&content);
-            };
+        if let Some(page) = self.pages.get_mut(page)
+            && let Some(section) = page.sections.get_mut(part)
+        {
+            section.content.push_str(&content);
         };
     }
 
@@ -300,10 +300,10 @@ impl Translation {
     }
 
     fn clean_text(&mut self, page: usize, part: usize) {
-        if let Some(page) = self.pages.get_mut(page) {
-            if let Some(section) = page.sections.get_mut(part) {
-                section.clean();
-            }
+        if let Some(page) = self.pages.get_mut(page)
+            && let Some(section) = page.sections.get_mut(part)
+        {
+            section.clean();
         };
     }
 }

@@ -48,7 +48,7 @@ impl Format {
     }
 
     fn set_pages(&mut self, name: String, pages: Vec<(PathBuf, String)>) {
-        self.pages = pages.into_iter().map(|e| FormatPage::from(e)).collect();
+        self.pages = pages.into_iter().map(FormatPage::from).collect();
         self.source_folder = name;
     }
 
