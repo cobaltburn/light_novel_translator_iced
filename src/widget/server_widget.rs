@@ -61,7 +61,7 @@ pub fn context_window_input(state: &Server) -> Element<'_, server::Action> {
             text("Context window:"),
             NumberInput::new(
                 &state.settings.context_window,
-                2..=10,
+                2..=20,
                 server::Action::SetWindow
             )
         ]
@@ -83,7 +83,7 @@ pub fn server_setting_input<'a>(
         row![
             text(setting),
             NumberInput::new(&value, range, on_change)
-                .ignore_buttons(true)
+                .step(0.1)
                 .ignore_scroll(true),
         ]
         .align_y(Vertical::Center)

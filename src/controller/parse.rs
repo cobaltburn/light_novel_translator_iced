@@ -1,7 +1,12 @@
-use std::{collections::HashMap, io::Cursor, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Cursor,
+    path::Path,
+    sync::LazyLock,
+};
 
 use crate::{
-    controller::{Nav, part_tag, strip_syosetu_tags, strip_tags},
+    controller::{Nav, insert_image_markers, part_tag, strip_syosetu_tags, strip_tags},
     error::Result,
 };
 use html2md::rewrite_html;
@@ -9,9 +14,42 @@ use pulldown_cmark::{Parser, Tag, TagEnd};
 use quick_xml::{Writer, events::BytesText};
 use regex::Regex;
 
+pub fn image_marker(n: usize) -> String {
+    format!("[[IMG:{n}]]")
+}
+
+/// Matches image markers, tolerating whitespace and markdown escapes added during translation.
+pub static IMAGE_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\\?\[\\?\[\s*IMG\s*:\s*(\d+)\s*\\?\]\\?\]").unwrap()
+});
+
+/// Whether the text has anything to translate besides image markers.
+pub fn has_translatable_text(text: &str) -> bool {
+    !markdown_sections(&IMAGE_MARKER_RE.replace_all(text, "")).is_empty()
+}
+
+pub fn image_marker_indices(content: &str) -> HashSet<usize> {
+    IMAGE_MARKER_RE
+        .captures_iter(content)
+        .filter_map(|caps| caps[1].parse().ok())
+        .collect()
+}
+
+/// Markdown without images, used to locate positions in the source text.
 pub fn html_to_markdown(html: &str) -> Result<String> {
     let html = strip_syosetu_tags(html)?;
-    let html = strip_tags(&html)?;
+    markdown_from_html(&html)
+}
+
+/// Markdown with images replaced by markers, used as the source text for translation.
+pub fn html_to_marked_markdown(html: &str) -> Result<String> {
+    let html = strip_syosetu_tags(html)?;
+    let html = insert_image_markers(&html)?;
+    markdown_from_html(&html)
+}
+
+fn markdown_from_html(html: &str) -> Result<String> {
+    let html = strip_tags(html)?;
     let markdown = rewrite_html(&html, false);
     let markdown: Vec<_> = markdown.lines().map(|s| s.trim()).collect();
     Ok(markdown.join("\n"))

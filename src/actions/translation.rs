@@ -50,13 +50,14 @@ pub enum Action {
 }
 
 impl Translation {
+    #[allow(clippy::unit_arg)]
     pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
             Action::ServerAction(action) => self.server.perform(action).map(Into::into),
             Action::SetPage(page) => self.set_current_page(page).into(),
             Action::CleanText { page, part } => self.clean_text(page, part).into(),
             Action::PageComplete(page) => self.check_complete(page).into(),
-            Action::CancelTranslate => self.cancel().into(),
+            Action::CancelTranslate => self.cancel(),
             Action::SavePages(path) => self.save_pages(path),
             Action::SetEpub { name, pages } => self.set_epub(name, pages).into(),
             Action::SavePage { name, page } => self.save_page(name, page),

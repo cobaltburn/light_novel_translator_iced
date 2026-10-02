@@ -1,5 +1,5 @@
 use crate::{
-    controller::{Anchor, AnchorPosition, extract_head, update_tag_path},
+    controller::{Anchor, AnchorPosition, IMAGE_MARKER_RE, extract_head, update_tag_path},
     error::Result,
 };
 use quick_xml::{
@@ -171,6 +171,33 @@ fn write_anchors(
         }
     }
     write_image_block(output, images)
+}
+
+/// Replaces each marker with its image block. Markers without a matching image, and repeats
+/// of a marker that was already placed, are removed.
+pub fn replace_image_markers(
+    content: &str,
+    mut images: HashMap<usize, BytesStart<'_>>,
+) -> Result<String> {
+    let mut output = String::with_capacity(content.len());
+    let mut last = 0;
+
+    for caps in IMAGE_MARKER_RE.captures_iter(content) {
+        let Some(marker) = caps.get(0) else {
+            continue;
+        };
+        output.push_str(&content[last..marker.start()]);
+        last = marker.end();
+
+        let tag = caps[1].parse().ok().and_then(|n: usize| images.remove(&n));
+        if let Some(tag) = tag {
+            output.push_str("\n\n");
+            write_image_block(&mut output, vec![tag])?;
+        }
+    }
+
+    output.push_str(&content[last..]);
+    Ok(output)
 }
 
 fn write_id_div(output: &mut String, id: &str) {

@@ -11,9 +11,9 @@ use iced::{
     widget::{column, container, row},
 };
 use iced_aw::ICED_AW_FONT_BYTES;
-use std::{cell::LazyCell, path::PathBuf};
+use std::{path::PathBuf, sync::LazyLock};
 
-pub const ICONS: LazyCell<PathBuf> = LazyCell::new(|| {
+pub static ICONS: LazyLock<PathBuf> = LazyLock::new(|| {
     std::env::current_exe()
         .expect("Failed to get executable path")
         .parent()
@@ -22,8 +22,8 @@ pub const ICONS: LazyCell<PathBuf> = LazyCell::new(|| {
         .join("icons")
 });
 
-pub const RECOVERY_DIR: LazyCell<PathBuf> =
-    LazyCell::new(|| std::env::temp_dir().join("light_novel_translator"));
+pub static RECOVERY_DIR: LazyLock<PathBuf> =
+    LazyLock::new(|| std::env::temp_dir().join("light_novel_translator"));
 
 pub fn app() -> Result<()> {
     iced::application(Translator::default, Translator::update, Translator::view)

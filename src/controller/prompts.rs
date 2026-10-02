@@ -48,6 +48,10 @@ All output must be in English. Never include Japanese characters in your respons
 - Preserve paragraph breaks exactly as they appear in the source
 - Keep emphasis markers (if the source uses special formatting for emphasis, reflect it)
 
+## Image Placeholders (Critical)
+
+The source may contain image placeholders such as `[[IMG:0]]`. Copy every placeholder exactly as written, on its own line, at the same position relative to the surrounding text. Never translate, renumber, merge, move, or remove them. If the input is only a placeholder, output only that placeholder.
+
 ## Difficult Content Handling
 
 - Wordplay/puns: Translate for equivalent effect in English, or translate the surface meaning if no equivalent exists
@@ -100,6 +104,7 @@ Work through these steps internally before producing output:
 - **Sound effects and onomatopoeia:** Render naturally in English where possible; otherwise transliterate. Be consistent with whatever convention the candidates establish if it's reasonable.
 - **Dialogue formatting:** Match the source's quotation/bracket style as rendered in the candidates (typically 「」 → "" for English).
 - **Internal monologue, italics, emphasis:** Preserve formatting cues from the source.
+- **Image placeholders:** The source may contain placeholders such as `[[IMG:0]]`. Every placeholder in the source must appear exactly once in the output, unchanged, on its own line, at the same position relative to the surrounding text. If a candidate dropped or moved one, restore it based on the source.
 
 # Pronoun and Subject Handling
 

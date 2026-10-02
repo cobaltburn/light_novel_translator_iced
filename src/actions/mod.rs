@@ -1,7 +1,7 @@
 use crate::{
     controller::{
-        TOC_PAGE_STEM, get_ordered_path, html_to_markdown, markdown_sections, nav_to_markdown,
-        read_toc,
+        TOC_PAGE_STEM, get_ordered_path, has_translatable_text, html_to_marked_markdown,
+        markdown_sections, nav_to_markdown, read_toc,
     },
     error::{Error, Result},
     model::Page,
@@ -90,9 +90,19 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
             let html = epub
                 .get_resource_str_by_path(&path)
                 .ok_or(Error::Error(format!("Invalid file in epub: {:#?}", path)))?;
-            Ok((path, html_to_markdown(&html)?))
+            Ok((path, html_to_marked_markdown(&html)?))
         })
-        .map(|result| result.map(|(path, markdown)| Page::new(path, markdown_sections(&markdown))))
+        .map(|result| {
+            result.map(|(path, markdown)| {
+                // Image-only pages are left untranslated so the build uses the original file
+                let sections = if has_translatable_text(&markdown) {
+                    markdown_sections(&markdown)
+                } else {
+                    Vec::new()
+                };
+                Page::new(path, sections)
+            })
+        })
         .collect();
 
     let pages: Vec<_> = iter::once(toc)

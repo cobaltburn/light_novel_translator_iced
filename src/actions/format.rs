@@ -28,6 +28,7 @@ pub enum Action {
 }
 
 impl Format {
+    #[allow(clippy::unit_arg)]
     pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
             Action::SetTitle(title) => self.set_title(title).into(),

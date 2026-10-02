@@ -1,8 +1,9 @@
 use crate::{
     controller::{
         DEFAULT_STYLESHEET, Nav, TOC_PAGE_STEM, get_ordered_path, html_to_markdown, image_anchors,
-        insert_anchors, markdown_sections, parse_links, read_toc, strip_syosetu_tags, strip_tags,
-        to_html, update_image_paths, update_style_path, write_body, write_header,
+        image_marker_indices, insert_anchors, markdown_sections, parse_links, read_toc,
+        replace_image_markers, strip_syosetu_tags, strip_tags, to_html, update_image_paths,
+        update_style_path, write_body, write_header,
     },
     error::{Error, Result},
     model::{EpubMetadata, FormatPage},
@@ -311,7 +312,6 @@ pub struct AnchorPosition {
     pub position: f64,
 }
 
-/// Converts html to markdown and partitions it the same way it is partitioned for translation.
 fn section_markdown(html: &str) -> Result<Vec<String>> {
     Ok(markdown_sections(&html_to_markdown(html)?))
 }
@@ -346,12 +346,15 @@ pub fn id_positions(html: &str, toc_ids: &[String]) -> Result<Vec<AnchorPosition
     Ok(positions)
 }
 
-pub fn image_positions(html: &str) -> Result<Vec<AnchorPosition>> {
+pub fn image_positions(
+    html: &str,
+    images: Vec<(BytesStart<'static>, Option<String>)>,
+) -> Result<Vec<AnchorPosition>> {
     let sections = section_markdown(html)?;
     let sections: Vec<Vec<_>> = sections.iter().map(|s| s.lines().collect()).collect();
     let last_section = sections.len().saturating_sub(1);
 
-    let positions = image_anchors(html)?
+    let positions = images
         .into_iter()
         .map(|(tag, text)| {
             let found = text.and_then(|text| {
@@ -440,9 +443,19 @@ fn to_text_path(path: &Path) -> Result<PathBuf> {
 }
 
 pub fn build_html(html: &str, content: &str, toc_ids: &[String]) -> Result<String> {
+    let found = image_marker_indices(content);
+    let (marked, estimated): (Vec<_>, Vec<_>) = image_anchors(html)?
+        .into_iter()
+        .enumerate()
+        .partition(|(i, _)| found.contains(i));
+
     let mut anchors = id_positions(html, toc_ids)?;
-    anchors.extend(image_positions(html)?);
+    let estimated = estimated.into_iter().map(|(_, image)| image).collect();
+    anchors.extend(image_positions(html, estimated)?);
     let content = insert_anchors(content, anchors)?;
+
+    let marked = marked.into_iter().map(|(i, (tag, _))| (i, tag)).collect();
+    let content = replace_image_markers(&content, marked)?;
     let content = replace_jp_symbols(&content);
     let content = to_html(&content);
 
@@ -478,6 +491,7 @@ pub struct TocLink {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::controller::{has_translatable_text, html_to_marked_markdown};
 
     const HTML: &str = r#"<html><head><title>Title</title></head><body>
 <p>first line</p>
@@ -496,7 +510,7 @@ mod test {
 
     #[test]
     fn image_positions_are_section_relative() {
-        let positions = image_positions(HTML).unwrap();
+        let positions = image_positions(HTML, image_anchors(HTML).unwrap()).unwrap();
         assert_eq!(positions.len(), 2);
         assert_eq!(positions[0].section, 0);
         assert!(positions[0].position > 0.0 && positions[0].position < 1.0);
@@ -520,5 +534,56 @@ mod test {
 
         let html = to_html(&output);
         assert!(html.contains("<p>four</p>"));
+    }
+
+    #[test]
+    fn source_markdown_has_numbered_markers() {
+        let markdown = html_to_marked_markdown(HTML).unwrap();
+        let lines: Vec<_> = markdown.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(
+            lines,
+            [
+                "first line",
+                "[[IMG:0]]",
+                "second line",
+                "third line",
+                "[[IMG:1]]"
+            ]
+        );
+        assert!(!html_to_markdown(HTML).unwrap().contains("IMG"));
+    }
+
+    #[test]
+    fn image_only_page_has_no_translatable_text() {
+        let html = r#"<html><head><title>Title</title></head><body>
+<div><svg><image xlink:href="cover.jpg"/></svg></div>
+</body></html>"#;
+        let markdown = html_to_marked_markdown(html).unwrap();
+        assert!(markdown.contains("[[IMG:0]]"));
+        assert!(!has_translatable_text(&markdown));
+        assert!(has_translatable_text(
+            &html_to_marked_markdown(HTML).unwrap()
+        ));
+    }
+
+    #[test]
+    fn build_html_uses_markers_and_falls_back() {
+        // Marker 0 kept, marker 1 dropped by the translation
+        let content = "<part>1</part>\n\none\n\n[[IMG:0]]\n\ntwo\n\nthree\n";
+        let html = build_html(HTML, content, &[]).unwrap();
+        let a = html.find("a.jpg").unwrap();
+        let b = html.find("b.jpg").unwrap();
+        assert!(html.find("one").unwrap() < a && a < html.find("two").unwrap());
+        assert!(html.find("three").unwrap() < b);
+        assert!(!html.contains("IMG"));
+    }
+
+    #[test]
+    fn replace_image_markers_tolerates_escapes_and_drops_unknown() {
+        let tag = BytesStart::new("img").with_attributes([("src", "../Images/a.jpg")]);
+        let images = HashMap::from([(0, tag)]);
+        let output = replace_image_markers("a\n\\[\\[IMG: 0\\]\\]\n[[IMG:7]]\nb", images).unwrap();
+        assert!(output.contains("a.jpg"));
+        assert!(!output.contains("IMG"));
     }
 }

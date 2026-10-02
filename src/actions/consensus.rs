@@ -64,6 +64,7 @@ pub enum Action {
 }
 
 impl Consensus {
+    #[allow(clippy::unit_arg)]
     pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
             Action::ServerAction(action) => self.server.perform(action).map(Into::into),

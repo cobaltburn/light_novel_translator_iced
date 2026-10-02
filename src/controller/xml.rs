@@ -1,9 +1,12 @@
-use crate::error::{Error, Result};
+use crate::{
+    controller::image_marker,
+    error::{Error, Result},
+};
 use bstr::ByteSlice;
 use pulldown_cmark::{Options, Parser, html::push_html};
 use quick_xml::{
     Reader, Writer, XmlVersion,
-    events::{BytesStart, Event},
+    events::{BytesStart, BytesText, Event},
 };
 use regex::Regex;
 use std::{
@@ -164,6 +167,36 @@ pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
     }
 }
 
+/// Replaces each image with a marker paragraph, numbered in the same order as `image_anchors`.
+pub fn insert_image_markers(html: &str) -> Result<String> {
+    let mut reader = Reader::from_str(html);
+    let mut writer = Writer::new(Cursor::new(Vec::new()));
+    let mut count = 0;
+
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"head" => {
+                reader.read_to_end(tag.name())?;
+            }
+            Event::Empty(tag) if is_image(&tag) => {
+                writer
+                    .create_element("p")
+                    .write_text_content(BytesText::new(&image_marker(count)))?;
+                count += 1;
+            }
+            Event::Eof => break,
+            e => writer.write_event(e)?,
+        }
+    }
+
+    Ok(String::from_utf8(writer.into_inner().into_inner())?)
+}
+
+fn is_image(tag: &BytesStart<'_>) -> bool {
+    let name = tag.name();
+    name.as_ref() == IMG_BYTES || name.as_ref() == IMAGE_BYTES
+}
+
 /// Pairs each image tag with the first non-empty text that follows it,
 /// or `None` if no text follows the image.
 pub fn image_anchors(html: &str) -> Result<Vec<(BytesStart<'static>, Option<String>)>> {
@@ -178,11 +211,9 @@ pub fn image_anchors(html: &str) -> Result<Vec<(BytesStart<'static>, Option<Stri
             Event::Start(tag) if tag.name().as_ref() == b"head" => {
                 reader.read_to_end(tag.name())?;
             }
-            Event::Empty(tag) if tag.name().as_ref() == IMG_BYTES => {
-                pending.push(update_tag_path(tag, &folder, SRC)?);
-            }
-            Event::Empty(tag) if tag.name().as_ref() == IMAGE_BYTES => {
-                pending.push(update_tag_path(tag, &folder, XLINK)?);
+            Event::Empty(tag) if is_image(&tag) => {
+                let attr = if tag.name().as_ref() == IMG_BYTES { SRC } else { XLINK };
+                pending.push(update_tag_path(tag, &folder, attr)?);
             }
             Event::Text(text) if !pending.is_empty() => {
                 let text = text.xml10_content()?;

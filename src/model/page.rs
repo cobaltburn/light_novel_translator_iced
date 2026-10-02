@@ -1,5 +1,6 @@
 use crate::{
     actions::{clean_invisible_chars, contains_japanese},
+    controller::image_marker_indices,
     model::Activity,
     view::DisplayType,
 };
@@ -18,12 +19,11 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     iter,
-    ops::Not,
     path::PathBuf,
 };
 
 const JACCARD_TOLERANCE: f64 = 0.25;
-const FREQUENCY_TOLERANCE: f64 = 10.0;
+const FREQUENCY_TOLERANCE: f64 = 12.0;
 const SECTION_CAPACITY: usize = 8 * 1024;
 const MIN_PERCENT: f64 = 70.0;
 const MAX_PERCENT: f64 = 105.0;
@@ -70,7 +70,7 @@ impl Page {
         self.sections
             .iter()
             .enumerate()
-            .filter(|(_, e)| contains_japanese(&e.content))
+            .filter(|(_, e)| e.content.lines().any(contains_japanese))
             .map(|(i, _)| PageError::Japanese(i))
             .collect()
     }
@@ -92,12 +92,12 @@ impl Page {
             .filter(|(_, s)| !s.content.is_empty())
             .filter_map(|(i, Section { japanese, content })| {
                 let p = (content.len() as f64 / japanese.len() as f64) * 100.0;
-                let (min, max) = if i == last {
-                    (MIN_PERCENT - 5.0, MAX_PERCENT + 5.0)
+                let (min, max) = if i == last && content.len() < 2000 {
+                    (MIN_PERCENT - 10.0, MAX_PERCENT + 10.0)
                 } else {
                     (MIN_PERCENT, MAX_PERCENT)
                 };
-                (p > min && p < max).not().then_some(PageError::Size(i))
+                (p <= min || p >= max).then_some(PageError::Size(i, content.len()))
             })
             .collect()
     }
@@ -123,14 +123,30 @@ impl Page {
             .collect()
     }
 
+    fn check_image_tags(&mut self) -> Vec<PageError> {
+        self.sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.content.is_empty())
+            .filter_map(|(i, Section { japanese, content })| {
+                let japanese_tags = image_marker_indices(japanese);
+                let content_tags = image_marker_indices(content);
+                let dif = japanese_tags.symmetric_difference(&content_tags).count();
+                (dif != 0).then_some(PageError::ImageTag(i))
+            })
+            .collect()
+    }
+
     pub fn check_page(&mut self, last_section: &str) {
         self.errors = [
             self.check_size(),
             self.check_japanese(),
             self.check_frequency(),
             self.check_jaccard(last_section),
+            self.check_image_tags(),
         ]
         .concat();
+        self.errors.sort_by_key(|e| e.index());
 
         self.activity = if let Some(error) = self.errors.first() {
             Activity::Error(error.index() + 1)
@@ -336,18 +352,20 @@ impl Section {
 #[derive(Debug, Clone)]
 pub enum PageError {
     Japanese(usize),
-    Size(usize),
+    Size(usize, usize),
     Repeat(usize),
     Copy(usize),
+    ImageTag(usize),
 }
 
 impl PageError {
     pub fn index(&self) -> usize {
         match self {
-            PageError::Japanese(i)
-            | PageError::Size(i)
+            PageError::Japanese(i, ..)
+            | PageError::Size(i, ..)
             | PageError::Repeat(i)
-            | PageError::Copy(i) => *i,
+            | PageError::Copy(i)
+            | PageError::ImageTag(i) => *i,
         }
     }
 
@@ -364,9 +382,10 @@ impl PageError {
 
         match self {
             PageError::Japanese(i) => make_btn(format!("Japanese error: {:2}", i + 1), *i),
-            PageError::Size(i) => make_btn(format!("Size error: {:2}", i + 1), *i),
+            PageError::Size(i, c) => make_btn(format!("Size error: {:2}, count:{}", i + 1, c), *i),
             PageError::Repeat(i) => make_btn(format!("Repeat error: {:2}", i + 1), *i),
             PageError::Copy(i) => make_btn(format!("Copy error: {:2}", i + 1), *i),
+            PageError::ImageTag(i) => make_btn(format!("Image Tag error: {:2}", i + 1), *i),
         }
     }
 }

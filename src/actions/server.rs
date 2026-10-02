@@ -20,6 +20,7 @@ pub enum Action {
 }
 
 impl Server {
+    #[allow(clippy::unit_arg)]
     pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
             Action::SelectModel(model) => self.set_model(model).into(),

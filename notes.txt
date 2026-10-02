@@ -1,3 +1,0 @@
-
-add nav file to html that is translated
-

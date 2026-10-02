@@ -22,6 +22,7 @@ pub enum Message {
 }
 
 impl Translator {
+    #[allow(clippy::unit_arg)]
     pub fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::DocAction(action) => self.doc.perform(action).map(Into::into),

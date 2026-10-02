@@ -20,6 +20,7 @@ pub enum Action {
 }
 
 impl Doc {
+    #[allow(clippy::unit_arg)]
     pub fn perform(&mut self, action: Action) -> Task<Action> {
         match action {
             Action::OpenEpub => Task::future(select_epub())

@@ -1,5 +1,8 @@
 use crate::{
-    actions::{server, translation},
+    actions::{
+        server,
+        translation::{self, Action},
+    },
     message::Message,
     model::{Server, Settings, Translation},
     view::{DisplayType, menu_button, rich_text_scrollable},
@@ -68,14 +71,14 @@ fn new_tab_button(_model: &Translation) -> Element<'_, Message> {
         .into()
 }
 
-fn tab(model: &Translation) -> Element<'_, translation::Action> {
+fn tab(model: &Translation) -> Element<'_, Action> {
     let page = model.current_page();
     let current_page = model.current_page;
     let can_translate = model.server.handles.is_empty()
         && model.server.connected()
         && !model.file_name().is_empty();
     let on_press = move |part| {
-        can_translate.then_some(translation::Action::TranslatePart {
+        can_translate.then_some(Action::TranslatePart {
             page: current_page,
             part,
         })
@@ -95,13 +98,13 @@ fn tab(model: &Translation) -> Element<'_, translation::Action> {
                 stack![
                     ContextMenu::new(rich_text_scrollable(content), || container(column![
                         context_menu_button(text("full").color(Color::WHITE))
-                            .on_press(translation::Action::SetDisplay(DisplayType::Full))
+                            .on_press(Action::SetDisplay(DisplayType::Full))
                             .width(Length::Fill),
                         context_menu_button(text("end").color(Color::WHITE))
-                            .on_press(translation::Action::SetDisplay(DisplayType::End))
+                            .on_press(Action::SetDisplay(DisplayType::End))
                             .width(Length::Fill),
                         context_menu_button(text("japanese").color(Color::WHITE))
-                            .on_press(translation::Action::SetDisplay(DisplayType::Japanese))
+                            .on_press(Action::SetDisplay(DisplayType::Japanese))
                             .width(Length::Fill)
                     ])
                     .style(container::rounded_box)
@@ -124,7 +127,7 @@ fn tab(model: &Translation) -> Element<'_, translation::Action> {
     .into()
 }
 
-fn side_bar(model: &Translation) -> Container<'_, translation::Action> {
+fn side_bar(model: &Translation) -> Container<'_, Action> {
     let buttons = lazy(model.sidebar_deps(), |deps| {
         build_path_buttons(deps).width(250).spacing(10)
     });
@@ -145,7 +148,7 @@ fn menu_bar(
         server: server_state,
         ..
     }: &Translation,
-) -> Row<'_, translation::Action> {
+) -> Row<'_, Action> {
     row![
         MenuBar::new(vec![epub_menu(model), server_menu(server_state)]).spacing(5),
         translate_button(model),
@@ -156,20 +159,20 @@ fn menu_bar(
     .padding(Padding::default().bottom(15))
 }
 
-fn translate_button(model: &Translation) -> Button<'_, translation::Action> {
+fn translate_button(model: &Translation) -> Button<'_, Action> {
     let (button_text, message) = if !model.server.handles.is_empty() {
-        ("cancel", Some(translation::Action::CancelTranslate))
+        ("cancel", Some(Action::CancelTranslate))
     } else if !model.server.connected() || model.file_name().is_empty() {
         ("translate", None)
     } else {
-        let msg = translation::Action::Translate(model.current_page);
+        let msg = Action::Translate(model.current_page);
         ("translate", Some(msg))
     };
 
     button(text(button_text).center()).on_press_maybe(message)
 }
 
-fn server_menu(state: &Server) -> Item<'_, translation::Action, Theme, Renderer> {
+fn server_menu(state: &Server) -> Item<'_, Action, Theme, Renderer> {
     let Settings {
         temperature,
         top_p,
@@ -212,7 +215,7 @@ fn server_menu(state: &Server) -> Item<'_, translation::Action, Theme, Renderer>
     )
 }
 
-fn epub_menu(model: &Translation) -> Item<'_, translation::Action, Theme, Renderer> {
+fn epub_menu(model: &Translation) -> Item<'_, Action, Theme, Renderer> {
     Item::with_menu(
         menu_button("epub"),
         Menu::new(vec![
@@ -224,11 +227,11 @@ fn epub_menu(model: &Translation) -> Item<'_, translation::Action, Theme, Render
     )
 }
 
-fn file_menu_buttons(state: &Translation) -> Element<'_, translation::Action> {
+fn file_menu_buttons(state: &Translation) -> Element<'_, Action> {
     let file_name = state.file_name();
     let not_empty = !file_name.is_empty();
-    let save = not_empty.then_some(translation::Action::SaveTranslation(file_name));
-    let recovery = not_empty.then_some(translation::Action::Recover);
+    let save = not_empty.then_some(Action::SaveTranslation(file_name));
+    let recovery = not_empty.then_some(Action::Recover);
 
     row![
         button(text("save").center())
@@ -243,7 +246,7 @@ fn file_menu_buttons(state: &Translation) -> Element<'_, translation::Action> {
     .into()
 }
 
-fn epub_select(model: &Translation) -> Row<'_, translation::Action> {
+fn epub_select(model: &Translation) -> Row<'_, Action> {
     row![
         button(text("epub").center()).on_press(translation::Action::OpenEpub),
         container(text(model.file_name()))
