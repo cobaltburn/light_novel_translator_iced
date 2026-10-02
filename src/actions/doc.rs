@@ -4,9 +4,9 @@ use crate::{
     message::select_epub,
     model::Doc,
 };
-use epub::doc::EpubDoc;
 use html2md::rewrite_html;
 use iced::Task;
+use rbook::Epub;
 use std::{io::Cursor, path::PathBuf};
 
 #[non_exhaustive]
@@ -47,10 +47,9 @@ impl Doc {
     }
 
     pub fn set_epub(&mut self, file_name: PathBuf, buffer: Vec<u8>) -> Result<()> {
-        let epub = EpubDoc::from_reader(Cursor::new(buffer))?;
+        let epub = Epub::read(Cursor::new(buffer))?;
         self.current_page = Some(0);
-        self.total_pages = epub.get_num_chapters();
-
+        self.total_pages = epub.spine().len();
         self.file_name = file_name
             .file_name()
             .map(|e| e.to_string_lossy().to_string());
@@ -62,8 +61,9 @@ impl Doc {
 
     pub fn get_page(&mut self, page: usize) -> Option<String> {
         let epub = self.epub.as_mut()?;
-        epub.set_current_chapter(page);
-        let html = epub.get_current_str()?.0;
+        let entry = epub.spine().get(page)?;
+        let entry = entry.manifest_entry()?;
+        let html = entry.read_str().ok()?;
         let html = strip_syosetu_tags(&html).ok()?;
         let html = strip_tags(&html).ok()?;
         let markdown = rewrite_html(&html, false);

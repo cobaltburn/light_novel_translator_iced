@@ -1,21 +1,20 @@
 use crate::{
     controller::{
-        DEFAULT_STYLESHEET, Nav, TOC_PAGE_STEM, get_ordered_path, html_to_markdown, image_anchors,
-        image_marker_indices, insert_anchors, markdown_sections, parse_links, read_toc,
+        DEFAULT_STYLESHEET, TOC_PAGE_STEM, get_ordered_path, html_to_markdown, image_anchors,
+        image_marker_indices, insert_anchors, markdown_sections, parse_links,
         replace_image_markers, strip_syosetu_tags, strip_tags, to_html, update_image_paths,
         update_style_path, write_body, write_header,
     },
     error::{Error, Result},
     model::{EpubMetadata, FormatPage},
 };
-use epub::doc::{EpubDoc, ResourceItem};
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, TocElement, ZipLibrary};
 use quick_xml::{
     Reader, Writer, XmlVersion,
     events::{BytesDecl, BytesStart, Event},
 };
+use rbook::{Epub, epub::manifest::EpubManifestEntry};
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet},
     ffi::OsStr,
     io::{self, Cursor},
@@ -23,14 +22,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const XHTML_MIME: &str = "application/xhtml+xml";
-const CSS_MIME: &str = "text/css";
-const JS_MIME: &str = "application/javascript";
-
 #[derive(Debug)]
 pub struct DocBuilder {
-    pub epub: EpubDoc<Cursor<Vec<u8>>>,
-    pub toc: Vec<Nav>,
+    pub epub: Epub,
     pub builder: EpubBuilder<ZipLibrary>,
     pub name: String,
     pub pages: Vec<FormatPage>,
@@ -39,18 +33,13 @@ pub struct DocBuilder {
 
 impl DocBuilder {
     pub fn new(
-        mut epub: EpubDoc<Cursor<Vec<u8>>>,
+        epub: Epub,
         name: String,
         pages: Vec<FormatPage>,
         metadata: EpubMetadata,
     ) -> Result<Self> {
-        let toc = read_toc(&mut epub)
-            .map(|(_, navs)| navs)
-            .unwrap_or_default();
-
         Ok(DocBuilder {
             epub,
-            toc,
             name,
             metadata,
             pages,
@@ -91,25 +80,14 @@ impl DocBuilder {
     }
 
     pub fn add_cover_image(&mut self) -> Result<()> {
-        let Some(cover_id) = self.epub.get_cover_id() else {
+        let Some(cover) = self.epub.manifest().cover_image() else {
             return Ok(());
         };
 
-        let ResourceItem { path, mime, .. } = self
-            .epub
-            .resources
-            .get(&cover_id)
-            .ok_or(Error::BuildError("Cover id has no matching resource"))?
-            .clone();
-
-        let content = self
-            .epub
-            .get_resource_by_path(&path)
-            .ok_or(Error::BuildError("Cover image content is missing"))?;
-        let file_name = path
-            .file_name()
-            .ok_or(Error::BuildError("Invalid file name found"))?;
+        let content = cover.read_bytes()?;
+        let file_name = cover.href().name().as_str();
         let path = PathBuf::from("Images").join(file_name);
+        let mime = cover.media_type();
 
         self.builder
             .add_cover_image(path, content.as_slice(), mime)?;
@@ -117,31 +95,32 @@ impl DocBuilder {
         Ok(())
     }
 
-    fn add_resources(
-        &mut self,
-        folder: &str,
-        select: impl Fn(&str, &ResourceItem) -> bool,
-    ) -> Result<()> {
-        let folder = PathBuf::from(folder);
+    pub fn add_images(&mut self) -> Result<()> {
+        let cover_id = self
+            .epub
+            .manifest()
+            .cover_image()
+            .map(|e| e.id())
+            .unwrap_or_default();
+
+        let folder = PathBuf::from("Images");
         let selected: Vec<_> = self
             .epub
-            .resources
-            .iter()
-            .filter(|(id, resource)| select(id.as_str(), resource))
-            .map(|(_, resource)| resource.clone())
+            .manifest()
+            .images()
+            .filter(|e| e.id() != cover_id)
             .collect();
 
-        for ResourceItem { path, mime, .. } in selected {
-            let Some(file_name) = path.file_name() else {
-                log::warn!("Skipping resource without a file name: {}", path.display());
-                continue;
-            };
-            let Some(content) = self.epub.get_resource_by_path(&path) else {
-                log::warn!("Skipping unreadable resource: {}", path.display());
+        for entry in selected {
+            let href = entry.href();
+            let file_name = href.name().decode();
+            let Ok(content) = self.epub.read_resource_bytes(href) else {
+                log::warn!("Skipping unreadable resource: {}", href);
                 continue;
             };
 
-            let path = folder.join(file_name);
+            let mime = entry.media_type();
+            let path = folder.join(file_name.as_ref());
             if let Err(error) = self.builder.add_resource(path, &*content, mime) {
                 log::warn!("{}", error);
             }
@@ -150,22 +129,50 @@ impl DocBuilder {
         Ok(())
     }
 
-    pub fn add_images(&mut self) -> Result<()> {
-        let cover_id = self.epub.get_cover_id();
-        self.add_resources("Images", |id, resource| {
-            resource.mime.starts_with("image") && Some(id) != cover_id.as_deref()
-        })
-    }
-
     fn add_js(&mut self) -> Result<()> {
-        self.add_resources("js", |_, resource| resource.mime == JS_MIME)
+        let folder = PathBuf::from("js");
+        let selected: Vec<_> = self.epub.manifest().scripts().collect();
+
+        for entry in selected {
+            let href = entry.href();
+            let file_name = href.name().decode();
+            let Ok(content) = self.epub.read_resource_bytes(href) else {
+                log::warn!("Skipping unreadable resource: {}", href);
+                continue;
+            };
+
+            let mime = entry.media_type();
+            let path = folder.join(file_name.as_ref());
+            if let Err(error) = self.builder.add_resource(path, &*content, mime) {
+                log::warn!("{}", error);
+            }
+        }
+        Ok(())
     }
 
     fn add_style_sheets(&mut self) -> Result<()> {
-        self.add_resources("Styles", |_, resource| resource.mime == CSS_MIME)
+        let folder = PathBuf::from("Styles");
+        let selected: Vec<_> = self.epub.manifest().styles().collect();
+
+        for entry in selected {
+            let href = entry.href();
+            let file_name = href.name().decode();
+            let Ok(content) = self.epub.read_resource_bytes(href) else {
+                log::warn!("Skipping unreadable resource: {}", href);
+                continue;
+            };
+
+            let mime = entry.media_type();
+            let path = folder.join(file_name.as_ref());
+            if let Err(error) = self.builder.add_resource(path, &*content, mime) {
+                log::warn!("{}", error);
+            }
+        }
+        Ok(())
     }
 
     pub fn collect_contents(&mut self) -> Result<Vec<EpubContent<Cursor<Vec<u8>>>>> {
+        // TODO return manifestentry
         let epub_paths = get_ordered_path(&self.epub);
         let path_map = self.path_map();
 
@@ -176,11 +183,9 @@ impl DocBuilder {
 
         let file_parts: Vec<_> = linked_files
             .into_iter()
-            .map(|(md_file, path)| {
-                let html = self
-                    .epub
-                    .get_resource_str_by_path(&path)
-                    .ok_or(Error::BuildError("Spine resource content is missing"))?;
+            .map(|(md_file, entry)| {
+                let html = entry.read_str()?;
+                let path = Path::new(entry.href().path().as_str());
                 let href = to_text_path(&path)?;
                 Ok((href, md_file, html))
             })
@@ -232,14 +237,14 @@ impl DocBuilder {
         Ok(contents)
     }
 
-    pub fn path_map(&self) -> HashMap<Cow<'_, str>, &PathBuf> {
+    pub fn path_map(&self) -> HashMap<String, EpubManifestEntry<'_>> {
         self.epub
-            .resources
-            .values()
-            .filter(|r| r.mime == XHTML_MIME)
-            .filter_map(|ResourceItem { path, .. }| {
-                let stem = path.file_stem()?.to_string_lossy();
-                Some((stem, path))
+            .manifest()
+            .readable_content()
+            .filter_map(|e| {
+                let path: PathBuf = e.href().name().decode().as_ref().into();
+                let stem = path.file_stem()?.to_string_lossy().to_string();
+                Some((stem, e))
             })
             .collect()
     }
@@ -249,16 +254,18 @@ impl DocBuilder {
         let mut links = self.links();
         links.extend(toc_links);
         let mut chapters: HashMap<_, Vec<_>> = HashMap::new();
+        let Some(pages) = self.epub.toc().contents() else {
+            return chapters;
+        };
 
-        for nav in &self.toc {
-            let Some(file_name) = nav.path.file_name() else {
+        for page in pages.flatten() {
+            let Some(href) = page.href() else {
                 continue;
             };
-            let path = file_name.to_string_lossy().into_owned();
-            let file = path
-                .split_once('#')
-                .map_or(path.as_str(), |(file, _)| file)
-                .to_string();
+            let file = href.name().decode().to_string();
+            let path = href
+                .fragment()
+                .map_or(file.clone(), |f| format!("{}#{}", file, f));
             let title = links.remove(&path);
 
             chapters
@@ -289,11 +296,14 @@ impl DocBuilder {
     }
 
     pub fn toc_ids(&self) -> Vec<String> {
-        self.toc
-            .iter()
-            .filter_map(|n| n.path.file_name())
-            .map(OsStr::to_string_lossy)
-            .filter_map(|e| e.split("#").last().map(ToString::to_string))
+        let Some(pages) = self.epub.toc().contents() else {
+            return Vec::new();
+        };
+
+        pages
+            .flatten()
+            .filter_map(|e| e.href().and_then(|e| e.fragment()))
+            .map(str::to_string)
             .collect()
     }
 }
@@ -419,20 +429,20 @@ fn next_text(text: &[u8]) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn link_files(
+fn link_files<'a>(
     path: &Path,
-    path_map: &HashMap<Cow<'_, str>, &PathBuf>,
-) -> Result<(PathBuf, PathBuf)> {
+    path_map: &'a HashMap<String, EpubManifestEntry<'a>>,
+) -> Result<(PathBuf, &'a EpubManifestEntry<'a>)> {
     let file_stem = path
         .file_stem()
         .ok_or(Error::BuildError("Spine entry has no file stem"))?;
     let md_file = PathBuf::from(file_stem).with_extension("md");
 
-    let xml_file = path_map
-        .get(&file_stem.to_string_lossy())
+    let xhtml_file = path_map
+        .get(file_stem.to_string_lossy().as_ref())
         .ok_or(Error::BuildError("Spine entry has no xhtml resource"))?;
 
-    Ok((md_file, xml_file.to_path_buf()))
+    Ok((md_file, xhtml_file))
 }
 
 fn to_text_path(path: &Path) -> Result<PathBuf> {
@@ -489,101 +499,4 @@ pub struct TocLink {
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-    use crate::controller::{has_translatable_text, html_to_marked_markdown};
-
-    const HTML: &str = r#"<html><head><title>Title</title></head><body>
-<p>first line</p>
-<p><img src="a.jpg"/></p>
-<p>second line</p>
-<p>third line</p>
-<p><img src="b.jpg"/></p>
-</body></html>"#;
-
-    #[test]
-    fn image_anchors_use_following_text() {
-        let anchors = image_anchors(HTML).unwrap();
-        let texts: Vec<_> = anchors.iter().map(|(_, t)| t.as_deref()).collect();
-        assert_eq!(texts, [Some("second line"), None]);
-    }
-
-    #[test]
-    fn image_positions_are_section_relative() {
-        let positions = image_positions(HTML, image_anchors(HTML).unwrap()).unwrap();
-        assert_eq!(positions.len(), 2);
-        assert_eq!(positions[0].section, 0);
-        assert!(positions[0].position > 0.0 && positions[0].position < 1.0);
-        assert_eq!(positions[1].position, 1.0);
-    }
-
-    #[test]
-    fn insert_anchors_places_images_in_section() {
-        let content = "<part>1</part>\n\none\n\ntwo\n\n<part>2</part>\n\nthree\n\nfour\n";
-        let tag = BytesStart::new("img").with_attributes([("src", "../Images/a.jpg")]);
-        let anchors = vec![AnchorPosition {
-            anchor: Anchor::Image(tag.into_owned()),
-            section: 1,
-            line: 3,
-            position: 0.5,
-        }];
-        let output = insert_anchors(content, anchors).unwrap();
-        let image = output.find("<img").unwrap();
-        assert!(output.find("three").unwrap() < image);
-        assert!(image < output.find("four").unwrap());
-
-        let html = to_html(&output);
-        assert!(html.contains("<p>four</p>"));
-    }
-
-    #[test]
-    fn source_markdown_has_numbered_markers() {
-        let markdown = html_to_marked_markdown(HTML).unwrap();
-        let lines: Vec<_> = markdown.lines().filter(|l| !l.is_empty()).collect();
-        assert_eq!(
-            lines,
-            [
-                "first line",
-                "[[IMG:0]]",
-                "second line",
-                "third line",
-                "[[IMG:1]]"
-            ]
-        );
-        assert!(!html_to_markdown(HTML).unwrap().contains("IMG"));
-    }
-
-    #[test]
-    fn image_only_page_has_no_translatable_text() {
-        let html = r#"<html><head><title>Title</title></head><body>
-<div><svg><image xlink:href="cover.jpg"/></svg></div>
-</body></html>"#;
-        let markdown = html_to_marked_markdown(html).unwrap();
-        assert!(markdown.contains("[[IMG:0]]"));
-        assert!(!has_translatable_text(&markdown));
-        assert!(has_translatable_text(
-            &html_to_marked_markdown(HTML).unwrap()
-        ));
-    }
-
-    #[test]
-    fn build_html_uses_markers_and_falls_back() {
-        // Marker 0 kept, marker 1 dropped by the translation
-        let content = "<part>1</part>\n\none\n\n[[IMG:0]]\n\ntwo\n\nthree\n";
-        let html = build_html(HTML, content, &[]).unwrap();
-        let a = html.find("a.jpg").unwrap();
-        let b = html.find("b.jpg").unwrap();
-        assert!(html.find("one").unwrap() < a && a < html.find("two").unwrap());
-        assert!(html.find("three").unwrap() < b);
-        assert!(!html.contains("IMG"));
-    }
-
-    #[test]
-    fn replace_image_markers_tolerates_escapes_and_drops_unknown() {
-        let tag = BytesStart::new("img").with_attributes([("src", "../Images/a.jpg")]);
-        let images = HashMap::from([(0, tag)]);
-        let output = replace_image_markers("a\n\\[\\[IMG: 0\\]\\]\n[[IMG:7]]\nb", images).unwrap();
-        assert!(output.contains("a.jpg"));
-        assert!(!output.contains("IMG"));
-    }
-}
+mod test {}

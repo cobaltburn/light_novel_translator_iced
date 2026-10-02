@@ -5,8 +5,8 @@ use crate::{
     message::select_epub,
     model::{Format, FormatPage},
 };
-use epub::doc::EpubDoc;
 use iced::{Task, widget::image::Handle};
+use rbook::Epub;
 use std::{io::Cursor, mem, path::PathBuf};
 
 #[non_exhaustive]
@@ -62,18 +62,21 @@ impl Format {
     }
 
     fn set_epub(&mut self, path: PathBuf, buffer: Vec<u8>) -> Result<()> {
-        let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
-        self.cover = epub.get_cover().map(|(e, _)| Handle::from_bytes(e));
+        let epub = Epub::read(Cursor::new(buffer))?;
+
+        self.cover = epub
+            .manifest()
+            .cover_image()
+            .and_then(|e| Some(Handle::from_bytes(e.read_bytes().ok()?)));
         self.metadata.title = path
             .file_stem()
             .map(|e| e.to_string_lossy().to_string())
             .unwrap_or_default();
         self.metadata.authors = epub
-            .metadata
-            .iter()
-            .find(|e| e.property == "creator")
-            .map(|e| e.value.to_owned())
-            .unwrap_or_default();
+            .metadata()
+            .by_property("creator")
+            .map(|e| e.value().to_owned())
+            .collect();
         self.epub_path = path;
         self.epub = Some(epub);
 

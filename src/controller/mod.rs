@@ -1,5 +1,5 @@
-use epub::doc::EpubDoc;
-use std::{io::Cursor, path::PathBuf};
+use rbook::Epub;
+use std::path::PathBuf;
 
 mod builder;
 mod client;
@@ -17,10 +17,11 @@ pub use prompts::*;
 pub use toc::*;
 pub use xml::*;
 
-pub fn get_ordered_path(epub: &EpubDoc<Cursor<Vec<u8>>>) -> Vec<PathBuf> {
-    epub.spine
+pub fn get_ordered_path(epub: &Epub) -> Vec<PathBuf> {
+    epub.spine()
         .iter()
-        .map(|e| epub.resources.get(&e.idref).unwrap().path.clone())
+        .filter_map(|e| e.manifest_entry())
+        .map(|e| e.href().decode().as_ref().into())
         .collect()
 }
 

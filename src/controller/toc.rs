@@ -1,10 +1,9 @@
 use crate::Result;
-use epub::doc::{EpubDoc, EpubVersion};
 use quick_xml::{
     Reader, XmlVersion,
     events::{BytesStart, Event},
 };
-use std::{io::Cursor, path::PathBuf};
+use std::path::PathBuf;
 
 pub const NCX_MIME: &str = "application/x-dtbncx+xml";
 
@@ -16,27 +15,6 @@ pub const TOC_PAGE_STEM: &str = "__toc__";
 pub struct Nav {
     pub label: String,
     pub path: PathBuf,
-}
-
-pub fn get_toc_path(epub: &EpubDoc<Cursor<Vec<u8>>>) -> Option<PathBuf> {
-    let resource = match epub.version {
-        EpubVersion::Version3_0 => epub.resources.get("toc"),
-        EpubVersion::Version2_0 | EpubVersion::Unknown(_) => {
-            epub.resources.values().find(|r| r.mime == NCX_MIME)
-        }
-    }?;
-    Some(resource.path.clone())
-}
-
-pub fn read_toc(epub: &mut EpubDoc<Cursor<Vec<u8>>>) -> Option<(PathBuf, Vec<Nav>)> {
-    let path = get_toc_path(epub)?;
-    let doc = epub.get_resource_str_by_path(&path)?;
-    let navs = match epub.version {
-        EpubVersion::Version3_0 => parse_nav_doc(&doc),
-        EpubVersion::Version2_0 | EpubVersion::Unknown(_) => parse_ncx(&doc),
-    }
-    .ok()?;
-    Some((path, navs))
 }
 
 pub fn parse_nav_doc(html: &str) -> Result<Vec<Nav>> {

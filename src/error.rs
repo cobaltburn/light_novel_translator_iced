@@ -27,7 +27,10 @@ pub enum Error {
     IOError(#[from] std::io::Error),
 
     #[error(transparent)]
-    DocError(#[from] epub::doc::DocError),
+    ArchiveError(#[from] rbook::ebook::errors::ArchiveError),
+
+    #[error(transparent)]
+    Ebookerror(#[from] rbook::ebook::errors::EbookError),
 
     #[error(transparent)]
     XmlError(#[from] quick_xml::Error),

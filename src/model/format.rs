@@ -1,6 +1,6 @@
-use epub::doc::EpubDoc;
 use iced::widget::image::Handle;
-use std::{io::Cursor, path::PathBuf};
+use rbook::Epub;
+use std::path::PathBuf;
 
 #[non_exhaustive]
 #[derive(Default, Debug)]
@@ -8,7 +8,7 @@ pub struct Format {
     pub pages: Vec<FormatPage>,
     pub source_folder: String,
     pub epub_path: PathBuf,
-    pub epub: Option<EpubDoc<Cursor<Vec<u8>>>>,
+    pub epub: Option<Epub>,
     pub cover: Option<Handle>,
     pub metadata: EpubMetadata,
 }

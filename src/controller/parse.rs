@@ -6,24 +6,21 @@ use std::{
 };
 
 use crate::{
-    controller::{Nav, insert_image_markers, part_tag, strip_syosetu_tags, strip_tags},
+    controller::{insert_image_markers, part_tag, strip_syosetu_tags, strip_tags},
     error::Result,
 };
 use html2md::rewrite_html;
 use pulldown_cmark::{Parser, Tag, TagEnd};
 use quick_xml::{Writer, events::BytesText};
+use rbook::epub::toc::EpubToc;
 use regex::Regex;
 
 pub fn image_marker(n: usize) -> String {
     format!("[[IMG:{n}]]")
 }
 
-/// Matches image markers, tolerating whitespace and markdown escapes added during translation.
-pub static IMAGE_MARKER_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\\?\[\\?\[\s*IMG\s*:\s*(\d+)\s*\\?\]\\?\]").unwrap()
-});
-
-/// Whether the text has anything to translate besides image markers.
+pub static IMAGE_MARKER_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\\?\[\\?\[\s*IMG\s*:\s*(\d+)\s*\\?\]\\?\]").unwrap());
 pub fn has_translatable_text(text: &str) -> bool {
     !markdown_sections(&IMAGE_MARKER_RE.replace_all(text, "")).is_empty()
 }
@@ -55,14 +52,16 @@ fn markdown_from_html(html: &str) -> Result<String> {
     Ok(markdown.join("\n"))
 }
 
-pub fn nav_to_markdown(navs: &[Nav]) -> Result<String> {
+pub fn toc_to_markdown(toc: EpubToc<'_>) -> Result<String> {
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
-
-    for Nav { label, path } in navs {
-        writer
-            .create_element("a")
-            .with_attribute(("href", path.to_string_lossy()))
-            .write_text_content(BytesText::new(label))?;
+    if let Some(toc) = toc.contents() {
+        for entry in toc.flatten() {
+            let href = entry.href().map(|e| e.as_str()).unwrap_or_default();
+            writer
+                .create_element("a")
+                .with_attribute(("href", href))
+                .write_text_content(BytesText::new(entry.label()))?;
+        }
     }
 
     let nav_html = String::from_utf8(writer.into_inner().into_inner())?;

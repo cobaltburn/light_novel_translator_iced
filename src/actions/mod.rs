@@ -1,12 +1,12 @@
 use crate::{
     controller::{
-        TOC_PAGE_STEM, get_ordered_path, has_translatable_text, html_to_marked_markdown,
-        markdown_sections, nav_to_markdown, read_toc,
+        TOC_PAGE_STEM, has_translatable_text, html_to_marked_markdown, markdown_sections,
+        toc_to_markdown,
     },
-    error::{Error, Result},
+    error::Result,
     model::Page,
 };
-use epub::doc::EpubDoc;
+use rbook::Epub;
 use std::{
     ffi::OsStr,
     io::Cursor,
@@ -75,21 +75,19 @@ pub async fn load_recovery() -> Option<Vec<Page>> {
 }
 
 pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<Page>)> {
-    let mut epub = EpubDoc::from_reader(Cursor::new(buffer))?;
-    let paths = get_ordered_path(&epub);
-
-    let toc = read_toc(&mut epub).and_then(|(_, navs)| {
-        let markdown = nav_to_markdown(&navs).ok()?;
+    let epub = Epub::read(Cursor::new(buffer))?;
+    let toc = toc_to_markdown(epub.toc()).ok().and_then(|markdown| {
         let path = PathBuf::from(TOC_PAGE_STEM).with_extension("xhtml");
         (!markdown.is_empty()).then_some(Page::new(path, vec![markdown]))
     });
 
-    let pages: Result<Vec<_>> = paths
-        .into_iter()
-        .map(|path| {
-            let html = epub
-                .get_resource_str_by_path(&path)
-                .ok_or(Error::Error(format!("Invalid file in epub: {:#?}", path)))?;
+    let pages: Result<Vec<_>> = epub
+        .spine()
+        .iter()
+        .filter_map(|e| e.manifest_entry())
+        .map(|entry| {
+            let html = entry.read_str()?;
+            let path = entry.href().as_str().into();
             Ok((path, html_to_marked_markdown(&html)?))
         })
         .map(|result| {
