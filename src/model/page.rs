@@ -1,5 +1,5 @@
 use crate::{
-    actions::{clean_invisible_chars, contains_japanese},
+    actions::{clean_invisible_chars, contains_japanese, is_japanese_char},
     controller::image_marker_indices,
     model::Activity,
     view::DisplayType,
@@ -192,6 +192,12 @@ impl Page {
         display: DisplayType,
         on_press: impl Fn(usize) -> Option<Link> + 'static,
     ) -> Vec<text::Span<'_, Link>> {
+        let has_japanese_error = |i| {
+            self.errors
+                .iter()
+                .any(|e| matches!(e, PageError::Japanese(j) if *j == i))
+        };
+
         self.sections
             .iter()
             .enumerate()
@@ -209,13 +215,22 @@ impl Page {
                         let end = content.pop();
                         spans.push(span(content));
                         if let Some(end) = end {
-                            let highlight = end != ',' && end.is_ascii_punctuation();
-                            spans.push(
-                                span(end)
-                                    .color_maybe(highlight.then_some(Color::BLACK))
-                                    .background_maybe(highlight.then_some(color!(0xffff00))),
-                            );
+                            let end_span = span(end);
+                            spans.push(if end != ',' && end.is_ascii_punctuation() {
+                                highlight(end_span)
+                            } else {
+                                end_span
+                            });
                         }
+                    }
+                    DisplayType::Full if has_japanese_error(i) => {
+                        spans.extend(japanese_runs(&section.content).map(|(japanese, run)| {
+                            if japanese {
+                                span(run).color(color!(0xff0000))
+                            } else {
+                                span(run)
+                            }
+                        }));
                     }
                     DisplayType::Full | DisplayType::Japanese => spans.push(span(content)),
                 }
@@ -224,6 +239,23 @@ impl Page {
             })
             .collect()
     }
+}
+
+fn japanese_runs(text: &str) -> impl Iterator<Item = (bool, &str)> {
+    let mut rest = text;
+    iter::from_fn(move || {
+        let japanese = is_japanese_char(&rest.chars().next()?);
+        let end = rest
+            .find(|c| is_japanese_char(&c) != japanese)
+            .unwrap_or(rest.len());
+        let (run, tail) = rest.split_at(end);
+        rest = tail;
+        Some((japanese, run))
+    })
+}
+
+fn highlight<Link>(span: text::Span<'_, Link>) -> text::Span<'_, Link> {
+    span.color(Color::BLACK).background(color!(0xffff00))
 }
 
 fn jaccard(a: &str, b: &str) -> f64 {

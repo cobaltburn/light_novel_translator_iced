@@ -2745,7 +2745,7 @@ dependencies = [
 
 [[package]]
 name = "light_novel_translator_iced"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "bstr",
  "epub",
