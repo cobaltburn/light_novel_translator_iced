@@ -8,24 +8,30 @@ use crate::{
     error::{Error, Result},
     model::{EpubMetadata, FormatPage},
 };
-use epub_builder::{EpubBuilder, EpubContent, EpubVersion, TocElement, ZipLibrary};
 use quick_xml::{
     Reader, Writer, XmlVersion,
     events::{BytesDecl, BytesStart, Event},
 };
-use rbook::{Epub, epub::manifest::EpubManifestEntry};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rbook::{
+    Epub,
+    epub::{
+        EpubChapter,
+        manifest::{DetachedEpubManifestEntry, EpubManifestEntry},
+    },
+};
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     io::{self, Cursor},
-    mem,
+    iter, mem,
     path::{Path, PathBuf},
 };
 
 #[derive(Debug)]
 pub struct DocBuilder {
     pub epub: Epub,
-    pub builder: EpubBuilder<ZipLibrary>,
+    pub builder: Epub,
     pub name: String,
     pub pages: Vec<FormatPage>,
     pub metadata: EpubMetadata,
@@ -43,38 +49,45 @@ impl DocBuilder {
             name,
             metadata,
             pages,
-            builder: EpubBuilder::new(ZipLibrary::new()?)?,
+            builder: Epub::new(),
         })
     }
 
     pub fn build(mut self) -> Result<(Vec<u8>, String)> {
-        self.builder
-            .epub_version(EpubVersion::V30)
-            .stylesheet(DEFAULT_STYLESHEET)?
-            .add_language("en");
+        let title = mem::take(&mut self.metadata.title);
+        let identifier = self
+            .epub
+            .metadata()
+            .identifier()
+            .map(|e| e.value().to_string())
+            .unwrap_or_else(|| format!("urn:light-novel-translator:{}", title));
 
-        self.builder.set_title(mem::take(&mut self.metadata.title));
-
-        let authors = self
+        let authors: Vec<_> = self
             .metadata
             .authors
             .split("&")
             .map(|e| e.trim().to_string())
+            .filter(|e| !e.is_empty())
             .collect();
 
-        self.builder.set_authors(authors);
+        self.builder
+            .edit()
+            .identifier(identifier)
+            .title(title)
+            .author(authors)
+            .language("en")
+            .modified_now()
+            .resource(("stylesheet.css", DEFAULT_STYLESHEET));
 
         self.add_images()?;
         self.add_cover_image()?;
         self.add_style_sheets()?;
         self.add_js()?;
 
-        for content in self.collect_contents()? {
-            self.builder.add_content(content)?;
-        }
+        let chapters = self.collect_contents()?;
+        self.builder.edit().chapter(chapters);
 
-        let mut content = Vec::new();
-        self.builder.generate(&mut content)?;
+        let content = self.builder.write().to_vec()?;
 
         Ok((content, self.name))
     }
@@ -86,92 +99,38 @@ impl DocBuilder {
 
         let content = cover.read_bytes()?;
         let file_name = cover.href().name().as_str();
-        let path = PathBuf::from("Images").join(file_name);
+        let path = format!("Images/{file_name}");
         let mime = cover.media_type();
 
         self.builder
-            .add_cover_image(path, content.as_slice(), mime)?;
+            .edit()
+            .cover_image(DetachedEpubManifestEntry::from((path, content)).media_type(mime));
 
         Ok(())
     }
 
     pub fn add_images(&mut self) -> Result<()> {
-        let cover_id = self
-            .epub
-            .manifest()
-            .cover_image()
-            .map(|e| e.id())
-            .unwrap_or_default();
-
-        let folder = PathBuf::from("Images");
-        let selected: Vec<_> = self
-            .epub
-            .manifest()
-            .images()
-            .filter(|e| e.id() != cover_id)
-            .collect();
-
-        for entry in selected {
-            let href = entry.href();
-            let file_name = href.name().decode();
-            let Ok(content) = self.epub.read_resource_bytes(href) else {
-                log::warn!("Skipping unreadable resource: {}", href);
-                continue;
-            };
-
-            let mime = entry.media_type();
-            let path = folder.join(file_name.as_ref());
-            if let Err(error) = self.builder.add_resource(path, &*content, mime) {
-                log::warn!("{}", error);
-            }
-        }
-
+        let selected: Vec<_> = self.epub.manifest().images().collect();
+        let resources = read_resources(selected, "Images");
+        self.builder.edit().resource(resources);
         Ok(())
     }
 
     fn add_js(&mut self) -> Result<()> {
-        let folder = PathBuf::from("js");
         let selected: Vec<_> = self.epub.manifest().scripts().collect();
-
-        for entry in selected {
-            let href = entry.href();
-            let file_name = href.name().decode();
-            let Ok(content) = self.epub.read_resource_bytes(href) else {
-                log::warn!("Skipping unreadable resource: {}", href);
-                continue;
-            };
-
-            let mime = entry.media_type();
-            let path = folder.join(file_name.as_ref());
-            if let Err(error) = self.builder.add_resource(path, &*content, mime) {
-                log::warn!("{}", error);
-            }
-        }
+        let resources = read_resources(selected, "js");
+        self.builder.edit().resource(resources);
         Ok(())
     }
 
     fn add_style_sheets(&mut self) -> Result<()> {
-        let folder = PathBuf::from("Styles");
         let selected: Vec<_> = self.epub.manifest().styles().collect();
-
-        for entry in selected {
-            let href = entry.href();
-            let file_name = href.name().decode();
-            let Ok(content) = self.epub.read_resource_bytes(href) else {
-                log::warn!("Skipping unreadable resource: {}", href);
-                continue;
-            };
-
-            let mime = entry.media_type();
-            let path = folder.join(file_name.as_ref());
-            if let Err(error) = self.builder.add_resource(path, &*content, mime) {
-                log::warn!("{}", error);
-            }
-        }
+        let resources = read_resources(selected, "Styles");
+        self.builder.edit().resource(resources);
         Ok(())
     }
 
-    pub fn collect_contents(&mut self) -> Result<Vec<EpubContent<Cursor<Vec<u8>>>>> {
+    pub fn collect_contents(&mut self) -> Result<Vec<EpubChapter>> {
         // TODO return manifestentry
         let epub_paths = get_ordered_path(&self.epub);
         let path_map = self.path_map();
@@ -218,20 +177,29 @@ impl DocBuilder {
                 .ok_or(Error::BuildError("Invalid file name found"))?
                 .to_string_lossy()
                 .into_owned();
-            let mut content =
-                EpubContent::new(href.to_string_lossy(), Cursor::new(html.into_bytes()));
+            let href = href.to_string_lossy().into_owned();
 
-            if let Some(links) = chapters.remove(&file_name) {
-                count += 1;
-                let mut links = links.into_iter().enumerate();
-                let title = links.next().and_then(|(_, link)| link.title);
-                content = content.title(title.unwrap_or(format!("Chapter: {}", count)));
-                content = links.fold(content, |content, (i, TocLink { path, title })| {
-                    let title = title.unwrap_or(format!("Chapter: {}-{}", count, i + 1));
-                    content.child(TocElement::new(format!("Text/{path}"), title))
-                });
-            }
-            contents.push(content);
+            let mut content: Vec<_> = match chapters.remove(&file_name) {
+                Some(links) => {
+                    count += 1;
+                    let mut links = links.into_iter();
+                    let title = links.next().and_then(|link| link.title);
+                    let chapter = EpubChapter::new(title.unwrap_or(format!("Chapter: {}", count)))
+                        .href(href)
+                        .xhtml(html);
+
+                    let sub_chapters = links.map(|TocLink { path, title }| {
+                        count += 1;
+
+                        let title = title.unwrap_or(format!("Chapter: {}", count));
+                        EpubChapter::new(title).href(format!("Text/{path}"))
+                    });
+
+                    iter::once(chapter).chain(sub_chapters).collect()
+                }
+                None => vec![EpubChapter::unlisted(href).xhtml(html)],
+            };
+            contents.append(&mut content);
         }
 
         Ok(contents)
@@ -282,7 +250,6 @@ impl DocBuilder {
         for FormatPage { content, .. } in &self.pages {
             links.extend(parse_links(content));
         }
-
         links
     }
 
@@ -427,6 +394,26 @@ fn next_text(text: &[u8]) -> Result<Option<String>> {
         }
     }
     Ok(None)
+}
+
+fn read_resources(
+    entries: Vec<EpubManifestEntry<'_>>,
+    folder: &str,
+) -> Vec<DetachedEpubManifestEntry> {
+    entries
+        .into_par_iter()
+        .filter_map(|entry| {
+            let href = entry.href();
+            let file_name = href.name().decode();
+            if let Ok(content) = entry.read_bytes() {
+                let path = format!("{folder}/{file_name}");
+                return Some(DetachedEpubManifestEntry::from((path, content)));
+            } else {
+                log::warn!("Skipping unreadable resource: {}", href);
+                return None;
+            };
+        })
+        .collect()
 }
 
 fn link_files<'a>(

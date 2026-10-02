@@ -45,9 +45,6 @@ pub enum Error {
     Utf8Error(#[from] std::str::Utf8Error),
 
     #[error(transparent)]
-    EpubBuilderError(#[from] epub_builder::Error),
-
-    #[error(transparent)]
     IconError(#[from] iced::window::icon::Error),
 
     #[error(transparent)]
