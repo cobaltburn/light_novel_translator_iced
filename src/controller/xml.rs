@@ -1,5 +1,5 @@
 use crate::{
-    controller::image_marker,
+    controller::{PageLinks, image_marker},
     error::{Error, Result},
 };
 use bstr::ByteSlice;
@@ -9,12 +9,7 @@ use quick_xml::{
     events::{BytesStart, BytesText, Event},
 };
 use regex::Regex;
-use std::{
-    borrow::Cow,
-    io::Cursor,
-    os::unix::ffi::OsStrExt,
-    path::{Path, PathBuf},
-};
+use std::{borrow::Cow, io::Cursor};
 
 pub fn to_html(markdown: &str) -> String {
     let parser = Parser::new_ext(markdown, Options::all());
@@ -83,8 +78,11 @@ pub const XLINK: &str = "xlink:href";
 pub const IMG_BYTES: &[u8] = b"img";
 pub const IMAGE_BYTES: &[u8] = b"image";
 
-pub fn update_image_paths(html: &str) -> Result<String> {
-    let folder = PathBuf::from("../Images");
+pub const IMAGES: &str = "../Images";
+pub const STYLES: &str = "../Styles";
+pub const SCRIPTS: &str = "../Script";
+
+pub fn update_image_paths(html: &str, links: PageLinks<'_>) -> Result<String> {
     let mut reader = Reader::from_str(html);
     reader.config_mut().trim_text(true);
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
@@ -92,11 +90,11 @@ pub fn update_image_paths(html: &str) -> Result<String> {
     loop {
         match reader.read_event()? {
             Event::Empty(tag) if tag.name().as_ref() == IMG_BYTES => {
-                let tag = update_tag_path(tag, &folder, SRC)?;
+                let tag = update_tag_path(tag, links, IMAGES, SRC)?;
                 writer.write_event(Event::Empty(tag))?;
             }
             Event::Empty(tag) if tag.name().as_ref() == IMAGE_BYTES => {
-                let tag = update_tag_path(tag, &folder, XLINK)?;
+                let tag = update_tag_path(tag, links, IMAGES, XLINK)?;
                 writer.write_event(Event::Empty(tag))?;
             }
             Event::Eof => break,
@@ -107,20 +105,35 @@ pub fn update_image_paths(html: &str) -> Result<String> {
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-pub fn update_style_path(html: &str) -> Result<String> {
-    let folder = PathBuf::from("../Styles");
+pub const LINK_BYTES: &[u8] = b"link";
+pub const SCRIPT_BYTES: &[u8] = b"script";
+
+/// Points `<link href>` and `<script src>` at where the builder writes those
+/// resources (`../Styles` and `../Script`).
+pub fn update_resource_tag<'a>(event: Event<'a>, links: PageLinks<'_>) -> Result<Event<'a>> {
+    Ok(match event {
+        Event::Empty(tag) if tag.name().as_ref() == LINK_BYTES => {
+            Event::Empty(update_tag_path(tag, links, STYLES, "href")?)
+        }
+        Event::Empty(tag) if tag.name().as_ref() == SCRIPT_BYTES => {
+            Event::Empty(update_tag_path(tag, links, SCRIPTS, SRC)?)
+        }
+        Event::Start(tag) if tag.name().as_ref() == SCRIPT_BYTES => {
+            Event::Start(update_tag_path(tag, links, SCRIPTS, SRC)?)
+        }
+        event => event,
+    })
+}
+
+pub fn update_resource_paths(html: &str, links: PageLinks<'_>) -> Result<String> {
     let mut reader = Reader::from_str(html);
     reader.config_mut().trim_text(true);
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
 
     loop {
         match reader.read_event()? {
-            Event::Empty(tag) if tag.name().as_ref() == b"link" => {
-                let tag = update_tag_path(tag, &folder, "href")?;
-                writer.write_event(Event::Empty(tag))?;
-            }
             Event::Eof => break,
-            event => writer.write_event(event)?,
+            event => writer.write_event(update_resource_tag(event, links)?)?,
         }
     }
 
@@ -129,17 +142,16 @@ pub fn update_style_path(html: &str) -> Result<String> {
 
 pub fn update_tag_path(
     tag: BytesStart<'_>,
-    folder: &Path,
+    links: PageLinks<'_>,
+    folder: &str,
     attr: &str,
 ) -> Result<BytesStart<'static>> {
     let Some(link) = tag.try_get_attribute(attr)? else {
         return Ok(tag.into_owned());
     };
 
-    let path = PathBuf::from(link.normalized_value(XmlVersion::Implicit1_0)?.as_ref());
-    let file_name = path.file_name().unwrap();
-    let path = folder.join(file_name);
-    let path = path.as_os_str();
+    let link = link.normalized_value(XmlVersion::Implicit1_0)?;
+    let path = links.resolve(&link, folder);
 
     let attributes: Vec<_> = tag
         .attributes()
@@ -149,7 +161,7 @@ pub fn update_tag_path(
 
     let tag = BytesStart::new(str::from_utf8(tag.name().as_ref())?)
         .with_attributes(attributes)
-        .with_attributes([(attr.as_bytes(), path.as_bytes())])
+        .with_attributes([(attr, path.as_str())])
         .into_owned();
     Ok(tag)
 }
@@ -199,8 +211,10 @@ fn is_image(tag: &BytesStart<'_>) -> bool {
 
 /// Pairs each image tag with the first non-empty text that follows it,
 /// or `None` if no text follows the image.
-pub fn image_anchors(html: &str) -> Result<Vec<(BytesStart<'static>, Option<String>)>> {
-    let folder = PathBuf::from("../Images");
+pub fn image_anchors(
+    html: &str,
+    links: PageLinks<'_>,
+) -> Result<Vec<(BytesStart<'static>, Option<String>)>> {
     let html = strip_syosetu_tags(html)?;
     let mut reader = Reader::from_str(&html);
     let mut anchors = vec![];
@@ -212,8 +226,12 @@ pub fn image_anchors(html: &str) -> Result<Vec<(BytesStart<'static>, Option<Stri
                 reader.read_to_end(tag.name())?;
             }
             Event::Empty(tag) if is_image(&tag) => {
-                let attr = if tag.name().as_ref() == IMG_BYTES { SRC } else { XLINK };
-                pending.push(update_tag_path(tag, &folder, attr)?);
+                let attr = if tag.name().as_ref() == IMG_BYTES {
+                    SRC
+                } else {
+                    XLINK
+                };
+                pending.push(update_tag_path(tag, links, IMAGES, attr)?);
             }
             Event::Text(text) if !pending.is_empty() => {
                 let text = text.xml10_content()?;

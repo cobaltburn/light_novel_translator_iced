@@ -95,7 +95,7 @@ impl Format {
         self.source_folder.clear();
         self.cover = None;
 
-        DocBuilder::new(epub, name, pages, metadata)
+        Ok(DocBuilder::new(epub, name, pages, metadata))
     }
 }
 

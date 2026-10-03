@@ -9,6 +9,7 @@ fast_html2md = "0.0.62"
 iced = { version = "0.14.0", features = ["advanced", "debug", "image", "lazy", "markdown", "svg", "tokio"] }
 iced_aw = { version = "0.14.1", default-features = false, features = ["context_menu", "typed_input", "menu", "tab_bar", "card", "number_input"] }
 log = "0.4.29" 
+percent-encoding = "2.3.2"
 phf = { version = "0.13.1", features = ["macros"] }
 pulldown-cmark = "0.13.4"
 quick-xml = "0.40.1" 

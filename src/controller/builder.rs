@@ -1,9 +1,9 @@
 use crate::{
     controller::{
-        DEFAULT_STYLESHEET, TOC_PAGE_STEM, get_ordered_path, html_to_markdown, image_anchors,
-        image_marker_indices, insert_anchors, markdown_sections, parse_links,
-        replace_image_markers, strip_syosetu_tags, strip_tags, to_html, update_image_paths,
-        update_style_path, write_body, write_header,
+        DEFAULT_STYLESHEET, PageLinks, ResourcePaths, TOC_PAGE_STEM, get_ordered_path,
+        html_to_markdown, image_anchors, image_marker_indices, insert_anchors, markdown_sections,
+        parse_links, replace_image_markers, strip_syosetu_tags, strip_tags, to_html,
+        update_image_paths, update_resource_paths, write_body, write_header,
     },
     error::{Error, Result},
     model::{EpubMetadata, FormatPage},
@@ -24,7 +24,7 @@ use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     io::{self, Cursor},
-    iter, mem,
+    mem,
     path::{Path, PathBuf},
 };
 
@@ -38,19 +38,14 @@ pub struct DocBuilder {
 }
 
 impl DocBuilder {
-    pub fn new(
-        epub: Epub,
-        name: String,
-        pages: Vec<FormatPage>,
-        metadata: EpubMetadata,
-    ) -> Result<Self> {
-        Ok(DocBuilder {
+    pub fn new(epub: Epub, name: String, pages: Vec<FormatPage>, metadata: EpubMetadata) -> Self {
+        DocBuilder {
             epub,
             name,
             metadata,
             pages,
             builder: Epub::new(),
-        })
+        }
     }
 
     pub fn build(mut self) -> Result<(Vec<u8>, String)> {
@@ -79,12 +74,31 @@ impl DocBuilder {
             .modified_now()
             .resource(("stylesheet.css", DEFAULT_STYLESHEET));
 
-        self.add_images()?;
-        self.add_cover_image()?;
-        self.add_style_sheets()?;
-        self.add_js()?;
+        let manifest = self.epub.manifest();
+        let cover = manifest.cover_image();
+        let mut paths = ResourcePaths::default();
+        if let Some(cover) = cover {
+            paths.insert(cover.href(), "Images");
+        }
 
-        let chapters = self.collect_contents()?;
+        let images: Vec<_> = manifest
+            .images()
+            .filter(|e| Some(e.id()) != cover.map(|c| c.id()))
+            .collect();
+        let styles: Vec<_> = manifest.styles().collect();
+        let scripts: Vec<_> = manifest.scripts().collect();
+        let entries: Vec<_> = [(images, "Images"), (styles, "Styles"), (scripts, "Script")]
+            .into_iter()
+            .flat_map(|(entries, folder)| entries.into_iter().map(move |e| (e, folder)))
+            .map(|(entry, folder)| {
+                let path = paths.insert(entry.href(), folder);
+                (entry, path)
+            })
+            .collect();
+        self.builder.edit().resource(read_resources(entries));
+        self.add_cover_image(&paths);
+
+        let chapters = self.collect_contents(&paths)?;
         self.builder.edit().chapter(chapters);
 
         let content = self.builder.write().to_vec()?;
@@ -92,46 +106,25 @@ impl DocBuilder {
         Ok((content, self.name))
     }
 
-    pub fn add_cover_image(&mut self) -> Result<()> {
+    pub fn add_cover_image(&mut self, paths: &ResourcePaths) {
         let Some(cover) = self.epub.manifest().cover_image() else {
-            return Ok(());
+            return;
+        };
+        let Some(path) = paths.get(cover.href()) else {
+            return;
         };
 
-        let content = cover.read_bytes()?;
-        let file_name = cover.href().name().as_str();
-        let path = format!("Images/{file_name}");
-        let mime = cover.media_type();
+        if let Ok(content) = cover.read_bytes() {
+            let path = path.to_string();
+            let mime = cover.media_type();
 
-        self.builder
-            .edit()
-            .cover_image(DetachedEpubManifestEntry::from((path, content)).media_type(mime));
-
-        Ok(())
+            self.builder
+                .edit()
+                .cover_image(DetachedEpubManifestEntry::from((path, content)).media_type(mime));
+        }
     }
 
-    pub fn add_images(&mut self) -> Result<()> {
-        let selected: Vec<_> = self.epub.manifest().images().collect();
-        let resources = read_resources(selected, "Images");
-        self.builder.edit().resource(resources);
-        Ok(())
-    }
-
-    fn add_js(&mut self) -> Result<()> {
-        let selected: Vec<_> = self.epub.manifest().scripts().collect();
-        let resources = read_resources(selected, "js");
-        self.builder.edit().resource(resources);
-        Ok(())
-    }
-
-    fn add_style_sheets(&mut self) -> Result<()> {
-        let selected: Vec<_> = self.epub.manifest().styles().collect();
-        let resources = read_resources(selected, "Styles");
-        self.builder.edit().resource(resources);
-        Ok(())
-    }
-
-    pub fn collect_contents(&mut self) -> Result<Vec<EpubChapter>> {
-        // TODO return manifestentry
+    pub fn collect_contents(&mut self, paths: &ResourcePaths) -> Result<Vec<EpubChapter>> {
         let epub_paths = get_ordered_path(&self.epub);
         let path_map = self.path_map();
 
@@ -145,8 +138,9 @@ impl DocBuilder {
             .map(|(md_file, entry)| {
                 let html = entry.read_str()?;
                 let path = Path::new(entry.href().path().as_str());
-                let href = to_text_path(&path)?;
-                Ok((href, md_file, html))
+                let href = to_text_path(path)?;
+                let source = entry.href().path().decode().into_owned();
+                Ok((href, md_file, source, html))
             })
             .collect::<Result<_>>()?;
 
@@ -162,13 +156,17 @@ impl DocBuilder {
         let mut count = 0;
         let mut contents = Vec::new();
 
-        for (href, md_file, html) in file_parts {
+        for (href, md_file, source, html) in file_parts {
             let md_name = md_file.file_name().unwrap_or_default();
+            let links = PageLinks {
+                page: &source,
+                paths,
+            };
             let html = match pages.get(md_name) {
-                Some(FormatPage { content, .. }) => build_html(&html, content, &toc_ids)?,
+                Some(FormatPage { content, .. }) => build_html(&html, content, &toc_ids, links)?,
                 None => {
-                    let html = update_image_paths(&html)?;
-                    update_style_path(&html)?
+                    let html = update_image_paths(&html, links)?;
+                    update_resource_paths(&html, links)?
                 }
             };
 
@@ -179,27 +177,24 @@ impl DocBuilder {
                 .into_owned();
             let href = href.to_string_lossy().into_owned();
 
-            let mut content: Vec<_> = match chapters.remove(&file_name) {
-                Some(links) => {
-                    count += 1;
-                    let mut links = links.into_iter();
-                    let title = links.next().and_then(|link| link.title);
-                    let chapter = EpubChapter::new(title.unwrap_or(format!("Chapter: {}", count)))
-                        .href(href)
-                        .xhtml(html);
-
-                    let sub_chapters = links.map(|TocLink { path, title }| {
-                        count += 1;
-
-                        let title = title.unwrap_or(format!("Chapter: {}", count));
-                        EpubChapter::new(title).href(format!("Text/{path}"))
-                    });
-
-                    iter::once(chapter).chain(sub_chapters).collect()
-                }
-                None => vec![EpubChapter::unlisted(href).xhtml(html)],
+            let Some(links) = chapters.remove(&file_name) else {
+                contents.push(EpubChapter::unlisted(href).xhtml(html));
+                continue;
             };
-            contents.append(&mut content);
+
+            count += 1;
+            let mut links = links.into_iter();
+            let title = links.next().and_then(|link| link.title);
+            let chapter = EpubChapter::new(title.unwrap_or(format!("Chapter: {}", count)))
+                .href(href)
+                .xhtml(html);
+            contents.push(chapter);
+
+            for TocLink { path, title } in links {
+                count += 1;
+                let title = title.unwrap_or(format!("Chapter: {}", count));
+                contents.push(EpubChapter::new(title).href(format!("Text/{path}")));
+            }
         }
 
         Ok(contents)
@@ -396,22 +391,16 @@ fn next_text(text: &[u8]) -> Result<Option<String>> {
     Ok(None)
 }
 
-fn read_resources(
-    entries: Vec<EpubManifestEntry<'_>>,
-    folder: &str,
-) -> Vec<DetachedEpubManifestEntry> {
+fn read_resources(entries: Vec<(EpubManifestEntry<'_>, String)>) -> Vec<DetachedEpubManifestEntry> {
     entries
         .into_par_iter()
-        .filter_map(|entry| {
-            let href = entry.href();
-            let file_name = href.name().decode();
-            if let Ok(content) = entry.read_bytes() {
-                let path = format!("{folder}/{file_name}");
-                return Some(DetachedEpubManifestEntry::from((path, content)));
-            } else {
-                log::warn!("Skipping unreadable resource: {}", href);
+        .filter_map(|(entry, path)| {
+            let Ok(content) = entry.read_bytes() else {
+                log::warn!("Skipping unreadable resource: {}", entry.href());
                 return None;
             };
+
+            Some(DetachedEpubManifestEntry::from((path, content)).media_type(entry.media_type()))
         })
         .collect()
 }
@@ -439,9 +428,14 @@ fn to_text_path(path: &Path) -> Result<PathBuf> {
     Ok(PathBuf::from("Text").join(file_name))
 }
 
-pub fn build_html(html: &str, content: &str, toc_ids: &[String]) -> Result<String> {
+pub fn build_html(
+    html: &str,
+    content: &str,
+    toc_ids: &[String],
+    links: PageLinks<'_>,
+) -> Result<String> {
     let found = image_marker_indices(content);
-    let (marked, estimated): (Vec<_>, Vec<_>) = image_anchors(html)?
+    let (marked, estimated): (Vec<_>, Vec<_>) = image_anchors(html, links)?
         .into_iter()
         .enumerate()
         .partition(|(i, _)| found.contains(i));
@@ -465,7 +459,7 @@ pub fn build_html(html: &str, content: &str, toc_ids: &[String]) -> Result<Strin
         .with_attribute(("xmlns:epub", "http://www.idpf.org/2007/ops"))
         .with_attribute(("xml:lang", "en"))
         .write_inner_content(|writer| {
-            write_header(writer, html).map_err(io::Error::other)?;
+            write_header(writer, html, links).map_err(io::Error::other)?;
             write_body(writer, &content).map_err(io::Error::other)
         })?;
 

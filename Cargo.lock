@@ -2656,6 +2656,7 @@ dependencies = [
  "iced",
  "iced_aw",
  "log",
+ "percent-encoding",
  "phf 0.13.1",
  "pulldown-cmark 0.13.4",
  "quick-xml 0.40.1",

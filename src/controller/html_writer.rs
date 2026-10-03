@@ -1,5 +1,7 @@
 use crate::{
-    controller::{Anchor, AnchorPosition, IMAGE_MARKER_RE, extract_head, update_tag_path},
+    controller::{
+        Anchor, AnchorPosition, IMAGE_MARKER_RE, PageLinks, extract_head, update_resource_tag,
+    },
     error::Result,
 };
 use quick_xml::{
@@ -14,33 +16,35 @@ use std::{
     fmt::Write as _,
     io::{self, Cursor},
     mem,
-    path::PathBuf,
     sync::LazyLock,
 };
 
-pub fn write_header(writer: &mut Writer<Cursor<Vec<u8>>>, html: &str) -> Result<()> {
+pub fn write_header(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    html: &str,
+    links: PageLinks<'_>,
+) -> Result<()> {
     let head = extract_head(html)?;
 
     writer
         .create_element("head")
-        .write_inner_content(|writer| write_head(writer, head).map_err(io::Error::other))?;
+        .write_inner_content(|writer| write_head(writer, head, links).map_err(io::Error::other))?;
 
     Ok(())
 }
 
-pub fn write_head(writer: &mut Writer<Cursor<Vec<u8>>>, head: Cow<'_, str>) -> Result<()> {
-    let folder = PathBuf::from("../Styles");
+pub fn write_head(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    head: Cow<'_, str>,
+    links: PageLinks<'_>,
+) -> Result<()> {
     let mut reader = Reader::from_str(&head);
     reader.config_mut().trim_text(true);
 
     loop {
         match reader.read_event()? {
-            Event::Empty(tag) if tag.name().as_ref() == b"link" => {
-                let tag = update_tag_path(tag, &folder, "href")?;
-                writer.write_event(Event::Empty(tag))?;
-            }
             Event::Eof => break,
-            e => writer.write_event(e)?,
+            e => writer.write_event(update_resource_tag(e, links)?)?,
         }
     }
 
