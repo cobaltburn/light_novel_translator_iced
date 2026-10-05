@@ -179,7 +179,6 @@ pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
     }
 }
 
-/// Replaces each image with a marker paragraph, numbered in the same order as `image_anchors`.
 pub fn insert_image_markers(html: &str) -> Result<String> {
     let mut reader = Reader::from_str(html);
     let mut writer = Writer::new(Cursor::new(Vec::new()));

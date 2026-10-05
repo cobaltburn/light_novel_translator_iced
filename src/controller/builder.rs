@@ -2,7 +2,7 @@ use crate::{
     controller::{
         DEFAULT_STYLESHEET, PageLinks, ResourcePaths, TOC_PAGE_STEM, get_ordered_path,
         html_to_markdown, image_anchors, image_marker_indices, insert_anchors, markdown_sections,
-        parse_links, replace_image_markers, strip_syosetu_tags, strip_tags, to_html,
+        parse_headers, parse_links, replace_image_markers, strip_syosetu_tags, strip_tags, to_html,
         update_image_paths, update_resource_paths, write_body, write_header,
     },
     error::{Error, Result},
@@ -23,7 +23,7 @@ use rbook::{
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
-    io::{self, Cursor},
+    io::Cursor,
     mem,
     path::{Path, PathBuf},
 };
@@ -153,17 +153,18 @@ impl DocBuilder {
             .filter_map(|e| Some((e.path.file_name()?, e)))
             .collect();
 
-        let mut count = 0;
         let mut contents = Vec::new();
 
-        for (href, md_file, source, html) in file_parts {
+        for (page, (href, md_file, source, html)) in file_parts.into_iter().enumerate() {
             let md_name = md_file.file_name().unwrap_or_default();
             let links = PageLinks {
                 page: &source,
                 paths,
             };
             let html = match pages.get(md_name) {
-                Some(FormatPage { content, .. }) => build_html(&html, content, &toc_ids, links)?,
+                Some(FormatPage { content, .. }) => {
+                    build_html(&html, content, &toc_ids, links, page)?
+                }
                 None => {
                     let html = update_image_paths(&html, links)?;
                     update_resource_paths(&html, links)?
@@ -177,23 +178,22 @@ impl DocBuilder {
                 .into_owned();
             let href = href.to_string_lossy().into_owned();
 
+            let mut sub_chapters = parse_headers(&html)?;
+            contents.push(EpubChapter::unlisted(href).xhtml(html));
             let Some(links) = chapters.remove(&file_name) else {
-                contents.push(EpubChapter::unlisted(href).xhtml(html));
+                contents.extend(sub_chapters.remove("").unwrap_or_default().into_iter().map(
+                    |(id, title)| EpubChapter::new(title).href(format!("Text/{file_name}#{id}")),
+                ));
                 continue;
             };
 
-            count += 1;
-            let mut links = links.into_iter();
-            let title = links.next().and_then(|link| link.title);
-            let chapter = EpubChapter::new(title.unwrap_or(format!("Chapter: {}", count)))
-                .href(href)
-                .xhtml(html);
-            contents.push(chapter);
-
             for TocLink { path, title } in links {
-                count += 1;
-                let title = title.unwrap_or(format!("Chapter: {}", count));
                 contents.push(EpubChapter::new(title).href(format!("Text/{path}")));
+                let fragment = path.rsplit_once('#').map_or_default(|(_, f)| f);
+                let sub_chapters = sub_chapters.remove(fragment).unwrap_or_default();
+                contents.extend(sub_chapters.into_iter().map(|(id, title)| {
+                    EpubChapter::new(title).href(format!("Text/{file_name}#{id}"))
+                }));
             }
         }
 
@@ -221,7 +221,7 @@ impl DocBuilder {
             return chapters;
         };
 
-        for page in pages.flatten() {
+        for (i, page) in pages.flatten().enumerate() {
             let Some(href) = page.href() else {
                 continue;
             };
@@ -229,7 +229,7 @@ impl DocBuilder {
             let path = href
                 .fragment()
                 .map_or(file.clone(), |f| format!("{}#{}", file, f));
-            let title = links.remove(&path);
+            let title = links.remove(&path).unwrap_or(format!("Chapter: {}", i + 1));
 
             chapters
                 .entry(file)
@@ -433,6 +433,7 @@ pub fn build_html(
     content: &str,
     toc_ids: &[String],
     links: PageLinks<'_>,
+    page: usize,
 ) -> Result<String> {
     let found = image_marker_indices(content);
     let (marked, estimated): (Vec<_>, Vec<_>) = image_anchors(html, links)?
@@ -459,8 +460,8 @@ pub fn build_html(
         .with_attribute(("xmlns:epub", "http://www.idpf.org/2007/ops"))
         .with_attribute(("xml:lang", "en"))
         .write_inner_content(|writer| {
-            write_header(writer, html, links).map_err(io::Error::other)?;
-            write_body(writer, &content).map_err(io::Error::other)
+            write_header(writer, html, links)?;
+            write_body(writer, &content, page)
         })?;
 
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
@@ -476,7 +477,7 @@ pub fn replace_jp_symbols(text: &str) -> String {
 #[derive(Debug)]
 pub struct TocLink {
     pub path: String,
-    pub title: Option<String>,
+    pub title: String,
 }
 
 #[cfg(test)]

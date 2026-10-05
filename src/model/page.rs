@@ -11,6 +11,7 @@ use iced::{
     widget::{Button, Column, button, right, span, text},
 };
 use phf::phf_map;
+use pulldown_cmark::{Event, Parser, Tag};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rig_core::message::Message;
 use serde::{Deserialize, Serialize};
@@ -64,6 +65,27 @@ impl Page {
 
     pub fn check_incomplete(&self) -> bool {
         self.sections.iter().any(|e| e.content.is_empty())
+    }
+
+    pub fn check_page(&mut self, last_section: &str) {
+        self.errors = [
+            self.check_size(),
+            self.check_japanese(),
+            self.check_frequency(),
+            self.check_jaccard(last_section),
+            self.check_image_tags(),
+            self.check_header_tags(),
+        ]
+        .concat();
+        self.errors.sort_by_key(|e| e.index());
+
+        self.activity = if let Some(error) = self.errors.first() {
+            Activity::Error(error.index() + 1)
+        } else if self.check_incomplete() {
+            Activity::Incomplete
+        } else {
+            Activity::Complete
+        };
     }
 
     pub fn check_japanese(&self) -> Vec<PageError> {
@@ -123,7 +145,7 @@ impl Page {
             .collect()
     }
 
-    fn check_image_tags(&mut self) -> Vec<PageError> {
+    fn check_image_tags(&self) -> Vec<PageError> {
         self.sections
             .iter()
             .enumerate()
@@ -137,24 +159,17 @@ impl Page {
             .collect()
     }
 
-    pub fn check_page(&mut self, last_section: &str) {
-        self.errors = [
-            self.check_size(),
-            self.check_japanese(),
-            self.check_frequency(),
-            self.check_jaccard(last_section),
-            self.check_image_tags(),
-        ]
-        .concat();
-        self.errors.sort_by_key(|e| e.index());
-
-        self.activity = if let Some(error) = self.errors.first() {
-            Activity::Error(error.index() + 1)
-        } else if self.check_incomplete() {
-            Activity::Incomplete
-        } else {
-            Activity::Complete
-        };
+    fn check_header_tags(&self) -> Vec<PageError> {
+        self.sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.content.is_empty())
+            .filter_map(|(i, Section { japanese, content })| {
+                let japanese_count = header_tag_count(&japanese);
+                let content_count = header_tag_count(&content);
+                (japanese_count != content_count).then_some(PageError::Header(i))
+            })
+            .collect()
     }
 
     pub fn error_cards<T: 'static + Clone>(
@@ -321,6 +336,12 @@ fn check_char_frequency(text: &str) -> bool {
         })
 }
 
+fn header_tag_count(text: &str) -> usize {
+    Parser::new(text)
+        .filter(|e| matches!(e, Event::Start(Tag::Heading { .. })))
+        .count()
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Section {
     pub japanese: String,
@@ -388,6 +409,7 @@ pub enum PageError {
     Repeat(usize),
     Copy(usize),
     ImageTag(usize),
+    Header(usize),
 }
 
 impl PageError {
@@ -397,7 +419,8 @@ impl PageError {
             | PageError::Size(i, ..)
             | PageError::Repeat(i)
             | PageError::Copy(i)
-            | PageError::ImageTag(i) => *i,
+            | PageError::ImageTag(i)
+            | PageError::Header(i) => *i,
         }
     }
 
@@ -418,6 +441,7 @@ impl PageError {
             PageError::Repeat(i) => make_btn(format!("Repeat error: {:2}", i + 1), *i),
             PageError::Copy(i) => make_btn(format!("Copy error: {:2}", i + 1), *i),
             PageError::ImageTag(i) => make_btn(format!("Image Tag error: {:2}", i + 1), *i),
+            PageError::Header(i) => make_btn(format!("Header Tag error: {:2}", i + 1), *i),
         }
     }
 }

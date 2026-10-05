@@ -23,8 +23,8 @@ pub fn write_header(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     html: &str,
     links: PageLinks<'_>,
-) -> Result<()> {
-    let head = extract_head(html)?;
+) -> io::Result<()> {
+    let head = extract_head(html).map_err(io::Error::other)?;
 
     writer
         .create_element("head")
@@ -60,14 +60,20 @@ pub fn write_head(
 const ANCHOR_TAG: &[u8] = b"a";
 const DIV: &str = "div";
 
-pub fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, content: &str) -> Result<()> {
+pub fn write_body(
+    writer: &mut Writer<Cursor<Vec<u8>>>,
+    content: &str,
+    page: usize,
+) -> io::Result<()> {
     let mut reader = Reader::from_str(content);
     reader.config_mut().trim_text(true);
+    let h_tags: &[&[u8]] = &[b"h1", b"h2", b"h3", b"h4"];
 
     writer
         .create_element("body")
         .with_attribute(("class", "p-text"))
         .write_inner_content(|writer| {
+            let mut count = 0;
             loop {
                 match reader.read_event().map_err(io::Error::other)? {
                     Event::Start(tag) if tag.name().as_ref() == ANCHOR_TAG => {
@@ -77,6 +83,12 @@ pub fn write_body(writer: &mut Writer<Cursor<Vec<u8>>>, content: &str) -> Result
                     Event::End(tag) if tag.name().as_ref() == ANCHOR_TAG => {
                         writer.write_event(Event::End(tag))?;
                         writer.write_event(Event::End(BytesEnd::new(DIV)))?;
+                    }
+                    Event::Start(tag) if h_tags.contains(&tag.name().as_ref()) => {
+                        count += 1;
+                        let id = format!("h{:03}-{:03}", page, count);
+                        let tag = tag.with_attributes([("id", id.as_str())]);
+                        writer.write_event(Event::Start(tag))?;
                     }
                     Event::Eof => break,
                     e => writer.write_event(e)?,

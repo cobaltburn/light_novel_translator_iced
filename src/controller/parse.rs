@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     collections::{HashMap, HashSet},
     io::Cursor,
     path::Path,
@@ -11,7 +12,7 @@ use crate::{
 };
 use html2md::rewrite_html;
 use pulldown_cmark::{Parser, Tag, TagEnd};
-use quick_xml::{Writer, events::BytesText};
+use quick_xml::{Reader, Writer, XmlVersion, events::BytesText};
 use rbook::epub::toc::EpubToc;
 use regex::Regex;
 
@@ -98,6 +99,54 @@ pub fn parse_links(content: &str) -> HashMap<String, String> {
     links
 }
 
+pub fn parse_headers(html: &str) -> Result<HashMap<String, Vec<(String, String)>>> {
+    use quick_xml::events::Event;
+    let mut reader = Reader::from_str(html);
+    let mut titles: Vec<_> = vec![(String::new(), Vec::new())];
+    let h_tags: &[&[u8]] = &[b"h1", b"h2", b"h3", b"h4"];
+
+    loop {
+        match reader.read_event()? {
+            Event::Start(tag) if tag.name().as_ref() == b"div" => {
+                if let Some(id) = tag.try_get_attribute("id")? {
+                    let id = id.normalized_value(XmlVersion::Implicit1_0)?;
+                    titles.push((id.into_owned(), Vec::new()));
+                }
+            }
+            Event::Start(tag) if h_tags.contains(&tag.name().as_ref()) => {
+                let title = extract_text(reader.read_text(tag.name())?.into_inner())?;
+                let id = tag.try_get_attribute("id")?;
+                if let Some((_, titles)) = titles.last_mut()
+                    && let Some(id) = id
+                {
+                    let id = id.normalized_value(XmlVersion::Implicit1_0)?.to_string();
+                    titles.push((id, title));
+                }
+            }
+            Event::Eof => break,
+            _ => (),
+        }
+    }
+    Ok(titles.into_iter().collect())
+}
+
+fn extract_text(html: Cow<'_, [u8]>) -> Result<String> {
+    use quick_xml::events::Event;
+    let mut reader = Reader::from_reader(html.as_ref());
+    let mut title = String::new();
+    loop {
+        match reader.read_event()? {
+            Event::Text(text) => {
+                let text = text.html_content()?;
+                title.push_str(text.as_ref());
+            }
+            Event::Eof => break,
+            _ => (),
+        }
+    }
+    Ok(title)
+}
+
 pub fn is_empty_section(section: &str) -> bool {
     section.trim().trim_matches('#').is_empty()
 }
@@ -130,8 +179,6 @@ pub fn partition_text(text: &str) -> Vec<String> {
         })
 }
 
-/// Partitions markdown into the non-empty sections that are sent for translation.
-/// Anything that maps positions onto translated sections must use this so indices line up.
 pub fn markdown_sections(markdown: &str) -> Vec<String> {
     partition_text(markdown)
         .into_iter()
