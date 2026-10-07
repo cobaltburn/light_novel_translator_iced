@@ -6,8 +6,8 @@ use crate::{
 };
 use quick_xml::{
     Reader, Writer,
-    escape::escape,
-    events::{BytesEnd, BytesStart, Event},
+    escape::{escape, partial_escape},
+    events::{BytesStart, Event},
 };
 use regex::Regex;
 use std::{
@@ -58,7 +58,7 @@ pub fn write_head(
 }
 
 const ANCHOR_TAG: &[u8] = b"a";
-const DIV: &str = "div";
+const BR: &str = "br";
 
 pub fn write_body(
     writer: &mut Writer<Cursor<Vec<u8>>>,
@@ -66,23 +66,29 @@ pub fn write_body(
     page: usize,
 ) -> io::Result<()> {
     let mut reader = Reader::from_str(content);
-    reader.config_mut().trim_text(true);
     let h_tags: &[&[u8]] = &[b"h1", b"h2", b"h3", b"h4"];
 
     writer
         .create_element("body")
-        .with_attribute(("class", "p-text"))
         .write_inner_content(|writer| {
             let mut count = 0;
+            let mut after_link = false;
             loop {
                 match reader.read_event().map_err(io::Error::other)? {
                     Event::Start(tag) if tag.name().as_ref() == ANCHOR_TAG => {
-                        writer.write_event(Event::Start(BytesStart::new(DIV)))?;
+                        if after_link {
+                            writer.write_event(Event::Empty(BytesStart::new(BR)))?;
+                        }
                         writer.write_event(Event::Start(tag))?;
                     }
                     Event::End(tag) if tag.name().as_ref() == ANCHOR_TAG => {
                         writer.write_event(Event::End(tag))?;
-                        writer.write_event(Event::End(BytesEnd::new(DIV)))?;
+                        after_link = true;
+                        continue;
+                    }
+                    Event::Text(text) if text.iter().all(u8::is_ascii_whitespace) => {
+                        writer.write_event(Event::Text(text))?;
+                        continue;
                     }
                     Event::Start(tag) if h_tags.contains(&tag.name().as_ref()) => {
                         count += 1;
@@ -93,6 +99,7 @@ pub fn write_body(
                     Event::Eof => break,
                     e => writer.write_event(e)?,
                 }
+                after_link = false;
             }
             Ok(())
         })?;
@@ -109,14 +116,11 @@ fn write_image_tags(
 
     writer
         .create_element("div")
-        .with_attribute(("style", "text-align: center;"))
+        .with_attribute(("class", "illustration"))
         .write_inner_content(|writer| {
-            writer.create_element("p").write_inner_content(|writer| {
-                for tag in image_tags {
-                    writer.write_event(Event::Empty(tag))?;
-                }
-                Ok(())
-            })?;
+            for tag in image_tags {
+                writer.write_event(Event::Empty(tag))?;
+            }
             Ok(())
         })?;
 
@@ -134,7 +138,7 @@ pub fn insert_anchors(content: &str, anchors: Vec<AnchorPosition>) -> Result<Str
     let sections = PART_RE
         .split(content)
         .filter(|e| !e.trim().is_empty())
-        .map(escape);
+        .map(partial_escape);
     let mut output = String::with_capacity(content.len());
 
     for (index, section) in sections.enumerate() {
@@ -160,7 +164,6 @@ pub fn insert_anchors(content: &str, anchors: Vec<AnchorPosition>) -> Result<Str
         write_anchors(&mut output, anchors)?;
     }
 
-    // Anchors whose section is missing from the translated content are appended at the end
     let mut remaining: Vec<_> = section_anchors.into_iter().collect();
     remaining.sort_by_key(|(section, _)| *section);
     for (_, mut anchors) in remaining {
@@ -232,4 +235,53 @@ fn write_image_block(output: &mut String, image_tags: Vec<BytesStart<'_>>) -> Re
     output.push_str(str::from_utf8(&writer.into_inner().into_inner())?);
     output.push_str("\n\n");
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn body(content: &str) -> String {
+        let mut writer = Writer::new(Cursor::new(Vec::new()));
+        write_body(&mut writer, content, 0).unwrap();
+        String::from_utf8(writer.into_inner().into_inner()).unwrap()
+    }
+
+    #[test]
+    fn keeps_spaces_around_inline_tags() {
+        let html = body("<p>He said <em>no</em> and left</p>");
+        assert!(html.starts_with("<body><p>"));
+        assert!(html.contains("<p>He said <em>no</em> and left</p>"));
+    }
+
+    #[test]
+    fn keeps_inline_links_inline() {
+        let html = body("<p>See <a href=\"a.xhtml\">this</a> page</p>");
+        assert!(html.contains("<p>See <a href=\"a.xhtml\">this</a> page</p>"));
+        assert!(!html.contains("<div"));
+    }
+
+    #[test]
+    fn splits_consecutive_links() {
+        let html = body("<p><a href=\"1.xhtml\">One</a>\n<a href=\"2.xhtml\">Two</a></p>");
+        assert!(html.contains("</a>\n<br/><a href=\"2.xhtml\">"));
+        assert!(!html.contains("<div"));
+    }
+
+    #[test]
+    fn keeps_quotes_for_smart_punctuation() {
+        let content = insert_anchors("\"Don't,\" she said <3 & left", Vec::new()).unwrap();
+        assert_eq!(content, "\"Don't,\" she said &lt;3 &amp; left");
+    }
+
+    #[test]
+    fn writes_illustration_block() {
+        let mut output = String::new();
+        let img = BytesStart::new("img").with_attributes([("src", "../Images/1.jpg")]);
+        write_image_block(&mut output, vec![img]).unwrap();
+        assert!(
+            output.starts_with("<div class=\"illustration\"><img src=\"../Images/1.jpg\"/></div>")
+        );
+        assert!(!output.contains("<p>"));
+    }
 }

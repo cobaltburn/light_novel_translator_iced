@@ -12,7 +12,11 @@ use regex::Regex;
 use std::{borrow::Cow, io::Cursor};
 
 pub fn to_html(markdown: &str) -> String {
-    let parser = Parser::new_ext(markdown, Options::all());
+    // Extensions like strikethrough/subscript (`~`), superscript (`^`) and math (`$`) mangle
+    // common prose such as "Nooo~~" or "$5"
+    let options =
+        Options::ENABLE_SMART_PUNCTUATION | Options::ENABLE_TABLES | Options::ENABLE_FOOTNOTES;
+    let parser = Parser::new_ext(markdown, options);
     let mut html = String::with_capacity(markdown.len());
     push_html(&mut html, parser);
     html
@@ -54,7 +58,8 @@ fn contains_author_notes(tag: &BytesStart<'_>) -> bool {
 pub fn strip_tags(html: &str) -> Result<String> {
     let mut reader = Reader::from_str(html);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
-    let tag_match = |e: &[u8]| matches!(e, b"head" | b"img" | b"image");
+    // `rt`/`rp` hold ruby readings (furigana), which would otherwise be inlined after the kanji
+    let tag_match = |e: &[u8]| matches!(e, b"head" | b"img" | b"image" | b"rt" | b"rp");
 
     loop {
         match reader.read_event()? {
@@ -246,4 +251,37 @@ pub fn image_anchors(
 
     anchors.extend(pending.into_iter().map(|tag| (tag, None)));
     Ok(anchors)
+}
+
+#[cfg(test)]
+mod test {
+    use super::{strip_tags, to_html};
+
+    #[test]
+    fn strips_ruby_readings() {
+        let html = "<p><ruby>漢字<rp>(</rp><rt>かんじ</rt><rp>)</rp></ruby>を読む</p>";
+        assert_eq!(strip_tags(html).unwrap(), "<p><ruby>漢字</ruby>を読む</p>");
+    }
+
+    #[test]
+    fn ignores_tildes() {
+        let html = to_html("Heeey~ ~wait~ for me~~ Nooo~~");
+        assert!(!html.contains("<sub>"));
+        assert!(!html.contains("<del>"));
+    }
+
+    #[test]
+    fn ignores_caret_superscript() {
+        assert!(!to_html("It costs 2^10^ gold").contains("<sup>"));
+    }
+
+    #[test]
+    fn ignores_dollar_math() {
+        assert!(!to_html("It was $5 or $10").contains("math"));
+    }
+
+    #[test]
+    fn keeps_smart_quotes() {
+        assert!(to_html("\"Hello\"").contains("“Hello”"));
+    }
 }

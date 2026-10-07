@@ -32,367 +32,163 @@ pub fn part_tag(n: usize) -> String {
 }
 
 pub const DEFAULT_STYLESHEET: &[u8] = br#"
-    /* EPUB Default Stylesheet */
+/* Default stylesheet for e-readers.
+ * Fonts, colors, margins and line spacing are left to the reader so its
+ * settings (font choice, night and sepia modes) keep working. */
 
-    /* Reset and base styles */
-    * {
-        box-sizing: border-box;
-    }
+body {
+    hyphens: auto;
+    -webkit-hyphens: auto;
+    overflow-wrap: break-word;
+}
 
-    html {
-        font-size: 100%;
-        line-height: 1.6;
-    }
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+    line-height: 1.2;
+    margin: 1.5em 0 0.5em 0;
+    page-break-after: avoid;
+    break-after: avoid;
+}
 
-    body {
-        font-family: "Times New Roman", Times, serif;
-        font-size: 1em;
-        line-height: 1.6;
-        margin: 0;
-        padding: 1em;
-        color: #333;
-        background-color: #fff;
-        text-align: left;
-        word-wrap: break-word;
-        -webkit-hyphens: auto;
-        -moz-hyphens: auto;
-        -ms-hyphens: auto;
-        hyphens: auto;
-    }
+h1 {
+    font-size: 1.6em;
+    margin-top: 0;
+    text-align: center;
+    page-break-before: always;
+    break-before: page;
+}
 
-    /* Headings */
-    h1, h2, h3, h4, h5, h6 {
-        font-weight: bold;
-        line-height: 1.2;
-        margin: 1.5em 0 0.5em 0;
-        page-break-after: avoid;
-        break-after: avoid;
-        orphans: 3;
-        widows: 3;
-    }
+h2 {
+    font-size: 1.4em;
+}
 
-    h1 {
-        font-size: 2em;
-        margin-top: 0;
-        text-align: center;
-        page-break-before: always;
-        break-before: page;
-    }
+h3 {
+    font-size: 1.2em;
+}
 
-    h2 {
-        font-size: 1.5em;
-        page-break-before: auto;
-        break-before: auto;
-    }
+h4, h5, h6 {
+    font-size: 1em;
+}
 
-    h3 {
-        font-size: 1.3em;
-    }
+/* Paragraphs */
+p {
+    margin: 0 0 1em 0;
+    text-indent: 1.2em;
+    orphans: 2;
+    widows: 2;
+}
 
-    h4 {
-        font-size: 1.1em;
-    }
+p:first-child,
+h1 + p,
+h2 + p,
+h3 + p,
+h4 + p,
+h5 + p,
+h6 + p,
+hr + p,
+.illustration + p {
+    text-indent: 0;
+}
 
-    h5, h6 {
-        font-size: 1em;
-    }
+/* Links keep the text color so they stay readable in night mode */
+a {
+    color: inherit;
+    text-decoration: underline;
+}
 
-    /* Paragraphs */
-    p {
-        margin: 0 0 1em 0;
-        text-indent: 1.2em;
-        orphans: 2;
-        widows: 2;
-    }
+/* Lists */
+ul, ol {
+    margin: 1em 0;
+    padding-left: 2em;
+}
 
-    p.no-indent,
-    p:first-child,
-    h1 + p,
-    h2 + p,
-    h3 + p,
-    h4 + p,
-    h5 + p,
-    h6 + p {
-        text-indent: 0;
-    }
+li {
+    margin: 0.5em 0;
+}
 
-    /* Lists */
-    ul, ol {
-        margin: 1em 0;
-        padding-left: 2em;
-    }
+/* Blockquotes */
+blockquote {
+    margin: 1em 2em;
+}
 
-    li {
-        margin: 0.5em 0;
-    }
+blockquote p {
+    text-indent: 0;
+}
 
-    /* Text formatting */
-    em, i {
-        font-style: italic;
-    }
+/* Tables */
+table {
+    border-collapse: collapse;
+    margin: 1em auto;
+}
 
-    strong, b {
-        font-weight: bold;
-    }
+th, td {
+    border: 1px solid rgba(128, 128, 128, 0.5);
+    padding: 0.3em 0.5em;
+}
 
-    small {
-        font-size: 0.875em;
-    }
+/* Images */
+img {
+    max-width: 100%;
+    height: auto;
+}
 
-    sup, sub {
-        font-size: 0.75em;
-        line-height: 0;
-        position: relative;
-        vertical-align: baseline;
-    }
+.illustration {
+    margin: 1em 0;
+    text-align: center;
+    text-indent: 0;
+    page-break-inside: avoid;
+    break-inside: avoid;
+}
 
-    sup {
-        top: -0.5em;
-    }
+.illustration img {
+    display: block;
+    margin: 0 auto;
+}
 
-    sub {
-        bottom: -0.25em;
-    }
+/* Scene breaks */
+hr {
+    border: none;
+    border-top: 1px solid rgba(128, 128, 128, 0.5);
+    margin: 2em 25%;
+}
 
-    /* Links */
-    a {
-        color: #0066cc;
-        text-decoration: underline;
-    }
+.section-break {
+    margin: 2em 0;
+    text-align: center;
+    text-indent: 0;
+}
 
-    a:visited {
-        color: #800080;
-    }
+/* Footnotes */
+.footnote-definition {
+    font-size: 0.85em;
+    margin-top: 1em;
+}
 
-    /* Blockquotes */
-    blockquote {
-        margin: 1.5em 2em;
-        padding: 0 1em;
-        border-left: 3px solid #ccc;
-        font-style: italic;
-    }
+.footnote-definition p {
+    text-indent: 0;
+}
 
-    blockquote p {
-        text-indent: 0;
-    }
-
-    pre {
-        font-family: "Courier New", Courier, monospace;
-        font-size: 0.85em;
-        background-color: #f5f5f5;
-        padding: 1em;
-        border-radius: 5px;
-        overflow-x: auto;
-        white-space: pre-wrap;
-        word-wrap: break-word;
-    }
-
-    pre code {
-        background-color: transparent;
-        padding: 0;
-    }
-
-    /* Tables */
-    table {
-        border-collapse: collapse;
-        width: 100%;
-        margin: 1em 0;
-    }
-
-    th, td {
-        border: 1px solid #ddd;
-        padding: 0.5em;
-        text-align: left;
-    }
-
-    th {
-        background-color: #f5f5f5;
-        font-weight: bold;
-    }
-
-    /* Images */
-    img {
-        max-width: 100%;
-        height: auto;
-        display: block;
-        margin: 1em auto;
-    }
-
-    figure {
-        margin: 1.5em 0;
-        text-align: center;
-    }
-
-    figcaption {
-        font-size: 0.9em;
-        font-style: italic;
-        margin-top: 0.5em;
-        text-align: center;
-    }
-
-    /* Horizontal rules */
-    hr {
-        border: none;
-        border-top: 1px solid #ccc;
-        margin: 2em 0;
-        height: 0;
-    }
-
-    /* Special elements */
-    .center, .text-center {
-        text-align: center;
-        text-indent: 0;
-    }
-
-    .right, .text-right {
-        text-align: right;
-        text-indent: 0;
-    }
-
-    .justify, .text-justify {
-        text-align: justify;
-    }
-
-    .no-break {
-        page-break-inside: avoid;
-        break-inside: avoid;
-    }
-
-    .page-break {
-        page-break-before: always;
-        break-before: page;
-    }
-
-    /* Chapter and section breaks */
-    .chapter {
-        page-break-before: always;
-        break-before: page;
-    }
-
-    .section-break {
-        margin: 3em 0;
-        text-align: center;
-    }
-
-    .section-break:before {
-        content: "* * *";
-        font-size: 1.2em;
-        letter-spacing: 0.5em;
-    }
-
-    /* Drop caps */
-    .drop-cap:first-letter {
-        float: left;
-        font-size: 3.5em;
-        line-height: 0.8;
-        margin: 0.1em 0.1em 0 0;
-        font-weight: bold;
-    }
-
-    /* Title page */
-    .title-page {
-        text-align: center;
-        page-break-after: always;
-        break-after: page;
-    }
-
-    .title {
-        font-size: 2.5em;
-        font-weight: bold;
-        margin: 2em 0 1em 0;
-    }
-
-    .subtitle {
-        font-size: 1.5em;
-        margin: 0 0 2em 0;
-    }
-
-    .author {
-        font-size: 1.2em;
-        margin: 1em 0;
-    }
-
-    /* Table of contents */
-    .toc {
-        page-break-before: always;
-        break-before: page;
-    }
-
-    .toc ul {
-        list-style: none;
-        padding-left: 0;
-    }
-
-    .toc li {
-        margin: 0.5em 0;
-        text-indent: 0;
-    }
-
-    .toc a {
-        text-decoration: none;
-        border-bottom: 1px dotted;
-    }
-
-    /* Footnotes */
-    .footnote {
-        font-size: 0.85em;
-        margin-top: 2em;
-        padding-top: 1em;
-        border-top: 1px solid #ccc;
-    }
-
-    .footnote-ref {
-        font-size: 0.75em;
-        vertical-align: super;
-        text-decoration: none;
-    }
-
-    /* Media queries for different screen sizes */
-    @media screen and (max-width: 600px) {
-        body {
-            padding: 0.5em;
-            font-size: 0.9em;
-        }
-    
-        h1 {
-            font-size: 1.8em;
-        }
-    
-        h2 {
-            font-size: 1.4em;
-        }
-    
-        blockquote {
-            margin: 1em 1em;
-        }
-    }
-
-    /* Print styles */
-    @media print {
-        body {
-            font-size: 12pt;
-            line-height: 1.4;
-        }
-    
-        h1, h2, h3, h4, h5, h6 {
-            page-break-after: avoid;
-        }
-    
-        img {
-            page-break-inside: avoid;
-        }
-    
-        blockquote, table, pre {
-            page-break-inside: avoid;
-        }
-    }
-
-    /* Accessibility improvements */
-    @media (prefers-reduced-motion: reduce) {
-        * {
-            animation-duration: 0.01ms !important;
-            animation-iteration-count: 1 !important;
-            transition-duration: 0.01ms !important;
-        }
-    }
+sup.footnote-reference {
+    font-size: 0.75em;
+    line-height: 0;
+}
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::DEFAULT_STYLESHEET;
+
+    #[test]
+    fn stylesheet_leaves_fonts_and_colors_to_the_reader() {
+        let css = str::from_utf8(DEFAULT_STYLESHEET).unwrap();
+        for property in [
+            "font-family",
+            "background",
+            "color: #",
+            "padding: 1em",
+            "@media",
+        ] {
+            assert!(!css.contains(property), "stylesheet sets {property}");
+        }
+    }
+}

@@ -1,6 +1,27 @@
 use percent_encoding::percent_decode_str;
 use rbook::ebook::element::Href;
-use std::collections::{HashMap, HashSet};
+use regex::Regex;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::LazyLock,
+};
+
+pub const CSS_MIME: &str = "text/css";
+
+/// Japanese layout declarations: vertical writing, right-to-left flow and CJK line
+/// breaking, which splits English words at any letter.
+static JP_LAYOUT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)(^|[\s;{])(?:-(?:epub|webkit|moz|ms)-)?(?:writing-mode|text-orientation|direction|word-break|line-break)\s*:[^;}]*;?",
+    )
+    .unwrap()
+});
+
+/// Removes Japanese layout declarations from a stylesheet so the translated text is
+/// laid out horizontally and left-to-right.
+pub fn strip_jp_layout(css: &str) -> String {
+    JP_LAYOUT_RE.replace_all(css, "$1").into_owned()
+}
 
 /// Output locations for the source EPUB's images, styles and scripts.
 ///
@@ -143,6 +164,20 @@ mod tests {
             Some("../Images/表紙.jpg")
         );
         assert_eq!(paths.link(page, "../img/missing.jpg"), None);
+    }
+
+    #[test]
+    fn strips_jp_layout() {
+        let css = "html { -epub-writing-mode: vertical-rl; writing-mode: vertical-rl }\n\
+                   body{direction:rtl;color:red;word-break:break-all}\n\
+                   .row { flex-direction: row; -webkit-text-orientation: upright; }";
+        let css = strip_jp_layout(css);
+        assert!(!css.contains("writing-mode"));
+        assert!(!css.contains("rtl"));
+        assert!(!css.contains("break-all"));
+        assert!(!css.contains("orientation"));
+        assert!(css.contains("color:red;"));
+        assert!(css.contains("flex-direction: row;"));
     }
 
     #[test]

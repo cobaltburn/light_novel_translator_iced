@@ -1,9 +1,9 @@
 use crate::{
     controller::{
-        DEFAULT_STYLESHEET, PageLinks, ResourcePaths, TOC_PAGE_STEM, get_ordered_path,
+        CSS_MIME, DEFAULT_STYLESHEET, PageLinks, ResourcePaths, TOC_PAGE_STEM, get_ordered_path,
         html_to_markdown, image_anchors, image_marker_indices, insert_anchors, markdown_sections,
-        parse_headers, parse_links, replace_image_markers, strip_syosetu_tags, strip_tags, to_html,
-        update_image_paths, update_resource_paths, write_body, write_header,
+        parse_headers, parse_links, replace_image_markers, strip_jp_layout, strip_syosetu_tags,
+        strip_tags, to_html, update_image_paths, update_resource_paths, write_body, write_header,
     },
     error::{Error, Result},
     model::{EpubMetadata, FormatPage},
@@ -15,17 +15,21 @@ use quick_xml::{
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use rbook::{
     Epub,
+    ebook::spine::PageDirection,
     epub::{
         EpubChapter,
         manifest::{DetachedEpubManifestEntry, EpubManifestEntry},
+        metadata::DetachedEpubMetaEntry,
     },
 };
+use regex::{Captures, Regex};
 use std::{
     collections::{HashMap, HashSet},
     ffi::OsStr,
     io::Cursor,
     mem,
     path::{Path, PathBuf},
+    sync::LazyLock,
 };
 
 #[derive(Debug)]
@@ -50,12 +54,21 @@ impl DocBuilder {
 
     pub fn build(mut self) -> Result<(Vec<u8>, String)> {
         let title = mem::take(&mut self.metadata.title);
-        let identifier = self
+        // A distinct but stable id keeps readers from merging the translation with the original
+        let source_id = self
             .epub
             .metadata()
             .identifier()
-            .map(|e| e.value().to_string())
-            .unwrap_or_else(|| format!("urn:light-novel-translator:{}", title));
+            .map(|e| e.value().to_string());
+        let identifier = match &source_id {
+            Some(id) => format!("urn:light-novel-translator:en:{id}"),
+            None => format!("urn:light-novel-translator:{title}"),
+        };
+        if let Some(id) = source_id {
+            self.builder
+                .edit()
+                .meta(DetachedEpubMetaEntry::dublin_core("dc:source").value(id));
+        }
 
         let authors: Vec<_> = self
             .metadata
@@ -71,6 +84,7 @@ impl DocBuilder {
             .title(title)
             .author(authors)
             .language("en")
+            .page_direction(PageDirection::LeftToRight)
             .modified_now()
             .resource(("stylesheet.css", DEFAULT_STYLESHEET));
 
@@ -399,6 +413,13 @@ fn read_resources(entries: Vec<(EpubManifestEntry<'_>, String)>) -> Vec<Detached
                 log::warn!("Skipping unreadable resource: {}", entry.href());
                 return None;
             };
+            let content = if entry.media_type() == CSS_MIME
+                && let Ok(css) = str::from_utf8(&content)
+            {
+                strip_jp_layout(css).into_bytes()
+            } else {
+                content
+            };
 
             Some(DetachedEpubManifestEntry::from((path, content)).media_type(entry.media_type()))
         })
@@ -467,11 +488,49 @@ pub fn build_html(
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
+/// Full-width spaces at the start of a line are Japanese paragraph indents.
+static INDENT_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^\u{3000}+").unwrap());
+static DASH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[―—─━]+").unwrap());
+static ELLIPSIS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"…+|・{2,}").unwrap());
+static COMMA_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"、[ \u{3000}]?").unwrap());
+/// Longer dash runs are scene separators rather than em dashes.
+const MAX_DASH_RUN: usize = 3;
+
+/// Converts Japanese punctuation left in the translation to English punctuation. Quotes
+/// become straight quotes, which smart punctuation then curls; `『』` are nested quotes.
+/// Markdown and HTML characters (`＊＃＜＞＆`, …) are left alone, since the content is
+/// already escaped markdown.
 pub fn replace_jp_symbols(text: &str) -> String {
-    text.replace("」", "\"")
-        .replace("「", "\"")
-        .replace("』", "\"")
-        .replace("『", "\"")
+    let text = INDENT_RE.replace_all(text, "");
+    let text = DASH_RE.replace_all(&text, |caps: &Captures| match caps[0].chars().count() {
+        n if n <= MAX_DASH_RUN => "—".to_string(),
+        _ => caps[0].to_string(),
+    });
+    let text = ELLIPSIS_RE.replace_all(&text, "…");
+    let text = COMMA_RE.replace_all(&text, ", ");
+
+    text.chars()
+        .map(|c| match c {
+            '「' | '」' => '"',
+            '『' | '』' => '\'',
+            '\u{3000}' => ' ',
+            '。' => '.',
+            '〜' => '~',
+            '！'
+            | '？'
+            | '（'
+            | '）'
+            | '，'
+            | '．'
+            | '：'
+            | '；'
+            | '～'
+            | '０'..='９'
+            | 'Ａ'..='Ｚ'
+            | 'ａ'..='ｚ' => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+            c => c,
+        })
+        .collect()
 }
 
 #[derive(Debug)]
@@ -481,4 +540,36 @@ pub struct TocLink {
 }
 
 #[cfg(test)]
-mod test {}
+mod test {
+    use super::replace_jp_symbols;
+
+    #[test]
+    fn converts_quotes() {
+        assert_eq!(
+            replace_jp_symbols("「She said 『no』」"),
+            "\"She said 'no'\""
+        );
+    }
+
+    #[test]
+    fn converts_dashes_and_ellipses() {
+        assert_eq!(replace_jp_symbols("Wait――no……"), "Wait—no…");
+        assert_eq!(replace_jp_symbols("Well・・・"), "Well…");
+        // Long runs are separators and stay as they are
+        assert_eq!(replace_jp_symbols("――――――"), "――――――");
+    }
+
+    #[test]
+    fn converts_full_width_punctuation() {
+        assert_eq!(
+            replace_jp_symbols("\u{3000}What！？ Level ５０、ok。"),
+            "What!? Level 50, ok."
+        );
+        assert_eq!(replace_jp_symbols("Hey～ 〜"), "Hey~ ~");
+    }
+
+    #[test]
+    fn keeps_markdown_and_html_characters() {
+        assert_eq!(replace_jp_symbols("＊＃＜＞＆"), "＊＃＜＞＆");
+    }
+}
