@@ -93,7 +93,7 @@ fn path_button_overlay<A: SidebarAction>(
 
     container(scrollable(overlay).width(Length::Fill))
         .style(container::rounded_box)
-        .max_height(400)
-        .width(300)
+        .max_height(300)
+        .width(200)
         .into()
 }

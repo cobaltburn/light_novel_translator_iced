@@ -57,7 +57,7 @@ pub fn toc_to_markdown(toc: EpubToc<'_>) -> Result<String> {
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::new()), b' ', 2);
     if let Some(toc) = toc.contents() {
         for entry in toc.flatten() {
-            let href = entry.href().map(|e| e.as_str()).unwrap_or_default();
+            let href = entry.href().map_or_default(|e| e.as_str());
             writer
                 .create_element("a")
                 .with_attribute(("href", href))

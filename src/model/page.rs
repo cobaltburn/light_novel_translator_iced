@@ -240,11 +240,7 @@ impl Page {
                     }
                     DisplayType::Full if has_japanese_error(i) => {
                         spans.extend(japanese_runs(&section.content).map(|(japanese, run)| {
-                            if japanese {
-                                span(run).color(color!(0xff0000))
-                            } else {
-                                span(run)
-                            }
+                            span(run).color_maybe(japanese.then_some(color!(0xff0000)))
                         }));
                     }
                     DisplayType::Full | DisplayType::Japanese => spans.push(span(content)),

@@ -1,7 +1,5 @@
-use std::ops::RangeBounds;
-
 use crate::{
-    actions::server,
+    actions::server::{self, Action},
     model::{Method, Server, Think},
 };
 use iced::{
@@ -10,8 +8,9 @@ use iced::{
     widget::{button, container, radio, row, text},
 };
 use iced_aw::NumberInput;
+use std::ops::RangeBounds;
 
-pub fn ollama_input() -> Element<'static, server::Action> {
+pub fn ollama_input() -> Element<'static, Action> {
     container(
         row![
             text("Ollama: ").center(),
@@ -25,7 +24,7 @@ pub fn ollama_input() -> Element<'static, server::Action> {
     .into()
 }
 
-pub fn think_selector(state: &Server) -> Element<'_, server::Action> {
+pub fn think_selector(state: &Server) -> Element<'_, Action> {
     let selection = [
         ("None", Think::None),
         ("Low", Think::Low),
@@ -34,13 +33,13 @@ pub fn think_selector(state: &Server) -> Element<'_, server::Action> {
     ];
     let radio_buttons = selection
         .into_iter()
-        .map(|(l, t)| radio(l, t, Some(state.settings.think), server::Action::SetThink).into());
+        .map(|(l, t)| radio(l, t, Some(state.settings.think), Action::SetThink).into());
     container(row![text("Think:")].extend(radio_buttons).spacing(10))
         .align_left(Length::Fill)
         .into()
 }
 
-pub fn execution_selector(state: &Server) -> Element<'_, server::Action> {
+pub fn execution_selector(state: &Server) -> Element<'_, Action> {
     let selection = [
         ("Chain", Method::Chain),
         ("Batch", Method::Batch),
@@ -48,14 +47,14 @@ pub fn execution_selector(state: &Server) -> Element<'_, server::Action> {
     ];
     let radio_buttons = selection
         .into_iter()
-        .map(|(l, t)| radio(l, t, Some(state.method), server::Action::SetMethod).into());
+        .map(|(l, t)| radio(l, t, Some(state.method), Action::SetMethod).into());
 
     container(row![text("Execution:")].extend(radio_buttons).spacing(10))
         .align_left(Length::Fill)
         .into()
 }
 
-pub fn context_window_input(state: &Server) -> Element<'_, server::Action> {
+pub fn context_window_input(state: &Server) -> Element<'_, Action> {
     container(
         row![
             text("Context window:"),
@@ -77,13 +76,13 @@ pub fn server_setting_input<'a>(
     setting: &'a str,
     value: f64,
     range: impl RangeBounds<f64>,
-    on_change: impl 'a + Fn(f64) -> server::Action + Clone,
-) -> Element<'a, server::Action> {
+    on_change: impl 'a + Fn(f64) -> Action + Clone,
+) -> Element<'a, Action> {
     container(
         row![
             text(setting),
             NumberInput::new(&value, range, on_change)
-                .step(0.1)
+                .step(0.05)
                 .ignore_scroll(true),
         ]
         .align_y(Vertical::Center)

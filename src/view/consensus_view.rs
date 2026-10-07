@@ -29,9 +29,7 @@ pub fn consensus_view(model: &Consensus) -> Element<'_, consensus::Action> {
     };
 
     let error_cards = page.map(|p| p.error_cards(on_press));
-    let content = page
-        .map(|p| p.spans(model.display, on_press))
-        .unwrap_or_default();
+    let content = page.map_or_default(|p| p.spans(model.display, on_press));
 
     container(column![
         vertical(),

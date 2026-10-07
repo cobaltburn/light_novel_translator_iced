@@ -58,6 +58,10 @@ impl Translation {
             rows,
         }
     }
+
+    pub fn can_translate(&self) -> bool {
+        self.server.handles.is_empty() && self.server.connected() && !self.file_name().is_empty()
+    }
 }
 
 impl SidebarAction for Action {

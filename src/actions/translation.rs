@@ -97,11 +97,7 @@ impl Translation {
                 mem::swap(&mut page.sections, current);
                 page.check_page(last_section);
             }
-            last_section = page
-                .sections
-                .last()
-                .map(|s| s.content.as_str())
-                .unwrap_or_default();
+            last_section = page.sections.last().map_or_default(|s| s.content.as_str());
         }
 
         self.pages
@@ -133,8 +129,7 @@ impl Translation {
             .position(|p| matches!(p.activity, Activity::Active));
 
         self.server.abort();
-        page.map(|page| Task::done(Action::PageComplete(page)))
-            .unwrap_or_default()
+        page.map_or_default(|page| Task::done(Action::PageComplete(page)))
     }
 
     fn set_current_page(&mut self, page: usize) {
@@ -146,8 +141,7 @@ impl Translation {
             .checked_sub(1)
             .and_then(|i| self.pages.get(i))
             .and_then(|p| p.sections.last())
-            .map(|c| c.content.clone())
-            .unwrap_or_default();
+            .map_or_default(|c| c.content.clone());
 
         if let Some(page) = self.pages.get_mut(page) {
             page.check_page(&last_section);
@@ -155,20 +149,17 @@ impl Translation {
     }
 
     pub fn save_page(&mut self, name: String, page: usize) -> Task<Action> {
-        self.pages
-            .get(page)
-            .map(|page| {
-                let text: String = page
-                    .sections
-                    .iter()
-                    .enumerate()
-                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
-                    .collect();
-                let contents = remove_think_tags(&text);
+        self.pages.get(page).map_or_default(|page| {
+            let text: String = page
+                .sections
+                .iter()
+                .enumerate()
+                .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
+                .collect();
+            let contents = remove_think_tags(&text);
 
-                Task::future(save_file(format!("{name}.md"), contents)).discard()
-            })
-            .unwrap_or_default()
+            Task::future(save_file(format!("{name}.md"), contents)).discard()
+        })
     }
 
     pub fn save_pages(&self, path: PathBuf) -> Task<Action> {

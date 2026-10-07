@@ -37,7 +37,7 @@ impl Format {
             Action::SelectEpub => Task::future(select_epub())
                 .and_then(|(path, buffer)| Task::done(Action::SetEpub { path, buffer })),
             Action::SelectFolder => Task::future(select_format_folder(
-                self.epub_path.parent().map_or(PathBuf::new(), Into::into),
+                self.epub_path.parent().map_or_default(Into::into),
             ))
             .and_then(|(name, pages)| Task::done(Action::SetPages { name, pages })),
             Action::SetEpub { path, buffer } => self.set_epub(path, buffer).ok_or_display(),
@@ -70,13 +70,14 @@ impl Format {
             .and_then(|e| Some(Handle::from_bytes(e.read_bytes().ok()?)));
         self.metadata.title = path
             .file_stem()
-            .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or_default();
+            .map_or_default(|e| e.to_string_lossy().to_string());
         self.metadata.authors = epub
             .metadata()
-            .by_property("creator")
-            .map(|e| e.value().to_owned())
-            .collect();
+            .creators()
+            .map(|e| e.value())
+            .collect::<Vec<_>>()
+            .join(" & ");
+
         self.epub_path = path;
         self.epub = Some(epub);
 
@@ -88,8 +89,7 @@ impl Format {
         let pages = mem::take(&mut self.pages);
         let name = mem::take(&mut self.epub_path)
             .file_name()
-            .map(|e| e.to_string_lossy().to_string())
-            .unwrap_or_default();
+            .map_or_default(|e| e.to_string_lossy().to_string());
         let metadata = mem::take(&mut self.metadata);
 
         self.source_folder.clear();

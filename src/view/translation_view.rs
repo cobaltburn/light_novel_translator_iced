@@ -50,12 +50,12 @@ pub fn translation_view(
 
     let model = models.get(&tab_id);
     let tab = model.map(|model| tab(model).map(Message::TransAction.with(tab_id)));
-    let add_tab = model.map(|model| new_tab_button(model));
+    let add_tab = model.map(|_| new_tab_button());
 
     column![row![tabs, add_tab].height(Length::Fixed(40.0)), tab].into()
 }
 
-fn new_tab_button(_model: &Translation) -> Element<'_, Message> {
+fn new_tab_button() -> Element<'static, Message> {
     button(container(text("+").center()).center(Length::Fill))
         .on_press(Message::AddTab)
         .width(Length::Fixed(50.0))
@@ -74,9 +74,7 @@ fn new_tab_button(_model: &Translation) -> Element<'_, Message> {
 fn tab(model: &Translation) -> Element<'_, Action> {
     let page = model.current_page();
     let current_page = model.current_page;
-    let can_translate = model.server.handles.is_empty()
-        && model.server.connected()
-        && !model.file_name().is_empty();
+    let can_translate = model.can_translate();
     let on_press = move |part| {
         can_translate.then_some(Action::TranslatePart {
             page: current_page,
@@ -85,9 +83,7 @@ fn tab(model: &Translation) -> Element<'_, Action> {
     };
 
     let error_cards = page.map(|p| p.error_cards(on_press));
-    let content = page
-        .map(|p| p.spans(model.display, on_press))
-        .unwrap_or_default();
+    let content = page.map_or_default(|p| p.spans(model.display, on_press));
 
     container(column![
         vertical(),
@@ -96,20 +92,7 @@ fn tab(model: &Translation) -> Element<'_, Action> {
             row![
                 side_bar(model),
                 stack![
-                    ContextMenu::new(rich_text_scrollable(content), || container(column![
-                        context_menu_button(text("full").color(Color::WHITE))
-                            .on_press(Action::SetDisplay(DisplayType::Full))
-                            .width(Length::Fill),
-                        context_menu_button(text("end").color(Color::WHITE))
-                            .on_press(Action::SetDisplay(DisplayType::End))
-                            .width(Length::Fill),
-                        context_menu_button(text("japanese").color(Color::WHITE))
-                            .on_press(Action::SetDisplay(DisplayType::Japanese))
-                            .width(Length::Fill)
-                    ])
-                    .style(container::rounded_box)
-                    .width(100)
-                    .into()),
+                    ContextMenu::new(rich_text_scrollable(content), || view_context_menu()),
                     error_cards
                 ]
             ]
@@ -125,6 +108,28 @@ fn tab(model: &Translation) -> Element<'_, Action> {
     .height(Length::Fill)
     .padding(10)
     .into()
+}
+
+fn view_context_menu<'a>() -> Element<'a, Action> {
+    let menu = column![
+        context_menu_button(text("full").color(Color::WHITE))
+            .on_press(Action::SetDisplay(DisplayType::Full))
+            .width(Length::Fill),
+        context_menu_button(text("end").color(Color::WHITE))
+            .on_press(Action::SetDisplay(DisplayType::End))
+            .width(Length::Fill),
+        context_menu_button(text("japanese").color(Color::WHITE))
+            .on_press(Action::SetDisplay(DisplayType::Japanese))
+            .width(Length::Fill)
+    ]
+    .padding(5)
+    .spacing(5);
+
+    container(scrollable(menu))
+        .style(container::rounded_box)
+        .max_height(300)
+        .width(200)
+        .into()
 }
 
 fn side_bar(model: &Translation) -> Container<'_, Action> {
@@ -230,15 +235,12 @@ fn epub_menu(model: &Translation) -> Item<'_, Action, Theme, Renderer> {
 fn file_menu_buttons(state: &Translation) -> Element<'_, Action> {
     let file_name = state.file_name();
     let not_empty = !file_name.is_empty();
-    let save = not_empty.then_some(Action::SaveTranslation(file_name));
-    let recovery = not_empty.then_some(Action::Recover);
-
     row![
         button(text("save").center())
-            .on_press_maybe(save)
+            .on_press_maybe(not_empty.then_some(Action::SaveTranslation(file_name)))
             .padding(5),
         button(text("recover").center())
-            .on_press_maybe(recovery)
+            .on_press_maybe(not_empty.then_some(Action::Recover))
             .padding(5)
     ]
     .align_y(Vertical::Center)

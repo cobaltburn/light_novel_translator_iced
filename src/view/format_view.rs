@@ -9,11 +9,7 @@ use iced::{
 };
 
 pub fn format_view(model: &Format) -> Element<'_, Action> {
-    let build = model
-        .epub
-        .as_ref()
-        .filter(|_| !model.pages.is_empty())
-        .map(|_| Action::Build);
+    let build = (model.epub.is_some() && !model.pages.is_empty()).then_some(Action::Build);
 
     container(column![
         vertical(),
@@ -24,7 +20,7 @@ pub fn format_view(model: &Format) -> Element<'_, Action> {
                 .align_right(Length::Fill)
                 .padding(20)
         ]
-        .height(Length::FillPortion(9))
+        .height(Length::FillPortion(15))
         .padding(10),
         vertical(),
     ])
@@ -43,10 +39,10 @@ fn format_menu_bar(model: &Format) -> Row<'_, Action> {
         .padding(Padding::default().bottom(15))
 }
 
-fn content_button(model: &Format) -> Row<'_, Action> {
+fn content_button(Format { source_folder, .. }: &Format) -> Row<'_, Action> {
     row![
         button(text("content")).on_press(Action::SelectFolder),
-        container(text(&model.source_folder).center())
+        container(text(source_folder).center())
             .width(Length::Fill)
             .padding(5)
             .style(|theme| transparent(theme).border(Border {
@@ -60,12 +56,10 @@ fn content_button(model: &Format) -> Row<'_, Action> {
     .spacing(10)
 }
 
-fn epub_button(model: &Format) -> Row<'_, Action> {
-    let name = model
-        .epub_path
+fn epub_button(Format { epub_path, .. }: &Format) -> Row<'_, Action> {
+    let name = epub_path
         .file_name()
-        .map(|e| e.to_string_lossy())
-        .unwrap_or_default();
+        .map_or_default(|e| e.to_string_lossy());
     row![
         button(text("epub").center()).on_press(Action::SelectEpub),
         container(text(name).center())
@@ -82,9 +76,8 @@ fn epub_button(model: &Format) -> Row<'_, Action> {
     .spacing(10)
 }
 
-fn epub_image(model: &Format) -> Element<'_, Action> {
-    let cover_image = model.cover.as_ref().map(image);
-    container(cover_image)
+fn epub_image(Format { cover, .. }: &Format) -> Element<'_, Action> {
+    container(cover.as_ref().map(image))
         .padding(10)
         .height(Length::Fill)
         .width(Length::Fill)
