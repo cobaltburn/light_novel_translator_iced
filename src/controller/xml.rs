@@ -12,8 +12,6 @@ use regex::Regex;
 use std::{borrow::Cow, io::Cursor};
 
 pub fn to_html(markdown: &str) -> String {
-    // Extensions like strikethrough/subscript (`~`), superscript (`^`) and math (`$`) mangle
-    // common prose such as "Nooo~~" or "$5"
     let options =
         Options::ENABLE_SMART_PUNCTUATION | Options::ENABLE_TABLES | Options::ENABLE_FOOTNOTES;
     let parser = Parser::new_ext(markdown, options);
@@ -58,7 +56,6 @@ fn contains_author_notes(tag: &BytesStart<'_>) -> bool {
 pub fn strip_tags(html: &str) -> Result<String> {
     let mut reader = Reader::from_str(html);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
-    // `rt`/`rp` hold ruby readings (furigana), which would otherwise be inlined after the kanji
     let tag_match = |e: &[u8]| matches!(e, b"head" | b"img" | b"image" | b"rt" | b"rp");
 
     loop {
@@ -113,8 +110,6 @@ pub fn update_image_paths(html: &str, links: PageLinks<'_>) -> Result<String> {
 pub const LINK_BYTES: &[u8] = b"link";
 pub const SCRIPT_BYTES: &[u8] = b"script";
 
-/// Points `<link href>` and `<script src>` at where the builder writes those
-/// resources (`../Styles` and `../Script`).
 pub fn update_resource_tag<'a>(event: Event<'a>, links: PageLinks<'_>) -> Result<Event<'a>> {
     Ok(match event {
         Event::Empty(tag) if tag.name().as_ref() == LINK_BYTES => {
@@ -213,8 +208,6 @@ fn is_image(tag: &BytesStart<'_>) -> bool {
     name.as_ref() == IMG_BYTES || name.as_ref() == IMAGE_BYTES
 }
 
-/// Pairs each image tag with the first non-empty text that follows it,
-/// or `None` if no text follows the image.
 pub fn image_anchors(
     html: &str,
     links: PageLinks<'_>,

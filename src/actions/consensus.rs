@@ -1,7 +1,6 @@
 use crate::{
     actions::{
-        clean_invisible_chars, complete_dialog, get_pages, pick_save_folder, save_file,
-        select_format_folder, server,
+        complete_dialog, get_pages, pick_save_folder, save_file, select_format_folder, server,
     },
     controller::{part_tag, remove_think_tags},
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
@@ -61,6 +60,7 @@ pub enum Action {
     },
     DropCandidate(usize),
     SetDisplay(DisplayType),
+    UpdateActivity(usize, Activity),
 }
 
 impl Consensus {
@@ -97,6 +97,7 @@ impl Consensus {
             Action::CleanText { page, part } => self.clean_text(page, part).into(),
             Action::DropCandidate(i) => self.drop_candidate(i).into(),
             Action::SetDisplay(display) => self.set_display(display).into(),
+            Action::UpdateActivity(page, activity) => self.update_activity(page, activity).into(),
         }
     }
 
@@ -117,7 +118,6 @@ impl Consensus {
     pub fn consensus(&mut self, page: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
         if let Some(page) = self.pages.get_mut(page) {
-            page.activity = Activity::Active;
             page.clear();
         }
 
@@ -150,7 +150,6 @@ impl Consensus {
         let model = self.check_ready()?;
 
         if let Some(page) = self.pages.get_mut(page) {
-            page.activity = Activity::Active;
             page.clear();
         }
 
@@ -172,7 +171,6 @@ impl Consensus {
         let model = self.check_ready()?;
 
         if let Some(page) = self.pages.get_mut(page) {
-            page.activity = Activity::Active;
             page.sections.get_mut(part).unwrap().content.clear();
             page.errors.clear();
         }
@@ -202,7 +200,7 @@ impl Consensus {
     fn cancel(&mut self) {
         self.pages
             .iter_mut()
-            .filter(|p| matches!(p.activity, Activity::Active))
+            .filter(|p| matches!(p.activity, Activity::Active(_)))
             .for_each(|p| p.activity = Activity::Incomplete);
         self.server.abort();
     }
@@ -277,7 +275,7 @@ impl Consensus {
         if let Some(page) = self.pages.get_mut(page)
             && let Some(section) = page.sections.get_mut(part)
         {
-            section.content = clean_invisible_chars(&section.content).replace(['“', '”'], "\"");
+            section.clean();
         };
     }
 
@@ -303,6 +301,12 @@ impl Consensus {
 
     fn drop_candidate(&mut self, i: usize) {
         self.candidates.remove(i);
+    }
+
+    fn update_activity(&mut self, page: usize, activity: Activity) {
+        if let Some(page) = self.pages.get_mut(page) {
+            page.activity = activity;
+        }
     }
 }
 

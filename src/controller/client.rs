@@ -106,14 +106,14 @@ impl Client {
 
     pub fn translate(
         &self,
-        prompt: &str,
+        japanese: &str,
         model: &str,
         settings: Settings,
         page: usize,
         part: usize,
-    ) -> Result<Task<translation::Action>> {
+    ) -> Task<translation::Action> {
         let Client::Ollama(ollama) = self else {
-            return Err(Error::ServerError("server not connected"));
+            return Task::none();
         };
         let agent = ollama
             .agent(model)
@@ -122,25 +122,23 @@ impl Client {
             .additional_params(settings.agent_params())
             .build();
 
-        let prompt = prompt.to_string();
+        let japanese = japanese.to_string();
         let stream =
-            Task::future(async move { agent.stream_prompt(prompt).await }).then(Task::stream);
-        Ok(handle_stream::<translation::Action, _>(
-            stream, None, 0, page, part,
-        ))
+            Task::future(async move { agent.stream_prompt(japanese).await }).then(Task::stream);
+        handle_stream::<translation::Action, _>(stream, None, 0, page, part)
     }
 
     pub fn translate_history(
         &self,
-        prompt: &str,
+        japanese: &str,
         model: &str,
         history: SharedHistory,
         settings: Settings,
         page: usize,
         part: usize,
-    ) -> Result<Task<translation::Action>> {
+    ) -> Task<translation::Action> {
         let Client::Ollama(ollama) = self else {
-            return Err(Error::ServerError("server not connected"));
+            return Task::none();
         };
         let agent = ollama
             .agent(model)
@@ -150,19 +148,19 @@ impl Client {
             .build();
 
         let chat_history = history.clone();
-        let prompt = prompt.to_string();
+        let japanese = japanese.to_string();
         let stream = Task::future(async move {
             let chat_history = chat_history.lock().unwrap().to_vec();
-            agent.stream_chat(prompt, chat_history).await
+            agent.stream_chat(japanese, chat_history).await
         })
         .then(Task::stream);
-        Ok(handle_stream::<translation::Action, _>(
+        handle_stream::<translation::Action, _>(
             stream,
             Some(history),
             settings.context_window,
             page,
             part,
-        ))
+        )
     }
 
     pub fn consensus(

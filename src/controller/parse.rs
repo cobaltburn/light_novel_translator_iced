@@ -33,13 +33,11 @@ pub fn image_marker_indices(content: &str) -> HashSet<usize> {
         .collect()
 }
 
-/// Markdown without images, used to locate positions in the source text.
 pub fn html_to_markdown(html: &str) -> Result<String> {
     let html = strip_syosetu_tags(html)?;
     markdown_from_html(&html)
 }
 
-/// Markdown with images replaced by markers, used as the source text for translation.
 pub fn html_to_marked_markdown(html: &str) -> Result<String> {
     let html = strip_syosetu_tags(html)?;
     let html = insert_image_markers(&html)?;

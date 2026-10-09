@@ -220,7 +220,7 @@ pub fn replace_image_markers(
 }
 
 fn write_id_div(output: &mut String, id: &str) {
-    let _ = writeln!(output, "<div id=\"{}\"></div>", escape(id));
+    let _ = writeln!(output, "<a id=\"{}\"/>", escape(id));
 }
 
 /// Writes the images as a markdown html block, followed by a blank line so the

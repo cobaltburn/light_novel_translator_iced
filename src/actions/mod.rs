@@ -92,7 +92,6 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
         })
         .map(|result| {
             result.map(|(path, markdown)| {
-                // Image-only pages are left untranslated so the build uses the original file
                 let sections = if has_translatable_text(&markdown) {
                     markdown_sections(&markdown)
                 } else {

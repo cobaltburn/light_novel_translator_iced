@@ -20,6 +20,6 @@ pub enum Activity {
     #[default]
     Incomplete,
     Complete,
-    Active,
+    Active(usize),
     Error(usize),
 }

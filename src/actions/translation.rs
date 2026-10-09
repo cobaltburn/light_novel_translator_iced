@@ -47,6 +47,7 @@ pub enum Action {
     SaveTranslation(String),
     ServerAction(server::Action),
     SetDisplay(DisplayType),
+    UpdateActivity(usize, Activity),
 }
 
 impl Translation {
@@ -81,6 +82,7 @@ impl Translation {
             Action::Recover => Task::future(load_recovery())
                 .and_then(|pages| Task::done(Action::RecoverPages(pages))),
             Action::SetDisplay(display) => self.set_display(display).into(),
+            Action::UpdateActivity(page, activity) => self.update_activity(page, activity).into(),
         }
     }
 
@@ -126,7 +128,7 @@ impl Translation {
         let page = self
             .pages
             .iter_mut()
-            .position(|p| matches!(p.activity, Activity::Active));
+            .position(|p| matches!(p.activity, Activity::Active(_)));
 
         self.server.abort();
         page.map_or_default(|page| Task::done(Action::PageComplete(page)))
@@ -216,10 +218,9 @@ impl Translation {
         };
 
         let current_page = pages.last_mut().unwrap();
-        current_page.activity = Activity::Active;
         current_page.clear();
 
-        let task = self.server.translate(pages, &model, page)?;
+        let task = self.server.translate(pages, &model, page);
 
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
@@ -256,10 +257,9 @@ impl Translation {
         };
 
         let current_page = pages.last_mut().unwrap();
-        current_page.activity = Activity::Active;
         current_page.clear();
 
-        let task = self.server.translate(pages, &model, page)?;
+        let task = self.server.translate(pages, &model, page);
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
 
@@ -277,11 +277,10 @@ impl Translation {
         };
 
         let current = pages.last_mut().unwrap();
-        current.activity = Activity::Active;
         current.sections.get_mut(part).unwrap().content.clear();
         current.errors.clear();
 
-        let task = self.server.translate_part(pages, &model, page, part)?;
+        let task = self.server.translate_part(pages, &model, page, part);
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
 
@@ -297,6 +296,11 @@ impl Translation {
         {
             section.clean();
         };
+    }
+    fn update_activity(&mut self, page: usize, activity: Activity) {
+        if let Some(page) = self.pages.get_mut(page) {
+            page.activity = activity;
+        }
     }
 }
 

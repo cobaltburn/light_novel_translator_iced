@@ -53,13 +53,27 @@ impl DocBuilder {
     }
 
     pub fn build(mut self) -> Result<(Vec<u8>, String)> {
+        self.config_metadata();
+
+        let paths = self.get_resources();
+        self.add_cover_image(&paths);
+
+        let chapters = self.collect_contents(&paths)?;
+        self.builder.edit().chapter(chapters);
+
+        let content = self.builder.write().to_vec()?;
+
+        Ok((content, self.name))
+    }
+
+    pub fn config_metadata(&mut self) {
         let title = mem::take(&mut self.metadata.title);
-        // A distinct but stable id keeps readers from merging the translation with the original
         let source_id = self
             .epub
             .metadata()
             .identifier()
             .map(|e| e.value().to_string());
+
         let identifier = match &source_id {
             Some(id) => format!("urn:light-novel-translator:en:{id}"),
             None => format!("urn:light-novel-translator:{title}"),
@@ -87,7 +101,9 @@ impl DocBuilder {
             .page_direction(PageDirection::LeftToRight)
             .modified_now()
             .resource(("stylesheet.css", DEFAULT_STYLESHEET));
+    }
 
+    pub fn get_resources(&mut self) -> ResourcePaths {
         let manifest = self.epub.manifest();
         let cover = manifest.cover_image();
         let mut paths = ResourcePaths::default();
@@ -110,14 +126,8 @@ impl DocBuilder {
             })
             .collect();
         self.builder.edit().resource(read_resources(entries));
-        self.add_cover_image(&paths);
 
-        let chapters = self.collect_contents(&paths)?;
-        self.builder.edit().chapter(chapters);
-
-        let content = self.builder.write().to_vec()?;
-
-        Ok((content, self.name))
+        paths
     }
 
     pub fn add_cover_image(&mut self, paths: &ResourcePaths) {
@@ -368,17 +378,33 @@ pub fn match_ids(html: &str, toc_ids: &[String]) -> Result<Vec<(String, String)>
     let ids: HashSet<_> = toc_ids.iter().map(|e| e.as_bytes()).collect();
 
     let mut pairs = Vec::new();
+    let mut pending = Vec::new();
     loop {
         match reader.read_event()? {
             Event::Start(tag) => {
                 if let Some(attr) = tag.try_get_attribute("id")?
                     && ids.contains(attr.value.as_ref())
                 {
+                    let id = attr.normalized_value(XmlVersion::Implicit1_0)?.to_string();
                     let text = reader.read_text(tag.name())?.into_inner();
-                    if let Some(text) = next_text(text.as_ref())? {
-                        let id = attr.normalized_value(XmlVersion::Implicit1_0)?.to_string();
-                        pairs.push((id, text));
+                    match next_text(text.as_ref())? {
+                        Some(text) => pairs.push((id, text)),
+                        None => pending.push(id),
                     }
+                }
+            }
+            Event::Empty(tag) => {
+                if let Some(attr) = tag.try_get_attribute("id")?
+                    && ids.contains(attr.value.as_ref())
+                {
+                    pending.push(attr.normalized_value(XmlVersion::Implicit1_0)?.to_string());
+                }
+            }
+            Event::Text(text) if !pending.is_empty() => {
+                let text = text.xml10_content()?;
+                let text = text.trim();
+                if !text.is_empty() {
+                    pairs.extend(pending.drain(..).map(|id| (id, text.to_string())));
                 }
             }
             Event::Eof => break,
@@ -396,7 +422,11 @@ fn next_text(text: &[u8]) -> Result<Option<String>> {
     loop {
         match reader.read_event()? {
             Event::Text(tag) => {
-                return Ok(Some(tag.xml10_content()?.to_string()));
+                let content = tag.xml10_content()?;
+                let content = content.trim();
+                if !content.is_empty() {
+                    return Ok(Some(content.to_string()));
+                }
             }
             Event::Eof => break,
             _ => (),
@@ -496,10 +526,6 @@ static COMMA_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"、[ \u{3000}]?
 /// Longer dash runs are scene separators rather than em dashes.
 const MAX_DASH_RUN: usize = 3;
 
-/// Converts Japanese punctuation left in the translation to English punctuation. Quotes
-/// become straight quotes, which smart punctuation then curls; `『』` are nested quotes.
-/// Markdown and HTML characters (`＊＃＜＞＆`, …) are left alone, since the content is
-/// already escaped markdown.
 pub fn replace_jp_symbols(text: &str) -> String {
     let text = INDENT_RE.replace_all(text, "");
     let text = DASH_RE.replace_all(&text, |caps: &Captures| match caps[0].chars().count() {
@@ -541,7 +567,22 @@ pub struct TocLink {
 
 #[cfg(test)]
 mod test {
-    use super::replace_jp_symbols;
+    use super::{match_ids, replace_jp_symbols};
+
+    #[test]
+    fn matches_ids_on_empty_anchors() {
+        let html = r#"<body><p><a id="toc-003"/><span><span>プロローグ</span></span></p><p><a id="toc-002"/>　<span>剣と魔法</span></p><h1 id="toc-004">＃１</h1></body>"#;
+        let ids = ["toc-002", "toc-003", "toc-004"].map(String::from);
+        assert_eq!(
+            match_ids(html, &ids).unwrap(),
+            [
+                ("toc-003", "プロローグ"),
+                ("toc-002", "剣と魔法"),
+                ("toc-004", "＃１")
+            ]
+            .map(|(id, text)| (id.to_string(), text.to_string()))
+        );
+    }
 
     #[test]
     fn converts_quotes() {

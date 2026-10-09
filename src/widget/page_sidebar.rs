@@ -56,8 +56,8 @@ pub fn build_path_buttons<A: SidebarAction>(deps: &SidebarDeps) -> Column<'stati
                 .push(match entry.activity {
                     Activity::Incomplete => None,
                     Activity::Complete => Some(check_mark()),
-                    Activity::Error(e) => Some(row![text(e), cross_mark()].spacing(5).into()),
-                    Activity::Active => Some(active_mark()),
+                    Activity::Error(i) => Some(row![text(i), cross_mark()].spacing(5).into()),
+                    Activity::Active(i) => Some(row![text(i), active_mark()].spacing(5).into()),
                 })
                 .padding(Padding::default().right(10));
 

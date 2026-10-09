@@ -60,7 +60,7 @@ impl Page {
     }
 
     pub fn active(&self) -> bool {
-        matches!(self.activity, Activity::Active)
+        matches!(self.activity, Activity::Active(_))
     }
 
     pub fn check_incomplete(&self) -> bool {

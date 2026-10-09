@@ -2,7 +2,7 @@ use crate::{
     actions::{consensus, server, translation},
     controller::Client,
     error::{Error, Result},
-    model::{Page, Section},
+    model::{Activity::Active, Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
 use quick_xml::{Writer, events::BytesText};
@@ -43,7 +43,7 @@ impl Server {
         pages: &[Page],
         model: &str,
         page: usize,
-    ) -> Result<Task<translation::Action>> {
+    ) -> Task<translation::Action> {
         match self.method {
             Method::History => self.translation_history(pages, model, page),
             _ => self.translation(pages, model, page),
@@ -55,22 +55,29 @@ impl Server {
         pages: &[Page],
         model: &str,
         page: usize,
-    ) -> Result<Task<translation::Action>> {
+    ) -> Task<translation::Action> {
         let current = pages.last().expect("dont pass an empty array");
 
         let handles = &mut self.handles;
-        let tasks: Result<Vec<_>> = current
+        let tasks: Vec<_> = current
             .sections
             .iter()
             .enumerate()
             .map(|(part, section)| {
-                self.client
-                    .translate(&section.japanese, model, self.settings.clone(), page, part)
+                Task::done(translation::Action::UpdateActivity(page, Active(part + 1))).chain(
+                    self.client.translate(
+                        &section.japanese,
+                        model,
+                        self.settings.clone(),
+                        page,
+                        part,
+                    ),
+                )
             })
-            .map(|task| task.map(|task| bind(handles, task)))
+            .map(|task| bind(handles, task))
             .collect();
 
-        Ok(self.method.join_tasks(tasks?))
+        self.method.join_tasks(tasks)
     }
 
     fn translation_history(
@@ -78,31 +85,33 @@ impl Server {
         pages: &[Page],
         model: &str,
         page: usize,
-    ) -> Result<Task<translation::Action>> {
+    ) -> Task<translation::Action> {
         let (current, pages) = pages.split_last().unwrap();
         let sections: Vec<_> = pages.iter().map(|p| p.sections.as_slice()).collect();
         let history = build_history(&sections, self.settings.context_window);
         let history = Arc::new(Mutex::new(history));
 
         let handles = &mut self.handles;
-        let tasks: Result<Vec<_>> = current
+        let tasks: Vec<_> = current
             .sections
             .iter()
             .enumerate()
             .map(|(part, section)| {
-                self.client.translate_history(
-                    &section.japanese,
-                    model,
-                    history.clone(),
-                    self.settings.clone(),
-                    page,
-                    part,
+                Task::done(translation::Action::UpdateActivity(page, Active(part + 1))).chain(
+                    self.client.translate_history(
+                        &section.japanese,
+                        model,
+                        history.clone(),
+                        self.settings.clone(),
+                        page,
+                        part,
+                    ),
                 )
             })
-            .map(|task| task.map(|task| bind(handles, task)))
+            .map(|task| bind(handles, task))
             .collect();
 
-        Ok(self.method.join_tasks(tasks?))
+        self.method.join_tasks(tasks)
     }
 
     pub fn translate_part(
@@ -111,7 +120,7 @@ impl Server {
         model: &str,
         page: usize,
         part: usize,
-    ) -> Result<Task<translation::Action>> {
+    ) -> Task<translation::Action> {
         let (Page { sections, .. }, pages) = pages.split_last().unwrap();
         let (section, current_sections) = sections
             .get(..part + 1)
@@ -127,7 +136,6 @@ impl Server {
             Method::History => {
                 let history = build_history(&sections, self.settings.context_window);
                 let history = Arc::new(Mutex::new(history));
-
                 self.client.translate_history(
                     &section.japanese,
                     model,
@@ -135,18 +143,16 @@ impl Server {
                     self.settings.clone(),
                     page,
                     part,
-                )?
+                )
             }
-            _ => self.client.translate(
-                &section.japanese,
-                model,
-                self.settings.clone(),
-                page,
-                part,
-            )?,
+            _ => self
+                .client
+                .translate(&section.japanese, model, self.settings.clone(), page, part),
         };
 
-        Ok(self.bind_handle(task))
+        self.bind_handle(
+            Task::done(translation::Action::UpdateActivity(page, Active(part + 1))).chain(task),
+        )
     }
 
     pub fn consensus(
@@ -171,6 +177,10 @@ impl Server {
                 let prompt = consensus_prompt(&section.japanese, &candidates)?;
                 self.client
                     .consensus(prompt, model.to_string(), self.settings.think, page, part)
+                    .map(|task| {
+                        Task::done(consensus::Action::UpdateActivity(page, Active(part + 1)))
+                            .chain(task)
+                    })
             })
             .map(|task| task.map(|task| bind(handles, task)))
             .collect();
@@ -197,6 +207,8 @@ impl Server {
         let task =
             self.client
                 .consensus(prompt, model.to_string(), self.settings.think, page, part)?;
+        let task =
+            Task::done(consensus::Action::UpdateActivity(page, Active(part + 1))).chain(task);
 
         Ok(self.bind_handle(task))
     }
