@@ -255,9 +255,9 @@ impl Page {
 fn japanese_runs(text: &str) -> impl Iterator<Item = (bool, &str)> {
     let mut rest = text;
     iter::from_fn(move || {
-        let japanese = is_japanese_char(&rest.chars().next()?);
+        let japanese = is_japanese_char(rest.chars().next()?);
         let end = rest
-            .find(|c| is_japanese_char(&c) != japanese)
+            .find(|c| is_japanese_char(c) != japanese)
             .unwrap_or(rest.len());
         let (run, tail) = rest.split_at(end);
         rest = tail;

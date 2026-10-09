@@ -232,23 +232,6 @@ impl Translation {
             .chain(next_task))
     }
 
-    fn complete_task(&mut self, page: usize) -> Task<Action> {
-        self.server
-            .bind_handle(Task::done(Action::PageComplete(page)))
-    }
-
-    fn backup_task(&mut self) -> Task<Action> {
-        let backup = self.file_path.with_extension("json");
-
-        self.server
-            .bind_handle(Task::done(Action::SaveRecovery(backup)))
-    }
-
-    fn next_task(&mut self, page: usize) -> Task<Action> {
-        self.server
-            .bind_handle(Task::done(Action::Translate(page + 1)))
-    }
-
     pub fn translate_page(&mut self, page: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
 
@@ -288,6 +271,23 @@ impl Translation {
             .chain(complete_task)
             .chain(backup_task)
             .chain(Task::done(server::Action::Abort.into())))
+    }
+
+    fn complete_task(&mut self, page: usize) -> Task<Action> {
+        self.server
+            .bind_handle(Task::done(Action::PageComplete(page)))
+    }
+
+    fn backup_task(&mut self) -> Task<Action> {
+        let backup = self.file_path.with_extension("json");
+
+        self.server
+            .bind_handle(Task::done(Action::SaveRecovery(backup)))
+    }
+
+    fn next_task(&mut self, page: usize) -> Task<Action> {
+        self.server
+            .bind_handle(Task::done(Action::Translate(page + 1)))
     }
 
     fn clean_text(&mut self, page: usize, part: usize) {

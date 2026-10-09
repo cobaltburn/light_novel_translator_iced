@@ -146,20 +146,10 @@ pub async fn select_format_folder(dir: PathBuf) -> Option<(String, Vec<(PathBuf,
 }
 
 pub fn contains_japanese(text: &str) -> bool {
-    text.chars().any(|c| {
-        c.is_alphabetic()
-            && matches!(c,
-                '\u{3040}'..='\u{309F}' |  // Hiragana
-                '\u{30A0}'..='\u{30FF}' |  // Katakana
-                '\u{4E00}'..='\u{9FFF}' |  // CJK Unified Ideographs (common kanji)
-                '\u{3400}'..='\u{4DBF}' |  // CJK Unified Ideographs Extension A
-                '\u{FF65}'..='\u{FF9F}' |  // Half-width Katakana
-                '\u{31F0}'..='\u{31FF}'    // Katakana Phonetic Extensions
-            )
-    })
+    text.chars().any(is_japanese_char)
 }
 
-pub fn is_japanese_char(ch: &char) -> bool {
+pub fn is_japanese_char(ch: char) -> bool {
     ch.is_alphabetic()
         && matches!(ch,
             '\u{3040}'..='\u{309F}' |  // Hiragana
