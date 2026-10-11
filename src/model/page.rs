@@ -55,8 +55,15 @@ impl Page {
         self.errors.clear();
     }
 
-    pub fn file_stem(&self) -> Option<&OsStr> {
-        self.path.file_stem()
+    pub fn file_prefix(&self) -> Option<&OsStr> {
+        self.path.file_prefix()
+    }
+
+    pub fn name(&self) -> String {
+        self.file_prefix()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned()
     }
 
     pub fn active(&self) -> bool {

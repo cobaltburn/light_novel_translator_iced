@@ -1,6 +1,6 @@
 use crate::{
     controller::{
-        CSS_MIME, DEFAULT_STYLESHEET, PageLinks, ResourcePaths, TOC_PAGE_STEM, get_ordered_path,
+        CSS_MIME, DEFAULT_STYLESHEET, PageLinks, ResourcePaths, TOC_PAGE_PREFIX, get_ordered_path,
         html_to_markdown, image_anchors, image_marker_indices, insert_anchors, markdown_sections,
         parse_headers, parse_links, replace_image_markers, strip_jp_layout, strip_syosetu_tags,
         strip_tags, to_html, update_image_paths, update_resource_paths, write_body, write_header,
@@ -152,13 +152,9 @@ impl DocBuilder {
         let epub_paths = get_ordered_path(&self.epub);
         let path_map = self.path_map();
 
-        let linked_files: Vec<_> = epub_paths
+        let file_parts: Vec<_> = epub_paths
             .iter()
-            .map(|stem| link_files(stem, &path_map))
-            .collect::<Result<_>>()?;
-
-        let file_parts: Vec<_> = linked_files
-            .into_iter()
+            .filter_map(|path| link_files(path, &path_map))
             .map(|(md_file, entry)| {
                 let html = entry.read_str()?;
                 let path = Path::new(entry.href().path().as_str());
@@ -276,7 +272,7 @@ impl DocBuilder {
         let i = self
             .pages
             .iter()
-            .position(|p| p.path.file_stem() == Some(OsStr::new(TOC_PAGE_STEM)))?;
+            .position(|p| p.path.file_prefix() == Some(OsStr::new(TOC_PAGE_PREFIX)))?;
 
         Some(parse_links(&self.pages.remove(i).content))
     }
@@ -459,17 +455,12 @@ fn read_resources(entries: Vec<(EpubManifestEntry<'_>, String)>) -> Vec<Detached
 fn link_files<'a>(
     path: &Path,
     path_map: &'a HashMap<String, EpubManifestEntry<'a>>,
-) -> Result<(PathBuf, &'a EpubManifestEntry<'a>)> {
-    let file_stem = path
-        .file_stem()
-        .ok_or(Error::BuildError("Spine entry has no file stem"))?;
+) -> Option<(PathBuf, &'a EpubManifestEntry<'a>)> {
+    let file_stem = path.file_stem()?;
     let md_file = PathBuf::from(file_stem).with_extension("md");
 
-    let xhtml_file = path_map
-        .get(file_stem.to_string_lossy().as_ref())
-        .ok_or(Error::BuildError("Spine entry has no xhtml resource"))?;
-
-    Ok((md_file, xhtml_file))
+    let xhtml_file = path_map.get(file_stem.to_string_lossy().as_ref())?;
+    Some((md_file, xhtml_file))
 }
 
 fn to_text_path(path: &Path) -> Result<PathBuf> {

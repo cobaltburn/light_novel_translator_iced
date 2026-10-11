@@ -310,20 +310,20 @@ impl Consensus {
     }
 }
 
-/// Groups candidate translations by file stem, keeping only the pages that
-/// match `pages` (matched by stem, since candidate folders are unordered and
+/// Groups candidate translations by file prefix, keeping only the pages that
+/// match `pages` (matched by prefix, since candidate folders are unordered and
 /// may contain fewer pages than the epub).
 pub fn candidates_map<'a>(
     candidates: &'a [Candidate],
     pages: &[Page],
 ) -> HashMap<&'a OsStr, Vec<&'a [String]>> {
-    let stems: HashSet<_> = pages.iter().filter_map(|p| p.path.file_stem()).collect();
+    let prefixes: HashSet<_> = pages.iter().filter_map(Page::file_prefix).collect();
 
     candidates
         .iter()
         .flat_map(|c| &c.pages)
-        .filter_map(|(p, e)| Some((p.file_stem()?, e)))
-        .filter(|(name, _)| stems.contains(name))
+        .filter_map(|(p, e)| Some((p.file_prefix()?, e)))
+        .filter(|(name, _)| prefixes.contains(name))
         .fold(HashMap::new(), |mut acc, (name, e)| {
             acc.entry(name).or_insert_with(Vec::new).push(e.as_slice());
             acc

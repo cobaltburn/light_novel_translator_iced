@@ -1,6 +1,6 @@
 use crate::{
     controller::{
-        TOC_PAGE_STEM, has_translatable_text, html_to_marked_markdown, markdown_sections,
+        TOC_PAGE_PREFIX, has_translatable_text, html_to_marked_markdown, markdown_sections,
         toc_to_markdown,
     },
     error::Result,
@@ -21,11 +21,11 @@ pub mod format;
 pub mod server;
 pub mod translation;
 
-pub async fn pick_save_folder(file_name: String) -> Option<PathBuf> {
-    let file_name = Path::new(&file_name).file_stem()?.to_str()?;
+pub async fn pick_save_folder(folder_name: String) -> Option<PathBuf> {
+    let folder_name = Path::new(&folder_name).file_prefix()?.to_string_lossy();
     let handle = rfd::AsyncFileDialog::new()
         .set_title("save translation")
-        .set_file_name(file_name)
+        .set_file_name(folder_name)
         .save_file()
         .await?;
     Some(handle.path().to_path_buf())
@@ -77,7 +77,7 @@ pub async fn load_recovery() -> Option<Vec<Page>> {
 pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<Page>)> {
     let epub = Epub::read(Cursor::new(buffer))?;
     let toc = toc_to_markdown(epub.toc()).ok().and_then(|markdown| {
-        let path = PathBuf::from(TOC_PAGE_STEM).with_extension("xhtml");
+        let path = PathBuf::from(TOC_PAGE_PREFIX).with_extension("xhtml");
         (!markdown.is_empty()).then_some(Page::new(path, vec![markdown]))
     });
 
@@ -113,7 +113,7 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
 
 pub async fn complete_dialog(file_name: String) {
     let file_name = Path::new(&file_name)
-        .file_stem()
+        .file_prefix()
         .unwrap_or_default()
         .to_string_lossy();
 

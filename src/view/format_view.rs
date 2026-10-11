@@ -124,7 +124,7 @@ fn epub_metadata(model @ Format { metadata, .. }: &Format) -> Element<'_, Action
 fn content_files(Format { pages, .. }: &Format) -> Element<'_, Action> {
     let pages: Column<_> = pages
         .iter()
-        .filter_map(|p| p.path.file_stem())
+        .filter_map(|p| p.path.file_prefix())
         .map(|p| text(p.to_string_lossy()).into())
         .collect();
     container(

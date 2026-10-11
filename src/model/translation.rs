@@ -42,12 +42,7 @@ impl Translation {
             .pages
             .iter()
             .map(|p| SidebarRow {
-                name: p
-                    .path
-                    .file_stem()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
+                name: p.name(),
                 activity: p.activity,
                 section_count: p.sections.len(),
             })

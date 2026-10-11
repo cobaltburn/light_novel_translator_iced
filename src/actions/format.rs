@@ -69,7 +69,7 @@ impl Format {
             .cover_image()
             .and_then(|e| Some(Handle::from_bytes(e.read_bytes().ok()?)));
         self.metadata.title = path
-            .file_stem()
+            .file_prefix()
             .map_or_default(|e| e.to_string_lossy().to_string());
         self.metadata.authors = epub
             .metadata()

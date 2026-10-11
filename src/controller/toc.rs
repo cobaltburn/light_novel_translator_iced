@@ -7,9 +7,9 @@ use std::path::PathBuf;
 
 pub const NCX_MIME: &str = "application/x-dtbncx+xml";
 
-/// Reserved stem for the translated toc page, chosen so it cannot collide
+/// Reserved prefix for the translated toc page, chosen so it cannot collide
 /// with a spine file (e.g. `nav.xhtml` or `toc.xhtml`) when saved as `.md`.
-pub const TOC_PAGE_STEM: &str = "__toc__";
+pub const TOC_PAGE_PREFIX: &str = "__toc__";
 
 #[derive(Debug, Default)]
 pub struct Nav {

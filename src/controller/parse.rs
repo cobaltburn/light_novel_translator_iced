@@ -125,6 +125,10 @@ pub fn parse_headers(html: &str) -> Result<HashMap<String, Vec<(String, String)>
             _ => (),
         }
     }
+    titles
+        .iter_mut()
+        .for_each(|(_, e)| e.retain(|e| !e.1.trim().is_empty()));
+
     Ok(titles.into_iter().collect())
 }
 
