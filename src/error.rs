@@ -51,10 +51,13 @@ pub enum Error {
     IcedError(#[from] iced::Error),
 
     #[error(transparent)]
-    ModelError(#[from] rig_core::model::ModelListingError),
+    PromptError(#[from] rig::run::PromptError),
 
     #[error(transparent)]
-    StreamError(#[from] rig_core::agent::StreamingError),
+    ProviderError(#[from] rig::ProviderError),
+
+    #[error(transparent)]
+    MemoryError(#[from] rig::memory::MemoryError),
 
     #[error(transparent)]
     SerdeJsonError(#[from] serde_json::Error),

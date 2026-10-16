@@ -1,32 +1,57 @@
 use crate::{
     actions::{consensus, translation},
     controller::{CONSENSUS_PROMPT, TRANSLATION_PROMPT},
-    error::{Error, Result},
+    error::{Error, Result, ResultTaskExt},
     model::{REPEAT_PENALTY, Settings, TEMPERATURE, TOP_P, Think},
 };
 use iced::Task;
-use reqwest_middleware::{ClientBuilder as MiddlewareBuilder, ClientWithMiddleware};
+use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
-use rig_core::{
-    agent::{MultiTurnStreamItem, StreamingError},
-    client::{CompletionClient, ModelListingClient, Nothing},
-    completion::{CompletionError, GetTokenUsage},
+use rig::{
+    AgentBuilder,
+    agent::MultiTurnStreamItem,
+    id::ConversationId,
+    memory::{
+        CompactingMemory, ConversationMemory, InMemoryConversationMemory, SlidingWindowMemory,
+        TemplateCompactor,
+    },
     message::Message,
-    providers::ollama::{self, OllamaApiKey, OllamaExt},
-    streaming::{StreamedAssistantContent, StreamingChat, StreamingPrompt},
+    providers::ollama::{self},
+    rig_reqwest::ReqwestMiddlewareClient,
+    run::PromptError,
+    streaming::{Item, StreamEvent},
 };
 use serde_json::Value;
-use std::{
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 const RETRY_DURATION: Duration = Duration::from_secs(240);
 const MIN_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(30);
+const CONVERSATION_ID: &str = "translation";
+const SUMMARY_MAX_BYTES: usize = 8 * 1024;
 
-pub type SharedHistory = Arc<Mutex<Vec<Message>>>;
-pub type Ollama = rig_core::client::Client<OllamaExt, ClientWithMiddleware>;
+pub type SharedHistory =
+    Arc<CompactingMemory<InMemoryConversationMemory, SlidingWindowMemory, TemplateCompactor>>;
+
+/// `context_window` counts user/assistant pairs, so the window holds twice as many messages.
+pub fn shared_history(context_window: usize) -> SharedHistory {
+    Arc::new(CompactingMemory::new(
+        InMemoryConversationMemory::new(),
+        SlidingWindowMemory::last_messages(context_window * 2),
+        TemplateCompactor::new().with_max_bytes(SUMMARY_MAX_BYTES),
+    ))
+}
+
+pub fn seed_history<A>(history: SharedHistory, messages: Vec<Message>) -> Task<A>
+where
+    A: StreamAction,
+{
+    Task::future(async move {
+        let id = ConversationId::from(CONVERSATION_ID);
+        history.append(&id, messages).await
+    })
+    .then(|result| result.map_err(Error::from).ok_or_display())
+}
 
 pub trait StreamAction: 'static + Send + Clone {
     fn update(content: String, page: usize, part: usize) -> Self;
@@ -73,7 +98,7 @@ impl StreamAction for consensus::Action {
 pub enum Client {
     #[default]
     Disconnected,
-    Ollama(Ollama),
+    Ollama(ollama::Ollama),
 }
 
 impl Client {
@@ -81,14 +106,12 @@ impl Client {
         let policy = ExponentialBackoff::builder()
             .retry_bounds(MIN_RETRY_INTERVAL, MAX_RETRY_INTERVAL)
             .build_with_total_retry_duration(RETRY_DURATION);
-        let http = MiddlewareBuilder::new(Default::default())
+        let http: ReqwestMiddlewareClient = ClientBuilder::new(Default::default())
             .with(RetryTransientMiddleware::new_with_policy(policy))
-            .build();
-        let ollama = ollama::Client::builder()
-            .api_key(OllamaApiKey::from(Nothing))
-            .http_client(http)
             .build()
-            .unwrap();
+            .into();
+
+        let ollama = ollama::Ollama::new().with_http(http);
         Client::Ollama(ollama)
     }
 
@@ -115,8 +138,7 @@ impl Client {
         let Client::Ollama(ollama) = self else {
             return Task::none();
         };
-        let agent = ollama
-            .agent(model)
+        let agent = AgentBuilder::new(ollama.completion(model))
             .preamble(TRANSLATION_PROMPT)
             .temperature(settings.temperature)
             .additional_params(settings.agent_params())
@@ -124,8 +146,8 @@ impl Client {
 
         let japanese = japanese.to_string();
         let stream =
-            Task::future(async move { agent.stream_prompt(japanese).await }).then(Task::stream);
-        handle_stream::<translation::Action, _>(stream, None, 0, page, part)
+            Task::future(async move { agent.prompt(japanese).stream() }).then(Task::stream);
+        handle_stream::<translation::Action>(stream, page, part)
     }
 
     pub fn translate_history(
@@ -140,27 +162,19 @@ impl Client {
         let Client::Ollama(ollama) = self else {
             return Task::none();
         };
-        let agent = ollama
-            .agent(model)
+
+        let agent = AgentBuilder::new(ollama.completion(model))
             .preamble(TRANSLATION_PROMPT)
             .temperature(settings.temperature)
             .additional_params(settings.agent_params())
+            .memory(history)
+            .conversation(CONVERSATION_ID)
             .build();
 
-        let chat_history = history.clone();
         let japanese = japanese.to_string();
-        let stream = Task::future(async move {
-            let chat_history = chat_history.lock().unwrap().to_vec();
-            agent.stream_chat(japanese, chat_history).await
-        })
-        .then(Task::stream);
-        handle_stream::<translation::Action, _>(
-            stream,
-            Some(history),
-            settings.context_window,
-            page,
-            part,
-        )
+        let stream =
+            Task::future(async move { agent.prompt(japanese).stream() }).then(Task::stream);
+        handle_stream::<translation::Action>(stream, page, part)
     }
 
     pub fn consensus(
@@ -174,18 +188,14 @@ impl Client {
         let Client::Ollama(ollama) = self else {
             return Err(Error::ServerError("server not connected"));
         };
-        let agent = ollama
-            .agent(&model)
+        let agent = AgentBuilder::new(ollama.completion(model))
             .preamble(CONSENSUS_PROMPT)
             .temperature(TEMPERATURE)
             .additional_params(agent_params(think))
             .build();
 
-        let stream =
-            Task::future(async move { agent.stream_prompt(prompt).await }).then(Task::stream);
-        Ok(handle_stream::<consensus::Action, _>(
-            stream, None, 0, page, part,
-        ))
+        let stream = Task::future(async move { agent.prompt(prompt).stream() }).then(Task::stream);
+        Ok(handle_stream::<consensus::Action>(stream, page, part))
     }
 
     pub fn connected(&self) -> bool {
@@ -201,56 +211,29 @@ fn agent_params(think: Think) -> Value {
     })
 }
 
-fn handle_stream<A, R>(
-    stream: Task<std::result::Result<MultiTurnStreamItem<R>, StreamingError>>,
-    history: Option<SharedHistory>,
-    context_window: usize,
+fn handle_stream<A>(
+    stream: Task<std::result::Result<MultiTurnStreamItem, PromptError>>,
     page: usize,
     part: usize,
 ) -> Task<A>
 where
     A: StreamAction,
-    R: Clone + Unpin + GetTokenUsage + Send + 'static,
 {
     stream
+        .map_err(Error::from)
         .and_then(move |item| {
             let content = match item {
-                MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(t))
-                    if t.text.is_empty() =>
-                {
-                    None
-                }
-                MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(t)) => {
-                    Some(t.text)
-                }
-                MultiTurnStreamItem::FinalResponse(response) => {
-                    if let Some(history) = &history
-                        && let Some(hist) = response.history()
-                    {
-                        let mut shared = history.lock().unwrap();
-                        shared.extend_from_slice(hist);
-                        shift_history(&mut shared, context_window);
-                    }
-                    None
-                }
+                MultiTurnStreamItem::StreamAssistantItem(Item::Event(StreamEvent::Text {
+                    text,
+                    ..
+                })) if !text.is_empty() => Some(text),
                 _ => None,
             };
             Task::done(Ok(content))
         })
         .then(move |content| match content {
-            Ok(None) => Task::none(),
-            Ok(Some(content)) => Task::done(A::update(content, page, part)),
-            Err(StreamingError::Completion(CompletionError::JsonError(_))) => Task::none(),
-            Err(error) => Task::done(A::cancel()).chain(Error::from(error).display_error()),
+            Ok(ok) => ok.map_or_default(|content| Task::done(A::update(content, page, part))),
+            Err(error) => Task::done(A::cancel()).chain(error.display_error()),
         })
         .chain(Task::done(A::clean(page, part)))
-}
-
-fn shift_history(history: &mut Vec<Message>, context_window: usize) {
-    let pair_count = history.len() / 2;
-    if pair_count <= context_window {
-        return;
-    }
-    let skip = (pair_count - context_window) * 2;
-    history.drain(..skip);
 }

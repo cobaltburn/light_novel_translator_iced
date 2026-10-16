@@ -1,27 +1,21 @@
 use crate::{
     actions::{consensus, server, translation},
-    controller::Client,
+    controller::{Client, seed_history, shared_history},
     error::{Error, Result},
     model::{Activity::Active, Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
 use quick_xml::{Writer, events::BytesText};
-use rig_core::message::Message;
+use rig::message::Message;
 use serde::{Serialize, Serializer};
 use serde_json::Value;
-use std::{
-    collections::HashMap,
-    ffi::OsStr,
-    io::Cursor,
-    iter,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, ffi::OsStr, io::Cursor, iter};
 
 pub const TEMPERATURE: f64 = 0.8;
 pub const TOP_P: f64 = 0.8;
 pub const REPEAT_PENALTY: f64 = 1.05;
 pub const BATCH_SIZE: usize = 6;
-pub const DEFAULT_CONTEXT_WINDOW: usize = 3;
+pub const DEFAULT_CONTEXT_WINDOW: usize = 10;
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -88,8 +82,11 @@ impl Server {
     ) -> Task<translation::Action> {
         let (current, pages) = pages.split_last().unwrap();
         let sections: Vec<_> = pages.iter().map(|p| p.sections.as_slice()).collect();
-        let history = build_history(&sections, self.settings.context_window);
-        let history = Arc::new(Mutex::new(history));
+        let history = shared_history(self.settings.context_window);
+        let seed = seed_history(
+            history.clone(),
+            build_history(&sections, self.settings.context_window),
+        );
 
         let handles = &mut self.handles;
         let tasks: Vec<_> = current
@@ -111,7 +108,7 @@ impl Server {
             .map(|task| bind(handles, task))
             .collect();
 
-        self.method.join_tasks(tasks)
+        seed.chain(self.method.join_tasks(tasks))
     }
 
     pub fn translate_part(
@@ -134,16 +131,19 @@ impl Server {
 
         let task = match self.method {
             Method::History => {
-                let history = build_history(&sections, self.settings.context_window);
-                let history = Arc::new(Mutex::new(history));
-                self.client.translate_history(
+                let history = shared_history(self.settings.context_window);
+                seed_history(
+                    history.clone(),
+                    build_history(&sections, self.settings.context_window),
+                )
+                .chain(self.client.translate_history(
                     &section.japanese,
                     model,
                     history,
                     self.settings.clone(),
                     page,
                     part,
-                )
+                ))
             }
             _ => self
                 .client
@@ -347,9 +347,9 @@ impl Serialize for Think {
 #[derive(Default, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Method {
     #[default]
+    History,
     Chain,
     Batch,
-    History,
 }
 
 impl Method {

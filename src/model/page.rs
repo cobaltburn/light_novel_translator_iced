@@ -13,7 +13,7 @@ use iced::{
 use phf::phf_map;
 use pulldown_cmark::{Event, Parser, Tag};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use rig_core::message::Message;
+use rig::message::Message;
 use serde::{Deserialize, Serialize};
 use std::{
     borrow::Cow,

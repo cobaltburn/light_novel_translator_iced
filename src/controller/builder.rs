@@ -25,7 +25,6 @@ use rbook::{
 use regex::{Captures, Regex};
 use std::{
     collections::{HashMap, HashSet},
-    ffi::OsStr,
     io::Cursor,
     mem,
     path::{Path, PathBuf},
@@ -272,7 +271,7 @@ impl DocBuilder {
         let i = self
             .pages
             .iter()
-            .position(|p| p.path.file_prefix() == Some(OsStr::new(TOC_PAGE_PREFIX)))?;
+            .position(|p| p.path.file_prefix().is_some_and(|p| p == TOC_PAGE_PREFIX))?;
 
         Some(parse_links(&self.pages.remove(i).content))
     }
