@@ -1,6 +1,6 @@
 use crate::{
     actions::{complete_dialog, get_pages, load_recovery, pick_save_folder, save_file, server},
-    controller::{part_tag, remove_think_tags},
+    controller::{TOC_PAGE_PREFIX, part_tag, remove_think_tags},
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::select_epub,
     model::{Activity, Page, Translation},
@@ -93,18 +93,19 @@ impl Translation {
     pub fn recover_pages(&mut self, pages: Vec<Page>) -> Result<()> {
         let mut sections: HashMap<_, _> = pages.into_iter().map(|p| (p.path, p.sections)).collect();
 
-        let mut last_section = "";
         for page in self.pages.iter_mut() {
             if let Some(current) = sections.get_mut(&page.path) {
                 mem::swap(&mut page.sections, current);
-                page.check_page(last_section);
             }
-            last_section = page.sections.last().map_or_default(|s| s.content.as_str());
         }
 
         self.pages
             .iter_mut()
             .for_each(|p| p.sections.iter_mut().for_each(|s| s.clean()));
+
+        for page in 0..self.pages.len() {
+            self.check_complete(page);
+        }
 
         Ok(())
     }
@@ -139,10 +140,13 @@ impl Translation {
     }
 
     fn check_complete(&mut self, page: usize) {
-        let last_section = page
-            .checked_sub(1)
-            .and_then(|i| self.pages.get(i))
-            .and_then(|p| p.sections.last())
+        let lead = page.checked_sub(1).and_then(|i| self.pages.get(i));
+        let last_section = lead
+            .and_then(|p| {
+                p.file_prefix()
+                    .is_some_and(|e| e != TOC_PAGE_PREFIX)
+                    .then_some(p.sections.last()?)
+            })
             .map_or_default(|c| c.content.clone());
 
         if let Some(page) = self.pages.get_mut(page) {

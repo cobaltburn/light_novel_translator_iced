@@ -2,7 +2,7 @@ use crate::{
     actions::{
         complete_dialog, get_pages, pick_save_folder, save_file, select_format_folder, server,
     },
-    controller::{part_tag, remove_think_tags},
+    controller::{TOC_PAGE_PREFIX, part_tag, remove_think_tags},
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::{display_error, select_epub},
     model::{Activity, Candidate, Consensus, Page},
@@ -212,11 +212,14 @@ impl Consensus {
     }
 
     fn check_complete(&mut self, page: usize) {
-        let last_section = self
-            .pages
-            .get(page - 1)
-            .and_then(|p| Some(p.sections.last()?.content.clone()))
-            .unwrap_or_default();
+        let lead = page.checked_sub(1).and_then(|i| self.pages.get(i));
+        let last_section = lead
+            .and_then(|p| {
+                p.file_prefix()
+                    .is_some_and(|e| e != TOC_PAGE_PREFIX)
+                    .then_some(p.sections.last()?)
+            })
+            .map_or_default(|c| c.content.clone());
         if let Some(page) = self.pages.get_mut(page) {
             page.check_page(&last_section);
         };

@@ -24,10 +24,11 @@ use std::{
 };
 
 const JACCARD_TOLERANCE: f64 = 0.25;
-const FREQUENCY_TOLERANCE: f64 = 12.0;
+const FREQUENCY_TOLERANCE: f64 = 15.0;
 const SECTION_CAPACITY: usize = 8 * 1024;
 const MIN_PERCENT: f64 = 70.0;
 const MAX_PERCENT: f64 = 105.0;
+const SIZE_TOLERANCE: f64 = 12.5;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -122,7 +123,7 @@ impl Page {
             .filter_map(|(i, Section { japanese, content })| {
                 let p = (content.len() as f64 / japanese.len() as f64) * 100.0;
                 let (min, max) = if i == last && content.len() < 2000 {
-                    (MIN_PERCENT - 10.0, MAX_PERCENT + 10.0)
+                    (MIN_PERCENT - SIZE_TOLERANCE, MAX_PERCENT + SIZE_TOLERANCE)
                 } else {
                     (MIN_PERCENT, MAX_PERCENT)
                 };
