@@ -215,16 +215,14 @@ impl Translation {
     pub fn translate(&mut self, page: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
 
-        let Some(pages) = self.pages.get_mut(..page + 1) else {
+        let Some(pages) = self.pages.get(..page + 1) else {
             let file_name = self.file_name();
             self.server.abort();
             return Ok(Task::future(complete_dialog(file_name)).discard());
         };
 
-        let current_page = pages.last_mut().unwrap();
-        current_page.clear();
-
-        let task = self.server.translate(pages, &model, page);
+        let task = self.server.translate(pages, &model, page)?;
+        self.pages[page].clear();
 
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
@@ -239,14 +237,13 @@ impl Translation {
     pub fn translate_page(&mut self, page: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
 
-        let Some(pages) = self.pages.get_mut(0..page + 1) else {
+        let Some(pages) = self.pages.get(0..page + 1) else {
             return Ok(Task::done(server::Action::Abort.into()));
         };
 
-        let current_page = pages.last_mut().unwrap();
-        current_page.clear();
+        let task = self.server.translate(pages, &model, page)?;
+        self.pages[page].clear();
 
-        let task = self.server.translate(pages, &model, page);
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
 
@@ -259,15 +256,15 @@ impl Translation {
     pub fn translate_part(&mut self, page: usize, part: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
 
-        let Some(pages) = self.pages.get_mut(..page + 1) else {
+        let Some(pages) = self.pages.get(..page + 1) else {
             return Ok(Task::done(server::Action::Abort.into()));
         };
 
-        let current = pages.last_mut().unwrap();
-        current.sections.get_mut(part).unwrap().content.clear();
+        let task = self.server.translate_part(pages, &model, page, part)?;
+        let current = &mut self.pages[page];
+        current.sections[part].content.clear();
         current.errors.clear();
 
-        let task = self.server.translate_part(pages, &model, page, part);
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
 

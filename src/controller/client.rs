@@ -2,13 +2,13 @@ use crate::{
     actions::{consensus, translation},
     controller::{CONSENSUS_PROMPT, TRANSLATION_PROMPT},
     error::{Error, Result, ResultTaskExt},
-    model::{REPEAT_PENALTY, Settings, TEMPERATURE, TOP_P, Think},
+    model::{Activity::Active, REPEAT_PENALTY, Settings, TEMPERATURE, TOP_P, Think},
 };
 use iced::Task;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use rig::{
-    AgentBuilder,
+    Agent, AgentBuilder,
     agent::MultiTurnStreamItem,
     id::ConversationId,
     memory::{
@@ -16,7 +16,7 @@ use rig::{
         TemplateCompactor,
     },
     message::Message,
-    providers::ollama::{self},
+    providers::ollama,
     rig_reqwest::ReqwestMiddlewareClient,
     run::PromptError,
     streaming::{Item, StreamEvent},
@@ -42,10 +42,7 @@ pub fn shared_history(context_window: usize) -> SharedHistory {
     ))
 }
 
-pub fn seed_history<A>(history: SharedHistory, messages: Vec<Message>) -> Task<A>
-where
-    A: StreamAction,
-{
+pub fn seed_history<A: StreamAction>(history: SharedHistory, messages: Vec<Message>) -> Task<A> {
     Task::future(async move {
         let id = ConversationId::from(CONVERSATION_ID);
         history.append(&id, messages).await
@@ -54,12 +51,16 @@ where
 }
 
 pub trait StreamAction: 'static + Send + Clone {
+    fn activity(page: usize, part: usize) -> Self;
     fn update(content: String, page: usize, part: usize) -> Self;
     fn cancel() -> Self;
     fn clean(page: usize, part: usize) -> Self;
 }
 
 impl StreamAction for translation::Action {
+    fn activity(page: usize, part: usize) -> Self {
+        translation::Action::UpdateActivity(page, Active(part + 1))
+    }
     fn update(content: String, page: usize, part: usize) -> Self {
         translation::Action::UpdateContent {
             content,
@@ -76,6 +77,10 @@ impl StreamAction for translation::Action {
 }
 
 impl StreamAction for consensus::Action {
+    fn activity(page: usize, part: usize) -> Self {
+        consensus::Action::UpdateActivity(page, Active(part + 1))
+    }
+
     fn update(content: String, page: usize, part: usize) -> Self {
         consensus::Action::UpdateContent {
             content,
@@ -127,80 +132,54 @@ impl Client {
         }
     }
 
-    pub fn translate(
+    pub fn translation_agent(
         &self,
-        japanese: &str,
         model: &str,
-        settings: Settings,
-        page: usize,
-        part: usize,
-    ) -> Task<translation::Action> {
-        let Client::Ollama(ollama) = self else {
-            return Task::none();
-        };
-        let agent = AgentBuilder::new(ollama.completion(model))
+        settings: &Settings,
+        history: Option<SharedHistory>,
+    ) -> Result<Agent> {
+        let builder = self
+            .agent_builder(model)?
             .preamble(TRANSLATION_PROMPT)
             .temperature(settings.temperature)
-            .additional_params(settings.agent_params())
-            .build();
-
-        let japanese = japanese.to_string();
-        let stream =
-            Task::future(async move { agent.prompt(japanese).stream() }).then(Task::stream);
-        handle_stream::<translation::Action>(stream, page, part)
+            .additional_params(settings.agent_params());
+        let builder = match history {
+            Some(history) => builder.memory(history).conversation(CONVERSATION_ID),
+            None => builder,
+        };
+        Ok(builder.build())
     }
 
-    pub fn translate_history(
-        &self,
-        japanese: &str,
-        model: &str,
-        history: SharedHistory,
-        settings: Settings,
-        page: usize,
-        part: usize,
-    ) -> Task<translation::Action> {
-        let Client::Ollama(ollama) = self else {
-            return Task::none();
-        };
-
-        let agent = AgentBuilder::new(ollama.completion(model))
-            .preamble(TRANSLATION_PROMPT)
-            .temperature(settings.temperature)
-            .additional_params(settings.agent_params())
-            .memory(history)
-            .conversation(CONVERSATION_ID)
-            .build();
-
-        let japanese = japanese.to_string();
-        let stream =
-            Task::future(async move { agent.prompt(japanese).stream() }).then(Task::stream);
-        handle_stream::<translation::Action>(stream, page, part)
-    }
-
-    pub fn consensus(
-        &self,
-        prompt: String,
-        model: String,
-        think: Think,
-        page: usize,
-        part: usize,
-    ) -> Result<Task<consensus::Action>> {
-        let Client::Ollama(ollama) = self else {
-            return Err(Error::ServerError("server not connected"));
-        };
-        let agent = AgentBuilder::new(ollama.completion(model))
+    pub fn consensus_agent(&self, model: &str, think: Think) -> Result<Agent> {
+        Ok(self
+            .agent_builder(model)?
             .preamble(CONSENSUS_PROMPT)
             .temperature(TEMPERATURE)
             .additional_params(agent_params(think))
-            .build();
+            .build())
+    }
 
-        let stream = Task::future(async move { agent.prompt(prompt).stream() }).then(Task::stream);
-        Ok(handle_stream::<consensus::Action>(stream, page, part))
+    fn agent_builder(&self, model: &str) -> Result<AgentBuilder> {
+        let Client::Ollama(ollama) = self else {
+            return Err(Error::ServerError("server not connected"));
+        };
+        Ok(AgentBuilder::new(ollama.completion(model)))
     }
 
     pub fn connected(&self) -> bool {
         !matches!(self, Client::Disconnected)
     }
+}
+
+pub fn agent_stream<A: StreamAction>(
+    agent: Agent,
+    prompt: impl Into<Message>,
+    page: usize,
+    part: usize,
+) -> Task<A> {
+    let prompt = prompt.into();
+    let stream = Task::future(async move { agent.prompt(prompt).stream() }).then(Task::stream);
+    handle_stream(stream, page, part)
 }
 
 fn agent_params(think: Think) -> Value {
@@ -211,14 +190,11 @@ fn agent_params(think: Think) -> Value {
     })
 }
 
-fn handle_stream<A>(
+fn handle_stream<A: StreamAction>(
     stream: Task<std::result::Result<MultiTurnStreamItem, PromptError>>,
     page: usize,
     part: usize,
-) -> Task<A>
-where
-    A: StreamAction,
-{
+) -> Task<A> {
     stream
         .map_err(Error::from)
         .and_then(move |item| {

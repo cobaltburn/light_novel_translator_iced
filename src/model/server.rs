@@ -1,12 +1,12 @@
 use crate::{
     actions::{consensus, server, translation},
-    controller::{Client, seed_history, shared_history},
+    controller::{Client, SharedHistory, StreamAction, agent_stream, seed_history, shared_history},
     error::{Error, Result},
-    model::{Activity::Active, Page, Section},
+    model::{Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
 use quick_xml::{Writer, events::BytesText};
-use rig::message::Message;
+use rig::{Agent, message::Message};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
 use std::{collections::HashMap, ffi::OsStr, io::Cursor, iter};
@@ -37,78 +37,24 @@ impl Server {
         pages: &[Page],
         model: &str,
         page: usize,
-    ) -> Task<translation::Action> {
-        match self.method {
-            Method::History => self.translation_history(pages, model, page),
-            _ => self.translation(pages, model, page),
-        }
-    }
-
-    fn translation(
-        &mut self,
-        pages: &[Page],
-        model: &str,
-        page: usize,
-    ) -> Task<translation::Action> {
-        let current = pages.last().expect("dont pass an empty array");
+    ) -> Result<Task<translation::Action>> {
+        let (current, pages) = pages.split_last().expect("dont pass an empty array");
+        let (seed, history) = self.seeded_history(newest_first(pages)).unzip();
+        let agent = self
+            .client
+            .translation_agent(model, &self.settings, history)?;
 
         let handles = &mut self.handles;
+        let seed = seed.map_or_default(|seed| bind(handles, seed));
         let tasks: Vec<_> = current
             .sections
             .iter()
             .enumerate()
-            .map(|(part, section)| {
-                Task::done(translation::Action::UpdateActivity(page, Active(part + 1))).chain(
-                    self.client.translate(
-                        &section.japanese,
-                        model,
-                        self.settings.clone(),
-                        page,
-                        part,
-                    ),
-                )
-            })
+            .map(|(part, section)| stream_task(&agent, Task::none(), &section.japanese, page, part))
             .map(|task| bind(handles, task))
             .collect();
 
-        self.method.join_tasks(tasks)
-    }
-
-    fn translation_history(
-        &mut self,
-        pages: &[Page],
-        model: &str,
-        page: usize,
-    ) -> Task<translation::Action> {
-        let (current, pages) = pages.split_last().unwrap();
-        let sections: Vec<_> = pages.iter().map(|p| p.sections.as_slice()).collect();
-        let history = shared_history(self.settings.context_window);
-        let seed = seed_history(
-            history.clone(),
-            build_history(&sections, self.settings.context_window),
-        );
-
-        let handles = &mut self.handles;
-        let tasks: Vec<_> = current
-            .sections
-            .iter()
-            .enumerate()
-            .map(|(part, section)| {
-                Task::done(translation::Action::UpdateActivity(page, Active(part + 1))).chain(
-                    self.client.translate_history(
-                        &section.japanese,
-                        model,
-                        history.clone(),
-                        self.settings.clone(),
-                        page,
-                        part,
-                    ),
-                )
-            })
-            .map(|task| bind(handles, task))
-            .collect();
-
-        seed.chain(self.method.join_tasks(tasks))
+        Ok(seed.chain(self.method.join_tasks(tasks)))
     }
 
     pub fn translate_part(
@@ -117,42 +63,35 @@ impl Server {
         model: &str,
         page: usize,
         part: usize,
-    ) -> Task<translation::Action> {
+    ) -> Result<Task<translation::Action>> {
         let (Page { sections, .. }, pages) = pages.split_last().unwrap();
         let (section, current_sections) = sections
             .get(..part + 1)
             .and_then(|p| p.split_last())
             .unwrap();
-        let sections: Vec<_> = pages
-            .iter()
-            .map(|p| p.sections.as_slice())
-            .chain(iter::once(current_sections))
-            .collect();
+        let recent = current_sections.iter().rev().chain(newest_first(pages));
+        let (seed, history) = self.seeded_history(recent).unzip();
+        let agent = self
+            .client
+            .translation_agent(model, &self.settings, history)?;
+        let seed = seed.unwrap_or_default();
+        let task = stream_task(&agent, seed, &section.japanese, page, part);
 
-        let task = match self.method {
-            Method::History => {
-                let history = shared_history(self.settings.context_window);
-                seed_history(
-                    history.clone(),
-                    build_history(&sections, self.settings.context_window),
-                )
-                .chain(self.client.translate_history(
-                    &section.japanese,
-                    model,
-                    history,
-                    self.settings.clone(),
-                    page,
-                    part,
-                ))
-            }
-            _ => self
-                .client
-                .translate(&section.japanese, model, self.settings.clone(), page, part),
-        };
+        Ok(self.bind_handle(task))
+    }
 
-        self.bind_handle(
-            Task::done(translation::Action::UpdateActivity(page, Active(part + 1))).chain(task),
-        )
+    /// In History mode, returns a task seeding a new shared history from `recent`
+    /// (sections ordered newest first) along with that history.
+    fn seeded_history<'a>(
+        &self,
+        recent: impl Iterator<Item = &'a Section>,
+    ) -> Option<(Task<translation::Action>, SharedHistory)> {
+        if self.method != Method::History {
+            return None;
+        }
+        let history = shared_history(self.settings.context_window);
+        let messages = build_history(recent, self.settings.context_window);
+        Some((seed_history(history.clone(), messages), history))
     }
 
     pub fn consensus(
@@ -163,55 +102,75 @@ impl Server {
         page: usize,
     ) -> Result<Task<consensus::Action>> {
         let current = pages.last().expect("dont pass an empty array");
-        let candidates = candidates
-            .get(current.file_prefix().unwrap_or_default())
-            .ok_or(Error::Error(String::from("missing candidate files")))?;
+        let candidates = page_candidates(current, &candidates)?;
+        let agent = self.client.consensus_agent(model, self.settings.think)?;
 
         let handles = &mut self.handles;
-        let tasks: Result<Vec<_>> = current
+        let tasks = current
             .sections
             .iter()
             .enumerate()
             .map(|(part, section)| {
-                let candidates: Vec<_> = candidates.iter().flat_map(|e| e.get(part)).collect();
-                let prompt = consensus_prompt(&section.japanese, &candidates)?;
-                self.client
-                    .consensus(prompt, model.to_string(), self.settings.think, page, part)
-                    .map(|task| {
-                        Task::done(consensus::Action::UpdateActivity(page, Active(part + 1)))
-                            .chain(task)
-                    })
+                consensus_task(&agent, section, candidates, page, part)
+                    .map(|task| bind(handles, task))
             })
-            .map(|task| task.map(|task| bind(handles, task)))
-            .collect();
+            .collect::<Result<_>>()?;
 
-        Ok(self.method.join_tasks(tasks?))
+        Ok(self.method.join_tasks(tasks))
     }
 
     pub fn consensus_part(
         &mut self,
         pages: &[Page],
         candidates: HashMap<&OsStr, Vec<&[String]>>,
-        model: String,
+        model: &str,
         page: usize,
         part: usize,
     ) -> Result<Task<consensus::Action>> {
         let current = pages.last().expect("dont pass an empty array");
         let section = current.sections.get(part).unwrap();
-        let page_candidates = candidates
-            .get(&current.file_prefix().unwrap_or_default())
-            .ok_or(Error::Error(String::from("missing candidate file")))?;
-        let page_candidates: Vec<_> = page_candidates.iter().flat_map(|e| e.get(part)).collect();
-        let prompt = consensus_prompt(&section.japanese, &page_candidates)?;
-
-        let task =
-            self.client
-                .consensus(prompt, model.to_string(), self.settings.think, page, part)?;
-        let task =
-            Task::done(consensus::Action::UpdateActivity(page, Active(part + 1))).chain(task);
+        let candidates = page_candidates(current, &candidates)?;
+        let agent = self.client.consensus_agent(model, self.settings.think)?;
+        let task = consensus_task(&agent, section, candidates, page, part)?;
 
         Ok(self.bind_handle(task))
     }
+}
+
+fn page_candidates<'a, 'b>(
+    page: &Page,
+    candidates: &'a HashMap<&OsStr, Vec<&'b [String]>>,
+) -> Result<&'a [&'b [String]]> {
+    candidates
+        .get(page.file_prefix().unwrap_or_default())
+        .map(Vec::as_slice)
+        .ok_or(Error::Error(String::from("missing candidate files")))
+}
+
+fn consensus_task(
+    agent: &Agent,
+    section: &Section,
+    candidates: &[&[String]],
+    page: usize,
+    part: usize,
+) -> Result<Task<consensus::Action>> {
+    let candidates: Vec<_> = candidates.iter().flat_map(|e| e.get(part)).collect();
+    let prompt = consensus_prompt(&section.japanese, &candidates)?;
+
+    Ok(stream_task(agent, Task::none(), prompt, page, part))
+}
+
+/// Marks the part active, runs `seed`, then streams the agent's reply.
+fn stream_task<A: StreamAction>(
+    agent: &Agent,
+    seed: Task<A>,
+    prompt: impl Into<Message>,
+    page: usize,
+    part: usize,
+) -> Task<A> {
+    Task::done(A::activity(page, part))
+        .chain(seed)
+        .chain(agent_stream(agent.clone(), prompt, page, part))
 }
 
 fn bind<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
@@ -220,18 +179,25 @@ fn bind<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
     task
 }
 
-fn build_history(sections: &[&[Section]], context_window: usize) -> Vec<Message> {
-    let mut recent: Vec<_> = sections
-        .iter()
-        .rev()
-        .flat_map(|&p| p.iter().rev())
+/// Sections of `pages` ordered newest first.
+fn newest_first(pages: &[Page]) -> impl Iterator<Item = &Section> {
+    pages.iter().rev().flat_map(|p| p.sections.iter().rev())
+}
+
+/// Builds history messages from the latest `context_window` translated sections,
+/// given `recent` ordered newest first. Stops walking once the window is full.
+fn build_history<'a>(
+    recent: impl Iterator<Item = &'a Section>,
+    context_window: usize,
+) -> Vec<Message> {
+    let recent: Vec<_> = recent
         .filter(|s| !s.content.is_empty())
         .take(context_window)
         .collect();
-    recent.reverse();
 
     recent
         .into_iter()
+        .rev()
         .flat_map(Section::history_message)
         .collect()
 }

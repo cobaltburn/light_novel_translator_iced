@@ -117,9 +117,6 @@ impl Consensus {
 
     pub fn consensus(&mut self, page: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
-        if let Some(page) = self.pages.get_mut(page) {
-            page.clear();
-        }
 
         let Some(pages) = self.pages.get(..page + 1) else {
             let file_name = self.file_name();
@@ -129,7 +126,12 @@ impl Consensus {
 
         let candidates = candidates_map(&self.candidates, pages);
 
-        let task = self.server.consensus(pages, candidates, &model, page)?;
+        let task = self
+            .server
+            .consensus(pages, candidates, &model, page)
+            .inspect_err(|_| self.cancel())?;
+        self.pages[page].clear();
+
         let complete_task = self.complete_task(page);
         let next_task = self.next_task(page);
 
@@ -149,10 +151,6 @@ impl Consensus {
     pub fn consensus_page(&mut self, page: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
 
-        if let Some(page) = self.pages.get_mut(page) {
-            page.clear();
-        }
-
         let Some(pages) = self.pages.get(0..page + 1) else {
             return Ok(Task::done(server::Action::Abort.into()));
         };
@@ -160,6 +158,8 @@ impl Consensus {
         let candidates = candidates_map(&self.candidates, pages);
 
         let task = self.server.consensus(pages, candidates, &model, page)?;
+        self.pages[page].clear();
+
         let complete_task = self.complete_task(page);
 
         Ok(task
@@ -170,11 +170,6 @@ impl Consensus {
     pub fn consensus_part(&mut self, page: usize, part: usize) -> Result<Task<Action>> {
         let model = self.check_ready()?;
 
-        if let Some(page) = self.pages.get_mut(page) {
-            page.sections.get_mut(part).unwrap().content.clear();
-            page.errors.clear();
-        }
-
         let Some(pages) = self.pages.get(0..page + 1) else {
             return Ok(Task::done(server::Action::Abort.into()));
         };
@@ -183,7 +178,11 @@ impl Consensus {
 
         let task = self
             .server
-            .consensus_part(pages, candidates, model, page, part)?;
+            .consensus_part(pages, candidates, &model, page, part)?;
+        let current = &mut self.pages[page];
+        current.sections[part].content.clear();
+        current.errors.clear();
+
         let complete_task = self
             .server
             .bind_handle(Task::done(Action::PageComplete(page)));
