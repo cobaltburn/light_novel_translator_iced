@@ -1,11 +1,12 @@
 use crate::{
     controller::{
-        Anchor, AnchorPosition, IMAGE_MARKER_RE, PageLinks, extract_head, update_resource_tag,
+        Anchor, AnchorPosition, IMAGE_MARKER_RE, PageLinks, extract_head, is_header,
+        update_resource_tag,
     },
     error::Result,
 };
 use quick_xml::{
-    Reader, Writer,
+    Reader, Writer, XmlVersion,
     escape::{escape, partial_escape},
     events::{BytesStart, Event},
 };
@@ -15,7 +16,6 @@ use std::{
     collections::{HashMap, VecDeque},
     fmt::Write as _,
     io::{self, Cursor},
-    mem,
     sync::LazyLock,
 };
 
@@ -57,7 +57,8 @@ pub fn write_head(
     Ok(())
 }
 
-const ANCHOR_TAG: &[u8] = b"a";
+const ANCHOR_TAG: &str = "a";
+const PARAGRAPH_TAG: &str = "p";
 const BR: &str = "br";
 
 pub fn write_body(
@@ -66,15 +67,32 @@ pub fn write_body(
     page: usize,
 ) -> io::Result<()> {
     let mut reader = Reader::from_str(content);
-    let h_tags: &[&[u8]] = &[b"h1", b"h2", b"h3", b"h4"];
 
     writer
         .create_element("body")
         .write_inner_content(|writer| {
             let mut count = 0;
             let mut after_link = false;
+            // A paragraph start is held back until the next event, so a leading id anchor
+            // can be moved onto the paragraph
+            let mut paragraph: Option<BytesStart<'_>> = None;
             loop {
-                match reader.read_event().map_err(io::Error::other)? {
+                let event = reader.read_event().map_err(io::Error::other)?;
+                if let Some(p) = paragraph.take() {
+                    if let Event::Empty(tag) = &event
+                        && let Some(id) = anchor_id(tag)
+                    {
+                        writer
+                            .write_event(Event::Start(p.with_attributes([("id", id.as_str())])))?;
+                        continue;
+                    }
+                    writer.write_event(Event::Start(p))?;
+                }
+
+                match event {
+                    Event::Start(tag) if tag.name().as_ref() == PARAGRAPH_TAG => {
+                        paragraph = Some(tag);
+                    }
                     Event::Start(tag) if tag.name().as_ref() == ANCHOR_TAG => {
                         if after_link {
                             writer.write_event(Event::Empty(BytesStart::new(BR)))?;
@@ -86,11 +104,11 @@ pub fn write_body(
                         after_link = true;
                         continue;
                     }
-                    Event::Text(text) if text.iter().all(u8::is_ascii_whitespace) => {
+                    Event::Text(text) if text.chars().all(|c| c.is_ascii_whitespace()) => {
                         writer.write_event(Event::Text(text))?;
                         continue;
                     }
-                    Event::Start(tag) if h_tags.contains(&tag.name().as_ref()) => {
+                    Event::Start(tag) if is_header(tag.name()) => {
                         count += 1;
                         let id = format!("h{:03}-{:03}", page, count);
                         let tag = tag.with_attributes([("id", id.as_str())]);
@@ -129,16 +147,18 @@ fn write_image_tags(
 
 static PART_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<part>.*?</part>").unwrap());
 
+/// The translated sections of a page, indexed the same way as `AnchorPosition::section`.
+pub fn content_sections(content: &str) -> impl Iterator<Item = &str> {
+    PART_RE.split(content).filter(|e| !e.trim().is_empty())
+}
+
 pub fn insert_anchors(content: &str, anchors: Vec<AnchorPosition>) -> Result<String> {
     let mut section_anchors: HashMap<usize, Vec<AnchorPosition>> = HashMap::new();
     for p in anchors {
         section_anchors.entry(p.section).or_default().push(p);
     }
 
-    let sections = PART_RE
-        .split(content)
-        .filter(|e| !e.trim().is_empty())
-        .map(partial_escape);
+    let sections = content_sections(content).map(partial_escape);
     let mut output = String::with_capacity(content.len());
 
     for (index, section) in sections.enumerate() {
@@ -156,40 +176,85 @@ pub fn insert_anchors(content: &str, anchors: Vec<AnchorPosition>) -> Result<Str
             while let Some(p) = anchors.pop_front_if(|p| position >= p.position) {
                 popped.push(p);
             }
-            write_anchors(&mut output, popped)?;
-            output.push_str(line);
-            output.push('\n');
+            let ids = write_anchors(&mut output, popped)?;
+            write_line(&mut output, line, &ids);
         }
 
-        write_anchors(&mut output, anchors)?;
+        let ids = write_anchors(&mut output, anchors)?;
+        ids.iter().for_each(|id| write_id_div(&mut output, id));
     }
 
     let mut remaining: Vec<_> = section_anchors.into_iter().collect();
     remaining.sort_by_key(|(section, _)| *section);
     for (_, mut anchors) in remaining {
         anchors.sort_by(|a, b| a.position.total_cmp(&b.position));
-        write_anchors(&mut output, anchors)?;
+        let ids = write_anchors(&mut output, anchors)?;
+        ids.iter().for_each(|id| write_id_div(&mut output, id));
     }
 
     Ok(output)
 }
 
-/// Writes anchors in order, grouping consecutive images into a single centered block.
+/// Writes the images as a single centered block and returns the ids, which belong on the
+/// line that follows.
 fn write_anchors(
     output: &mut String,
     anchors: impl IntoIterator<Item = AnchorPosition>,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let mut images = Vec::new();
+    let mut ids = Vec::new();
     for AnchorPosition { anchor, .. } in anchors {
         match anchor {
             Anchor::Image(tag) => images.push(tag),
-            Anchor::Id(id) => {
-                write_image_block(output, mem::take(&mut images))?;
-                write_id_div(output, &id);
-            }
+            Anchor::Id(id) => ids.push(id),
         }
     }
-    write_image_block(output, images)
+    write_image_block(output, images)?;
+    Ok(ids)
+}
+
+/// Writes the line with the id anchors at the start of its text, after any heading marker,
+/// so they end up inside its paragraph or heading where `write_body` moves the id onto
+/// the element itself. Readers handle that better than an empty anchor between blocks.
+fn write_line(output: &mut String, line: &str, ids: &[String]) {
+    if line.trim().is_empty() {
+        ids.iter().for_each(|id| write_id_div(output, id));
+        output.push_str(line);
+        output.push('\n');
+        return;
+    }
+
+    let text = line.trim_start();
+    let hashes = text.len() - text.trim_start_matches('#').len();
+    let marker = match text[hashes..].strip_prefix(' ') {
+        Some(_) if (1..=6).contains(&hashes) => hashes + 1,
+        _ => 0,
+    };
+    let split = line.len() - text.len() + marker;
+
+    output.push_str(&line[..split]);
+    for id in ids {
+        let _ = write!(output, "<a id=\"{}\"/>", escape(id));
+    }
+    output.push_str(&line[split..]);
+    output.push('\n');
+}
+
+/// The id of an `<a>` that has nothing but an id, as written by `insert_anchors`.
+fn anchor_id(tag: &BytesStart<'_>) -> Option<String> {
+    if tag.name().as_ref() != ANCHOR_TAG {
+        return None;
+    }
+    let mut attributes = tag.attributes().flatten();
+    let id = attributes.next().filter(|a| a.key.as_ref() == "id")?;
+    if attributes.next().is_some() {
+        return None;
+    }
+    Some(
+        id.normalized_value(XmlVersion::Implicit1_0)
+            .ok()?
+            .into_owned(),
+    )
 }
 
 /// Replaces each marker with its image block. Markers without a matching image, and repeats
@@ -219,8 +284,9 @@ pub fn replace_image_markers(
     Ok(output)
 }
 
+/// The blank line closes the anchor's html block, so the heading after it stays a paragraph.
 fn write_id_div(output: &mut String, id: &str) {
-    let _ = writeln!(output, "<a id=\"{}\"/>", escape(id));
+    let _ = writeln!(output, "<a id=\"{}\"/>\n", escape(id));
 }
 
 /// Writes the images as a markdown html block, followed by a blank line so the
@@ -266,6 +332,32 @@ mod test {
         let html = body("<p><a href=\"1.xhtml\">One</a>\n<a href=\"2.xhtml\">Two</a></p>");
         assert!(html.contains("</a>\n<br/><a href=\"2.xhtml\">"));
         assert!(!html.contains("<div"));
+    }
+
+    #[test]
+    fn keeps_links_separated_by_text_inline() {
+        let html = body("<p><a href=\"1.xhtml\">One</a> and <a href=\"2.xhtml\">Two</a></p>");
+        assert!(html.contains("</a> and <a href=\"2.xhtml\">"));
+        assert!(!html.contains("<br/>"));
+    }
+
+    #[test]
+    fn puts_ids_on_their_paragraph() {
+        let position = |id: &str, line: usize| AnchorPosition {
+            anchor: Anchor::Id(id.to_string()),
+            section: 0,
+            line,
+            position: line as f64 / 7.0,
+        };
+        let content = "<part>1</part>\n\nText.\n\nSide Story: Title\n\n## Heading\n";
+        let anchors = vec![position("c1", 4), position("c2", 6)];
+        let markdown = insert_anchors(content, anchors).unwrap();
+        assert!(markdown.contains("\n<a id=\"c1\"/>Side Story: Title\n"));
+        assert!(markdown.contains("\n## <a id=\"c2\"/>Heading\n"));
+
+        let html = body(&crate::controller::to_html(&markdown));
+        assert!(html.contains("<p id=\"c1\">Side Story: Title</p>"));
+        assert!(html.contains("<h2 id=\"h000-001\"><a id=\"c2\"/>Heading</h2>"));
     }
 
     #[test]

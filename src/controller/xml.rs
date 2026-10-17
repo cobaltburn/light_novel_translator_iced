@@ -2,7 +2,6 @@ use crate::{
     controller::{PageLinks, image_marker},
     error::{Error, Result},
 };
-use bstr::ByteSlice;
 use pulldown_cmark::{Options, Parser, html::push_html};
 use quick_xml::{
     Reader, Writer, XmlVersion,
@@ -11,7 +10,7 @@ use quick_xml::{
     name::QName,
 };
 use regex::Regex;
-use std::{borrow::Cow, io::Cursor};
+use std::{borrow::Cow, fmt::Write as _, io::Cursor};
 
 pub fn to_html(markdown: &str) -> String {
     let options =
@@ -44,23 +43,24 @@ pub fn strip_syosetu_tags(html: &str) -> Result<String> {
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-const SYOSETU_AFTERWORD: &[u8] = b"--afterword";
-const SYOSETU_PREFACE: &[u8] = b"--preface";
-const SYOSETU_ATTRIBUTES: &[&[u8]] = &[SYOSETU_PREFACE, SYOSETU_AFTERWORD];
+const SYOSETU_AFTERWORD: &str = "--afterword";
+const SYOSETU_PREFACE: &str = "--preface";
+const SYOSETU_ATTRIBUTES: &[&str] = &[SYOSETU_PREFACE, SYOSETU_AFTERWORD];
 
 fn contains_author_notes(tag: &BytesStart<'_>) -> bool {
     tag.try_get_attribute("class")
         .ok()
         .flatten()
-        .is_some_and(|a| SYOSETU_ATTRIBUTES.iter().any(|e| a.value.contains_str(e)))
+        .is_some_and(|a| SYOSETU_ATTRIBUTES.iter().any(|e| a.value.contains(e)))
 }
 
-const RUBY_TAG: &[u8] = b"ruby";
+const RUBY_TAG: &str = "ruby";
+const HEAD_TAG: &str = "head";
 
 pub fn strip_tags(html: &str) -> Result<String> {
     let mut reader = Reader::from_str(html);
     let mut writer = Writer::new(Cursor::new(Vec::new()));
-    let tag_match = |e: &[u8]| matches!(e, b"head" | b"img" | b"image" | b"rt" | b"rp");
+    let tag_match = |e: &str| matches!(e, HEAD_TAG | IMG_TAG | IMAGE_TAG | "rt" | "rp");
     let mut ruby_depth = 0usize;
     let mut ruby_text = String::new();
 
@@ -68,7 +68,7 @@ pub fn strip_tags(html: &str) -> Result<String> {
         let event = reader.read_event()?;
         match event {
             Event::Text(ref text) if ruby_depth > 0 => {
-                ruby_text.push_str(str::from_utf8(text)?);
+                ruby_text.push_str(&text.html_content());
                 continue;
             }
             Event::GeneralRef(ref entity) if ruby_depth > 0 => {
@@ -117,14 +117,67 @@ pub fn strip_tags(html: &str) -> Result<String> {
 /// are resolved to their characters here. The result is escaped text; unknown
 /// entities are kept as-is.
 fn resolve_entity(entity: &BytesRef<'_>) -> Result<String> {
-    if let Some(ch) = entity.resolve_char_ref()? {
-        return Ok(escape(ch.to_string()).into_owned());
-    }
-    let name = entity.html_content()?;
-    Ok(match resolve_html5_entity(&name) {
+    Ok(match entity_text(entity)? {
         Some(text) => escape(text).into_owned(),
-        None => format!("&{name};"),
+        None => format!("&{};", entity.html_content()),
     })
+}
+
+/// Resolves a numeric or HTML5 entity reference to its unescaped text.
+fn entity_text(entity: &BytesRef<'_>) -> Result<Option<String>> {
+    if let Some(ch) = entity.resolve_char_ref()? {
+        return Ok(Some(ch.to_string()));
+    }
+    Ok(resolve_html5_entity(&entity.html_content()).map(str::to_string))
+}
+
+/// Joins the text pieces that the reader splits at every entity reference.
+#[derive(Default)]
+pub struct TextRun(String);
+
+impl TextRun {
+    /// Appends a text or entity event to the run. Returns false for any other event.
+    pub fn push(&mut self, event: &Event<'_>) -> Result<bool> {
+        match event {
+            Event::Text(text) => self.0.push_str(&text.html_content()),
+            Event::GeneralRef(entity) => match entity_text(entity)? {
+                Some(text) => self.0.push_str(&text),
+                None => {
+                    let _ = write!(self.0, "&{};", entity.html_content());
+                }
+            },
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    /// Ends the run, returning its trimmed text unless it is blank.
+    pub fn finish(&mut self) -> Option<String> {
+        let text = self.0.trim().to_string();
+        self.0.clear();
+        (!text.is_empty()).then_some(text)
+    }
+}
+
+/// Returns the text of the html, with entities resolved and inline tags removed.
+pub fn text_content(html: &str) -> Result<String> {
+    let mut reader = Reader::from_str(html);
+    let mut text = TextRun::default();
+    loop {
+        match reader.read_event()? {
+            Event::Eof => break,
+            event => {
+                text.push(&event)?;
+            }
+        }
+    }
+    Ok(text.finish().unwrap_or_default())
+}
+
+pub const HEADER_TAGS: &[&str] = &["h1", "h2", "h3", "h4"];
+
+pub fn is_header(name: QName<'_>) -> bool {
+    HEADER_TAGS.contains(&name.as_ref())
 }
 
 pub fn is_ruby(name: QName<'_>) -> bool {
@@ -133,8 +186,8 @@ pub fn is_ruby(name: QName<'_>) -> bool {
 
 pub const SRC: &str = "src";
 pub const XLINK: &str = "xlink:href";
-pub const IMG_BYTES: &[u8] = b"img";
-pub const IMAGE_BYTES: &[u8] = b"image";
+pub const IMG_TAG: &str = "img";
+pub const IMAGE_TAG: &str = "image";
 
 pub const IMAGES: &str = "../Images";
 pub const STYLES: &str = "../Styles";
@@ -147,11 +200,11 @@ pub fn update_image_paths(html: &str, links: PageLinks<'_>) -> Result<String> {
 
     loop {
         match reader.read_event()? {
-            Event::Empty(tag) if tag.name().as_ref() == IMG_BYTES => {
+            Event::Empty(tag) if tag.name().as_ref() == IMG_TAG => {
                 let tag = update_tag_path(tag, links, IMAGES, SRC)?;
                 writer.write_event(Event::Empty(tag))?;
             }
-            Event::Empty(tag) if tag.name().as_ref() == IMAGE_BYTES => {
+            Event::Empty(tag) if tag.name().as_ref() == IMAGE_TAG => {
                 let tag = update_tag_path(tag, links, IMAGES, XLINK)?;
                 writer.write_event(Event::Empty(tag))?;
             }
@@ -163,18 +216,18 @@ pub fn update_image_paths(html: &str, links: PageLinks<'_>) -> Result<String> {
     Ok(String::from_utf8(writer.into_inner().into_inner())?)
 }
 
-pub const LINK_BYTES: &[u8] = b"link";
-pub const SCRIPT_BYTES: &[u8] = b"script";
+pub const LINK_TAG: &str = "link";
+pub const SCRIPT_TAG: &str = "script";
 
 pub fn update_resource_tag<'a>(event: Event<'a>, links: PageLinks<'_>) -> Result<Event<'a>> {
     Ok(match event {
-        Event::Empty(tag) if tag.name().as_ref() == LINK_BYTES => {
+        Event::Empty(tag) if tag.name().as_ref() == LINK_TAG => {
             Event::Empty(update_tag_path(tag, links, STYLES, "href")?)
         }
-        Event::Empty(tag) if tag.name().as_ref() == SCRIPT_BYTES => {
+        Event::Empty(tag) if tag.name().as_ref() == SCRIPT_TAG => {
             Event::Empty(update_tag_path(tag, links, SCRIPTS, SRC)?)
         }
-        Event::Start(tag) if tag.name().as_ref() == SCRIPT_BYTES => {
+        Event::Start(tag) if tag.name().as_ref() == SCRIPT_TAG => {
             Event::Start(update_tag_path(tag, links, SCRIPTS, SRC)?)
         }
         event => event,
@@ -212,10 +265,10 @@ pub fn update_tag_path(
     let attributes: Vec<_> = tag
         .attributes()
         .flatten()
-        .filter(|a| a.key.as_ref() != attr.as_bytes())
+        .filter(|a| a.key.as_ref() != attr)
         .collect();
 
-    let tag = BytesStart::new(str::from_utf8(tag.name().as_ref())?)
+    let tag = BytesStart::new(tag.name().as_ref())
         .with_attributes(attributes)
         .with_attributes([(attr, path.as_str())])
         .into_owned();
@@ -226,8 +279,8 @@ pub fn extract_head(html: &str) -> Result<Cow<'_, str>> {
     let mut reader = Reader::from_str(html);
     loop {
         match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"head" => {
-                return Ok(reader.read_text(tag.name())?.decode()?);
+            Event::Start(tag) if tag.name().as_ref() == HEAD_TAG => {
+                return Ok(reader.read_text(tag.name())?.html_content());
             }
             Event::Eof => return Err(Error::BuildError("No head tag found")),
             _ => (),
@@ -242,7 +295,7 @@ pub fn insert_image_markers(html: &str) -> Result<String> {
 
     loop {
         match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"head" => {
+            Event::Start(tag) if tag.name().as_ref() == HEAD_TAG => {
                 reader.read_to_end(tag.name())?;
             }
             Event::Empty(tag) if is_image(&tag) => {
@@ -261,7 +314,7 @@ pub fn insert_image_markers(html: &str) -> Result<String> {
 
 fn is_image(tag: &BytesStart<'_>) -> bool {
     let name = tag.name();
-    name.as_ref() == IMG_BYTES || name.as_ref() == IMAGE_BYTES
+    name.as_ref() == IMG_TAG || name.as_ref() == IMAGE_TAG
 }
 
 pub fn image_anchors(
@@ -272,26 +325,30 @@ pub fn image_anchors(
     let mut reader = Reader::from_str(&html);
     let mut anchors = vec![];
     let mut pending = vec![];
+    let mut run = TextRun::default();
 
     loop {
-        match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"head" => {
+        let event = reader.read_event()?;
+        if run.push(&event)? {
+            continue;
+        }
+        if let Some(text) = run.finish()
+            && !pending.is_empty()
+        {
+            anchors.extend(pending.drain(..).map(|tag| (tag, Some(text.clone()))));
+        }
+
+        match event {
+            Event::Start(tag) if tag.name().as_ref() == HEAD_TAG => {
                 reader.read_to_end(tag.name())?;
             }
             Event::Empty(tag) if is_image(&tag) => {
-                let attr = if tag.name().as_ref() == IMG_BYTES {
+                let attr = if tag.name().as_ref() == IMG_TAG {
                     SRC
                 } else {
                     XLINK
                 };
                 pending.push(update_tag_path(tag, links, IMAGES, attr)?);
-            }
-            Event::Text(text) if !pending.is_empty() => {
-                let text = text.xml10_content()?;
-                let text = text.trim();
-                if !text.is_empty() {
-                    anchors.extend(pending.drain(..).map(|tag| (tag, Some(text.to_string()))));
-                }
             }
             Event::Eof => break,
             _ => (),
@@ -304,7 +361,13 @@ pub fn image_anchors(
 
 #[cfg(test)]
 mod test {
-    use super::{strip_tags, to_html};
+    use super::{strip_tags, text_content, to_html};
+
+    #[test]
+    fn joins_text_split_at_entities() {
+        let html = "<span>Tom</span> &amp; Jerry&hellip;&#33;&bogus;";
+        assert_eq!(text_content(html).unwrap(), "Tom & Jerry…!&bogus;");
+    }
 
     #[test]
     fn strips_ruby_readings() {

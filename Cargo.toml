@@ -4,26 +4,25 @@ version = "1.2.0"
 edition = "2024"
 
 [dependencies]
-bstr = "1.12.1"
 fast_html2md = "0.0.62"
 iced = { version = "0.14.0", features = ["advanced", "debug", "image", "lazy", "markdown", "svg", "tokio"] }
 iced_aw = { version = "0.14.1", default-features = false, features = ["context_menu", "typed_input", "menu", "tab_bar", "card", "number_input"] }
-log = "0.4.29" 
+log = "0.4.34" 
 percent-encoding = "2.3.2"
 phf = { version = "0.13.1", features = ["macros"] }
 pulldown-cmark = "0.13.4"
-quick-xml = { version = "0.40.1", features = ["escape-html"] }
+quick-xml = { version = "0.42.0", features = ["escape-html"] }
 rayon = "1.12.0"
-rbook = "0.7.10"
-regex = "1.12.3"
-reqwest-middleware = "0.5"
-reqwest-retry = "0.9"
+rbook = "0.7.12"
+regex = "1.13"
+reqwest-middleware = "0.5.2"
+reqwest-retry = "0.9.1"
 rfd = { version = "0.17.2", features = ["xdg-portal"] }
 rig = { version = "0.44.0", features = ["agent", "memory", "reqwest-middleware"] }
-serde = "1.0.228"
-serde_json = "1.0"
-thiserror = "2.0.18"
-tokio = { version = "1.52.1", features = ["fs", "rt-multi-thread", "time", "tokio-macros"] }
-tokio-stream = "0.1.18"
+serde = "1.0.229"
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.53.3", features = ["fs", "rt-multi-thread", "time", "tokio-macros"] }
+tokio-stream = "0.1.19"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     collections::{HashMap, HashSet},
     io::Cursor,
     path::Path,
@@ -7,7 +6,9 @@ use std::{
 };
 
 use crate::{
-    controller::{insert_image_markers, part_tag, strip_syosetu_tags, strip_tags},
+    controller::{
+        insert_image_markers, is_header, part_tag, strip_syosetu_tags, strip_tags, text_content,
+    },
     error::Result,
 };
 use html2md::rewrite_html;
@@ -101,18 +102,17 @@ pub fn parse_headers(html: &str) -> Result<HashMap<String, Vec<(String, String)>
     use quick_xml::events::Event;
     let mut reader = Reader::from_str(html);
     let mut titles: Vec<_> = vec![(String::new(), Vec::new())];
-    let h_tags: &[&[u8]] = &[b"h1", b"h2", b"h3", b"h4"];
 
     loop {
         match reader.read_event()? {
-            Event::Start(tag) if tag.name().as_ref() == b"div" => {
+            Event::Start(tag) if tag.name().as_ref() == "div" => {
                 if let Some(id) = tag.try_get_attribute("id")? {
                     let id = id.normalized_value(XmlVersion::Implicit1_0)?;
                     titles.push((id.into_owned(), Vec::new()));
                 }
             }
-            Event::Start(tag) if h_tags.contains(&tag.name().as_ref()) => {
-                let title = extract_text(reader.read_text(tag.name())?.into_inner())?;
+            Event::Start(tag) if is_header(tag.name()) => {
+                let title = text_content(&reader.read_text(tag.name())?.into_inner())?;
                 let id = tag.try_get_attribute("id")?;
                 if let Some((_, titles)) = titles.last_mut()
                     && let Some(id) = id
@@ -130,23 +130,6 @@ pub fn parse_headers(html: &str) -> Result<HashMap<String, Vec<(String, String)>
         .for_each(|(_, e)| e.retain(|e| !e.1.trim().is_empty()));
 
     Ok(titles.into_iter().collect())
-}
-
-fn extract_text(html: Cow<'_, [u8]>) -> Result<String> {
-    use quick_xml::events::Event;
-    let mut reader = Reader::from_reader(html.as_ref());
-    let mut title = String::new();
-    loop {
-        match reader.read_event()? {
-            Event::Text(text) => {
-                let text = text.html_content()?;
-                title.push_str(text.as_ref());
-            }
-            Event::Eof => break,
-            _ => (),
-        }
-    }
-    Ok(title)
 }
 
 pub fn is_empty_section(section: &str) -> bool {

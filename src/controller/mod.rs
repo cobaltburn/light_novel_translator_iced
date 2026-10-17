@@ -7,7 +7,6 @@ mod html_writer;
 mod parse;
 mod prompts;
 mod resources;
-mod toc;
 mod xml;
 
 pub use builder::*;
@@ -16,8 +15,9 @@ pub use html_writer::*;
 pub use parse::*;
 pub use prompts::*;
 pub use resources::*;
-pub use toc::*;
 pub use xml::*;
+
+pub const TOC_PAGE_PREFIX: &str = "__toc__";
 
 pub fn get_ordered_path(epub: &Epub) -> Vec<PathBuf> {
     epub.spine()
