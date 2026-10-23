@@ -635,9 +635,9 @@ pub fn place_ids(
             let Anchor::Id(id) = &position.anchor else {
                 return position;
             };
-            let before = source.get(position.section).map_or(0, |s| {
-                s.lines().take(position.line).filter(is_filled).count()
-            });
+            let before = source
+                .get(position.section)
+                .map_or_default(|s| s.lines().take(position.line).filter(is_filled).count());
             let share = (offsets.get(position.section).unwrap_or(&0) + before) as f64
                 / source_total.max(1) as f64;
             let estimate = filled[((share * filled.len() as f64) as usize).min(filled.len() - 1)];

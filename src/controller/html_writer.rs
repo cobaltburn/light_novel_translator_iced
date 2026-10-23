@@ -124,23 +124,33 @@ pub fn write_body(
     Ok(())
 }
 
+/// The first id goes on the illustration itself, any others on empty anchors inside it.
 fn write_image_tags(
     writer: &mut Writer<Cursor<Vec<u8>>>,
     image_tags: Vec<BytesStart<'_>>,
+    ids: Vec<String>,
 ) -> Result<()> {
     if image_tags.is_empty() {
         return Ok(());
     }
 
-    writer
+    let mut ids = ids.into_iter();
+    let mut div = writer
         .create_element("div")
-        .with_attribute(("class", "illustration"))
-        .write_inner_content(|writer| {
-            for tag in image_tags {
-                writer.write_event(Event::Empty(tag))?;
-            }
-            Ok(())
-        })?;
+        .with_attribute(("class", "illustration"));
+    if let Some(id) = ids.next() {
+        div = div.with_attribute(("id", id.as_str()));
+    }
+    div.write_inner_content(|writer| {
+        for id in ids {
+            let anchor = BytesStart::new(ANCHOR_TAG).with_attributes([("id", id.as_str())]);
+            writer.write_event(Event::Empty(anchor))?;
+        }
+        for tag in image_tags {
+            writer.write_event(Event::Empty(tag))?;
+        }
+        Ok(())
+    })?;
 
     Ok(())
 }
@@ -160,12 +170,15 @@ pub fn insert_anchors(content: &str, anchors: Vec<AnchorPosition>) -> Result<Str
 
     let sections = content_sections(content).map(partial_escape);
     let mut output = String::with_capacity(content.len());
+    // Ids waiting for a line with text, carried across blank lines and into the next section
+    let mut ids = Vec::new();
 
     for (index, section) in sections.enumerate() {
-        let Some(mut anchors) = section_anchors.remove(&index) else {
+        let mut anchors = section_anchors.remove(&index).unwrap_or_default();
+        if anchors.is_empty() && ids.is_empty() {
             output.push_str(&section);
             continue;
-        };
+        }
         anchors.sort_by(|a, b| a.position.total_cmp(&b.position));
         let mut anchors = VecDeque::from(anchors);
 
@@ -176,49 +189,54 @@ pub fn insert_anchors(content: &str, anchors: Vec<AnchorPosition>) -> Result<Str
             while let Some(p) = anchors.pop_front_if(|p| position >= p.position) {
                 popped.push(p);
             }
-            let ids = write_anchors(&mut output, popped)?;
-            write_line(&mut output, line, &ids);
+            write_anchors(&mut output, popped, &mut ids)?;
+            write_line(&mut output, line, &mut ids);
         }
 
-        let ids = write_anchors(&mut output, anchors)?;
-        ids.iter().for_each(|id| write_id_div(&mut output, id));
+        write_anchors(&mut output, anchors, &mut ids)?;
     }
 
     let mut remaining: Vec<_> = section_anchors.into_iter().collect();
     remaining.sort_by_key(|(section, _)| *section);
     for (_, mut anchors) in remaining {
         anchors.sort_by(|a, b| a.position.total_cmp(&b.position));
-        let ids = write_anchors(&mut output, anchors)?;
-        ids.iter().for_each(|id| write_id_div(&mut output, id));
+        write_anchors(&mut output, anchors, &mut ids)?;
     }
+
+    ids.iter().for_each(|id| write_id_div(&mut output, id));
 
     Ok(output)
 }
 
-/// Writes the images as a single centered block and returns the ids, which belong on the
-/// line that follows.
+/// Writes the images as a single centered block and adds the ids to `ids`, which belong on
+/// the next line with text. Ids already waiting go on the images, so they don't end up
+/// pointing past them.
 fn write_anchors(
     output: &mut String,
     anchors: impl IntoIterator<Item = AnchorPosition>,
-) -> Result<Vec<String>> {
+    ids: &mut Vec<String>,
+) -> Result<()> {
     let mut images = Vec::new();
-    let mut ids = Vec::new();
+    let mut new_ids = Vec::new();
     for AnchorPosition { anchor, .. } in anchors {
         match anchor {
             Anchor::Image(tag) => images.push(tag),
-            Anchor::Id(id) => ids.push(id),
+            Anchor::Id(id) => new_ids.push(id),
         }
     }
-    write_image_block(output, images)?;
-    Ok(ids)
+    if !images.is_empty() {
+        write_image_block(output, images, std::mem::take(ids))?;
+    }
+    ids.extend(new_ids);
+    Ok(())
 }
 
 /// Writes the line with the id anchors at the start of its text, after any heading marker,
 /// so they end up inside its paragraph or heading where `write_body` moves the id onto
 /// the element itself. Readers handle that better than an empty anchor between blocks.
-fn write_line(output: &mut String, line: &str, ids: &[String]) {
+/// A blank line leaves the ids for the next line.
+fn write_line(output: &mut String, line: &str, ids: &mut Vec<String>) {
     if line.trim().is_empty() {
-        ids.iter().for_each(|id| write_id_div(output, id));
         output.push_str(line);
         output.push('\n');
         return;
@@ -233,8 +251,8 @@ fn write_line(output: &mut String, line: &str, ids: &[String]) {
     let split = line.len() - text.len() + marker;
 
     output.push_str(&line[..split]);
-    for id in ids {
-        let _ = write!(output, "<a id=\"{}\"/>", escape(id));
+    for id in ids.drain(..) {
+        let _ = write!(output, "<a id=\"{}\"/>", escape(&id));
     }
     output.push_str(&line[split..]);
     output.push('\n');
@@ -276,7 +294,7 @@ pub fn replace_image_markers(
         let tag = caps[1].parse().ok().and_then(|n: usize| images.remove(&n));
         if let Some(tag) = tag {
             output.push_str("\n\n");
-            write_image_block(&mut output, vec![tag])?;
+            write_image_block(&mut output, vec![tag], Vec::new())?;
         }
     }
 
@@ -284,20 +302,26 @@ pub fn replace_image_markers(
     Ok(output)
 }
 
-/// The blank line closes the anchor's html block, so the heading after it stays a paragraph.
+/// An empty block for an id with nothing after it to go on. The closing tag is written out,
+/// since html parsers treat `<div/>` as an open tag that swallows what follows. The blank
+/// line closes the markdown html block, so anything after it is parsed as markdown again.
 fn write_id_div(output: &mut String, id: &str) {
-    let _ = writeln!(output, "<a id=\"{}\"/>\n", escape(id));
+    let _ = writeln!(output, "<div id=\"{}\"></div>\n", escape(id));
 }
 
 /// Writes the images as a markdown html block, followed by a blank line so the
 /// block is closed before the next line of text.
-fn write_image_block(output: &mut String, image_tags: Vec<BytesStart<'_>>) -> Result<()> {
+fn write_image_block(
+    output: &mut String,
+    image_tags: Vec<BytesStart<'_>>,
+    ids: Vec<String>,
+) -> Result<()> {
     if image_tags.is_empty() {
         return Ok(());
     }
 
     let mut writer = Writer::new(Cursor::new(Vec::new()));
-    write_image_tags(&mut writer, image_tags)?;
+    write_image_tags(&mut writer, image_tags, ids)?;
     output.push_str(str::from_utf8(&writer.into_inner().into_inner())?);
     output.push_str("\n\n");
     Ok(())
@@ -361,6 +385,53 @@ mod test {
     }
 
     #[test]
+    fn carries_ids_to_the_next_text() {
+        let position = |id: &str, section: usize, position: f64| AnchorPosition {
+            anchor: Anchor::Id(id.to_string()),
+            section,
+            line: 0,
+            position,
+        };
+        let content = "<part>1</part>\n\nText.\n\nMore.\n<part>2</part>\n\nNext.\n";
+        let anchors = vec![
+            position("blank", 0, 3.0 / 5.0),
+            position("end", 0, 1.0),
+            position("missing", 5, 0.0),
+        ];
+        let markdown = insert_anchors(content, anchors).unwrap();
+        assert!(markdown.contains("\n<a id=\"blank\"/>More.\n"));
+        assert!(markdown.contains("\n<a id=\"end\"/>Next.\n"));
+        assert!(markdown.ends_with("Next.\n<div id=\"missing\"></div>\n\n"));
+
+        let html = body(&crate::controller::to_html(&markdown));
+        assert!(html.contains("<p id=\"end\">Next.</p>"));
+        assert!(html.contains("<div id=\"missing\"></div>"));
+    }
+
+    #[test]
+    fn puts_waiting_ids_on_images() {
+        let id = |id: &str| AnchorPosition {
+            anchor: Anchor::Id(id.to_string()),
+            section: 0,
+            line: 0,
+            position: 0.0,
+        };
+        let img = BytesStart::new("img").with_attributes([("src", "../Images/1.jpg")]);
+        let image = AnchorPosition {
+            anchor: Anchor::Image(img),
+            section: 0,
+            line: 1,
+            position: 0.5,
+        };
+        let markdown = insert_anchors("\nText.\n", vec![id("c1"), id("c2"), image]).unwrap();
+        let html = body(&crate::controller::to_html(&markdown));
+        assert!(html.contains(
+            "<div class=\"illustration\" id=\"c1\"><a id=\"c2\"/><img src=\"../Images/1.jpg\"/></div>"
+        ));
+        assert!(html.contains("<p>Text.</p>"));
+    }
+
+    #[test]
     fn keeps_quotes_for_smart_punctuation() {
         let content = insert_anchors("\"Don't,\" she said <3 & left", Vec::new()).unwrap();
         assert_eq!(content, "\"Don't,\" she said &lt;3 &amp; left");
@@ -370,7 +441,7 @@ mod test {
     fn writes_illustration_block() {
         let mut output = String::new();
         let img = BytesStart::new("img").with_attributes([("src", "../Images/1.jpg")]);
-        write_image_block(&mut output, vec![img]).unwrap();
+        write_image_block(&mut output, vec![img], Vec::new()).unwrap();
         assert!(
             output.starts_with("<div class=\"illustration\"><img src=\"../Images/1.jpg\"/></div>")
         );

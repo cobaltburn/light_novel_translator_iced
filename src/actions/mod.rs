@@ -87,7 +87,7 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
         .filter_map(|e| e.manifest_entry())
         .map(|entry| {
             let html = entry.read_str()?;
-            let path = entry.href().as_str().into();
+            let path = entry.href().decode().as_ref().into();
             Ok((path, html_to_marked_markdown(&html)?))
         })
         .map(|result| {

@@ -211,16 +211,14 @@ impl Consensus {
     }
 
     fn check_complete(&mut self, page: usize) {
-        let lead = page.checked_sub(1).and_then(|i| self.pages.get(i));
-        let last_section = lead
-            .and_then(|p| {
-                p.file_prefix()
-                    .is_some_and(|e| e != TOC_PAGE_PREFIX)
-                    .then_some(p.sections.last()?)
-            })
-            .map_or_default(|c| c.content.clone());
+        let prior = page.checked_sub(1).and_then(|i| self.pages.get(i));
+        let prior_sections = prior
+            .and_then(|p| (p.file_prefix()? != TOC_PAGE_PREFIX).then_some(p.sections.iter()))
+            .unwrap_or_default();
+        let prior_sections: Vec<_> = prior_sections.map(|e| e.content.clone()).collect();
+
         if let Some(page) = self.pages.get_mut(page) {
-            page.check_page(&last_section);
+            page.check_page(&prior_sections);
         };
     }
 

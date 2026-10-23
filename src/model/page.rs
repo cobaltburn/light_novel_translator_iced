@@ -75,20 +75,22 @@ impl Page {
         self.sections.iter().any(|e| e.content.is_empty())
     }
 
-    pub fn check_page(&mut self, last_section: &str) {
+    pub fn check_page(&mut self, prior_sections: &[String]) {
         self.errors = [
             self.check_size(),
             self.check_japanese(),
             self.check_frequency(),
-            self.check_jaccard(last_section),
+            self.check_jaccard(prior_sections),
             self.check_image_tags(),
             self.check_header_tags(),
+            self.check_link_tags(),
+            self.check_end_character(),
         ]
         .concat();
-        self.errors.sort_by_key(|e| e.index());
+        self.errors.sort_by_key(|e| e.index);
 
         self.activity = if let Some(error) = self.errors.first() {
-            Activity::Error(error.index() + 1)
+            Activity::Error(error.index + 1)
         } else if self.check_incomplete() {
             Activity::Incomplete
         } else {
@@ -100,8 +102,7 @@ impl Page {
         self.sections
             .iter()
             .enumerate()
-            .filter(|(_, e)| e.content.lines().any(contains_japanese))
-            .map(|(i, _)| PageError::Japanese(i))
+            .filter_map(|(i, e)| contains_japanese(&e.content).then_some(PageError::japanese(i)))
             .collect()
     }
 
@@ -109,8 +110,7 @@ impl Page {
         self.sections
             .par_iter()
             .enumerate()
-            .filter(|(_, e)| check_char_frequency(&e.content))
-            .map(|(i, _)| PageError::Repeat(i))
+            .filter_map(|(i, e)| check_char_frequency(&e.content).then_some(PageError::repeat(i)))
             .collect()
     }
 
@@ -127,28 +127,26 @@ impl Page {
                 } else {
                     (MIN_PERCENT, MAX_PERCENT)
                 };
-                (p <= min || p >= max).then_some(PageError::Size(i, content.len()))
+                (p <= min || p >= max).then_some(PageError::size(i, content.len()))
             })
             .collect()
     }
 
-    fn check_jaccard(&self, last_section: &str) -> Vec<PageError> {
-        let sections = self.sections.iter().map(|s| s.content.as_str());
-        let full_sections: Vec<_> = iter::once(last_section).chain(sections).collect();
+    fn check_jaccard(&self, prior_sections: &[String]) -> Vec<PageError> {
+        let sections = self.sections.iter().map(|s| &s.content);
+        let full_sections: Vec<_> = prior_sections.iter().chain(sections).collect();
+        let prior_len = prior_sections.len();
         self.sections
             .par_iter()
             .map(|s| s.content.as_str())
             .enumerate()
+            .filter(|(_, a)| !a.is_empty())
             .filter_map(|(i, a)| {
-                if a.is_empty() {
-                    return None;
-                }
-                full_sections
+                let prior = full_sections.get(..prior_len + i).unwrap_or_default();
+                prior
                     .par_iter()
-                    .enumerate()
-                    .filter(|&(j, b)| i + 1 != j && !b.is_empty())
-                    .any(|(_, b)| jaccard(a, b) > JACCARD_TOLERANCE)
-                    .then_some(PageError::Copy(i))
+                    .any(|b| !b.is_empty() && jaccard(a, b) > JACCARD_TOLERANCE)
+                    .then_some(PageError::copy(i))
             })
             .collect()
     }
@@ -162,7 +160,7 @@ impl Page {
                 let japanese_tags = image_marker_indices(japanese);
                 let content_tags = image_marker_indices(content);
                 let dif = japanese_tags.symmetric_difference(&content_tags).count();
-                (dif != 0).then_some(PageError::ImageTag(i))
+                (dif != 0).then_some(PageError::image(i))
             })
             .collect()
     }
@@ -173,9 +171,33 @@ impl Page {
             .enumerate()
             .filter(|(_, s)| !s.content.is_empty())
             .filter_map(|(i, Section { japanese, content })| {
-                let japanese_count = header_tag_count(&japanese);
-                let content_count = header_tag_count(&content);
-                (japanese_count != content_count).then_some(PageError::Header(i))
+                let unequal = header_tag_count(&japanese) != header_tag_count(&content);
+                (unequal).then_some(PageError::header(i))
+            })
+            .collect()
+    }
+
+    fn check_link_tags(&self) -> Vec<PageError> {
+        self.sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.content.is_empty())
+            .filter_map(|(i, Section { japanese, content })| {
+                let unequal = link_tag_count(&japanese) != link_tag_count(&content);
+                unequal.then_some(PageError::header(i))
+            })
+            .collect()
+    }
+
+    fn check_end_character(&self) -> Vec<PageError> {
+        self.sections
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| !s.content.is_empty())
+            .filter_map(|(i, Section { japanese, content })| {
+                let jp = japanese.trim_end().chars().last()?.is_alphanumeric();
+                let c = content.trim_end().chars().last()?.is_alphanumeric();
+                (jp != c).then_some(PageError::end(i))
             })
             .collect()
     }
@@ -199,11 +221,7 @@ impl Page {
             .map(|i| make_btn(format!("Empty part: {:2}", i + 1), i));
 
         let errors = self.errors.iter().map(|e| e.error_button(&on_press));
-
-        let errors = empty_sections
-            .chain(errors)
-            .map(Into::into)
-            .collect::<Column<_>>();
+        let errors: Column<'_, T> = empty_sections.chain(errors).map(Into::into).collect();
 
         right(errors.spacing(5).align_x(Horizontal::Right))
             .padding(20)
@@ -218,7 +236,7 @@ impl Page {
         let has_japanese_error = |i| {
             self.errors
                 .iter()
-                .any(|e| matches!(e, PageError::Japanese(j) if *j == i))
+                .any(|e| e.index == i && matches!(e.error, ErrorType::Japanese))
         };
 
         self.sections
@@ -346,6 +364,12 @@ fn header_tag_count(text: &str) -> usize {
         .count()
 }
 
+fn link_tag_count(text: &str) -> usize {
+    Parser::new(text)
+        .filter(|e| matches!(e, Event::Start(Tag::Link { .. })))
+        .count()
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Section {
     pub japanese: String,
@@ -407,24 +431,58 @@ impl Section {
 }
 
 #[derive(Debug, Clone)]
-pub enum PageError {
-    Japanese(usize),
-    Size(usize, usize),
-    Repeat(usize),
-    Copy(usize),
-    ImageTag(usize),
-    Header(usize),
+pub struct PageError {
+    pub index: usize,
+    pub error: ErrorType,
 }
 
 impl PageError {
-    pub fn index(&self) -> usize {
-        match self {
-            PageError::Japanese(i, ..)
-            | PageError::Size(i, ..)
-            | PageError::Repeat(i)
-            | PageError::Copy(i)
-            | PageError::ImageTag(i)
-            | PageError::Header(i) => *i,
+    pub fn japanese(index: usize) -> Self {
+        PageError {
+            index,
+            error: ErrorType::Japanese,
+        }
+    }
+    pub fn size(index: usize, size: usize) -> Self {
+        PageError {
+            index,
+            error: ErrorType::Size(size),
+        }
+    }
+    pub fn repeat(index: usize) -> Self {
+        PageError {
+            index,
+            error: ErrorType::Repeat,
+        }
+    }
+    pub fn copy(index: usize) -> Self {
+        PageError {
+            index,
+            error: ErrorType::Copy,
+        }
+    }
+    pub fn image(index: usize) -> Self {
+        PageError {
+            index,
+            error: ErrorType::Image,
+        }
+    }
+    pub fn header(index: usize) -> Self {
+        PageError {
+            index,
+            error: ErrorType::Header,
+        }
+    }
+    pub fn link(index: usize) -> Self {
+        PageError {
+            index,
+            error: ErrorType::Link,
+        }
+    }
+    pub fn end(index: usize) -> Self {
+        PageError {
+            index,
+            error: ErrorType::End,
         }
     }
 
@@ -432,20 +490,35 @@ impl PageError {
         &self,
         on_press: &impl Fn(usize) -> Option<T>,
     ) -> Button<'_, T> {
-        let make_btn = |label: String, i: usize| {
+        let make_btn = |label: String| {
             button(text(label))
                 .padding(5)
                 .style(button::primary)
-                .on_press_maybe(on_press(i))
+                .on_press_maybe(on_press(self.index))
         };
 
-        match self {
-            PageError::Japanese(i) => make_btn(format!("Japanese error: {:2}", i + 1), *i),
-            PageError::Size(i, c) => make_btn(format!("Size error: {:2}, count:{}", i + 1, c), *i),
-            PageError::Repeat(i) => make_btn(format!("Repeat error: {:2}", i + 1), *i),
-            PageError::Copy(i) => make_btn(format!("Copy error: {:2}", i + 1), *i),
-            PageError::ImageTag(i) => make_btn(format!("Image Tag error: {:2}", i + 1), *i),
-            PageError::Header(i) => make_btn(format!("Header Tag error: {:2}", i + 1), *i),
+        let position = self.index + 1;
+        match self.error {
+            ErrorType::Japanese => make_btn(format!("Japanese error: {:2}", position)),
+            ErrorType::Size(c) => make_btn(format!("Size error: {:2}, count:{}", position, c)),
+            ErrorType::Repeat => make_btn(format!("Repeat error: {:2}", position)),
+            ErrorType::Copy => make_btn(format!("Copy error: {:2}", position)),
+            ErrorType::Image => make_btn(format!("Image Tag error: {:2}", position)),
+            ErrorType::Header => make_btn(format!("Header Tag error: {:2}", position)),
+            ErrorType::Link => make_btn(format!("Link Tag error: {:2}", position)),
+            ErrorType::End => make_btn(format!("End Punctuation error: {:2}", position)),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum ErrorType {
+    Japanese,
+    Size(usize),
+    Repeat,
+    Copy,
+    Image,
+    Header,
+    Link,
+    End,
 }

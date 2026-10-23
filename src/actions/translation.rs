@@ -7,7 +7,11 @@ use crate::{
     view::DisplayType,
 };
 use iced::Task;
-use std::{collections::HashMap, mem, path::PathBuf};
+use std::{
+    collections::HashMap,
+    mem,
+    path::{Path, PathBuf},
+};
 use tokio::fs;
 
 #[non_exhaustive]
@@ -78,7 +82,7 @@ impl Translation {
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
                 .map_err(Error::from)
                 .ok_or_display(|path| Task::done(Action::SavePages(path))),
-            Action::RecoverPages(pages) => self.recover_pages(pages).ok_or_display(),
+            Action::RecoverPages(pages) => self.recover_pages(pages).into(),
             Action::Recover => Task::future(load_recovery())
                 .and_then(|pages| Task::done(Action::RecoverPages(pages))),
             Action::SetDisplay(display) => self.set_display(display).into(),
@@ -90,12 +94,24 @@ impl Translation {
         self.display = display;
     }
 
-    pub fn recover_pages(&mut self, pages: Vec<Page>) -> Result<()> {
-        let mut sections: HashMap<_, _> = pages.into_iter().map(|p| (p.path, p.sections)).collect();
+    pub fn recover_pages(&mut self, pages: Vec<Page>) -> () {
+        let mut sections: HashMap<PathBuf, _> = pages
+            .into_iter()
+            .map(|p| {
+                let path = if p.path.is_relative() {
+                    Path::new("/").join(&p.path)
+                } else {
+                    p.path
+                };
+                (path, p.sections)
+            })
+            .collect();
 
         for page in self.pages.iter_mut() {
             if let Some(current) = sections.get_mut(&page.path) {
-                mem::swap(&mut page.sections, current);
+                for (x, y) in page.sections.iter_mut().zip(current) {
+                    mem::swap(&mut x.content, &mut y.content);
+                }
             }
         }
 
@@ -106,8 +122,6 @@ impl Translation {
         for page in 0..self.pages.len() {
             self.check_complete(page);
         }
-
-        Ok(())
     }
 
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {
@@ -140,17 +154,14 @@ impl Translation {
     }
 
     fn check_complete(&mut self, page: usize) {
-        let lead = page.checked_sub(1).and_then(|i| self.pages.get(i));
-        let last_section = lead
-            .and_then(|p| {
-                p.file_prefix()
-                    .is_some_and(|e| e != TOC_PAGE_PREFIX)
-                    .then_some(p.sections.last()?)
-            })
-            .map_or_default(|c| c.content.clone());
+        let prior = page.checked_sub(1).and_then(|i| self.pages.get(i));
+        let prior_sections = prior
+            .and_then(|p| (p.file_prefix()? != TOC_PAGE_PREFIX).then_some(p.sections.iter()))
+            .unwrap_or_default();
+        let prior_sections: Vec<_> = prior_sections.map(|e| e.content.clone()).collect();
 
         if let Some(page) = self.pages.get_mut(page) {
-            page.check_page(&last_section);
+            page.check_page(&prior_sections);
         };
     }
 
