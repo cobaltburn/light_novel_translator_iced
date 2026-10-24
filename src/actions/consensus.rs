@@ -2,10 +2,10 @@ use crate::{
     actions::{
         complete_dialog, get_pages, pick_save_folder, save_file, select_format_folder, server,
     },
-    controller::{TOC_PAGE_PREFIX, part_tag, remove_think_tags},
+    controller::{part_tag, remove_think_tags},
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::{display_error, select_epub},
-    model::{Activity, Candidate, Consensus, Page},
+    model::{Activity, Candidate, Consensus, Page, check_page_at},
     view::DisplayType,
 };
 use iced::Task;
@@ -211,15 +211,7 @@ impl Consensus {
     }
 
     fn check_complete(&mut self, page: usize) {
-        let prior = page.checked_sub(1).and_then(|i| self.pages.get(i));
-        let prior_sections = prior
-            .and_then(|p| (p.file_prefix()? != TOC_PAGE_PREFIX).then_some(p.sections.iter()))
-            .unwrap_or_default();
-        let prior_sections: Vec<_> = prior_sections.map(|e| e.content.clone()).collect();
-
-        if let Some(page) = self.pages.get_mut(page) {
-            page.check_page(&prior_sections);
-        };
+        check_page_at(&mut self.pages, page);
     }
 
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {

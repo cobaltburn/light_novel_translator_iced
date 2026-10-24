@@ -8,7 +8,7 @@ use iced::Task;
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
 use rig::{
-    Agent, AgentBuilder,
+    Agent, AgentBuilder, ErrorKind,
     agent::MultiTurnStreamItem,
     id::ConversationId,
     memory::{
@@ -209,7 +209,12 @@ fn handle_stream<A: StreamAction>(
         })
         .then(move |content| match content {
             Ok(ok) => ok.map_or_default(|content| Task::done(A::update(content, page, part))),
+            Err(error) if is_response_report(&error) => error.display_error(),
             Err(error) => Task::done(A::cancel()).chain(error.display_error()),
         })
         .chain(Task::done(A::clean(page, part)))
+}
+
+fn is_response_report(error: &Error) -> bool {
+    matches!(error, Error::PromptError(PromptError::Report(report)) if report.kind == ErrorKind::Response)
 }
