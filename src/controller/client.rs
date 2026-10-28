@@ -1,7 +1,7 @@
 use crate::{
     actions::{consensus, translation},
     controller::{CONSENSUS_PROMPT, TRANSLATION_PROMPT},
-    error::{Error, Result, ResultTaskExt},
+    error::{Error, Result, TaskResultExt},
     model::{Activity::Active, REPEAT_PENALTY, Settings, TEMPERATURE, TOP_P, Think},
 };
 use iced::Task;
@@ -47,7 +47,7 @@ pub fn seed_history<A: StreamAction>(history: SharedHistory, messages: Vec<Messa
         let id = ConversationId::from(CONVERSATION_ID);
         history.append(&id, messages).await
     })
-    .then(|result| result.map_err(Error::from).ok_or_display())
+    .ok_or_display(Into::into)
 }
 
 pub trait StreamAction: 'static + Send + Clone {

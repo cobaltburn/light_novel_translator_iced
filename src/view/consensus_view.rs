@@ -13,14 +13,12 @@ use iced::{
     },
 };
 use iced_aw::{ContextMenu, Menu, MenuBar, menu::Item};
-use std::ops::Not;
 
 pub fn consensus_view(model: &Consensus) -> Element<'_, consensus::Action> {
     let page = model.current_page();
     let current_page = model.current_page;
-    let can_consensus = model.server.handles.is_empty()
-        && model.server.connected()
-        && !model.file_name().is_empty();
+    let can_consensus =
+        model.server.handles.is_empty() && model.server.connected() && model.file_name().is_some();
     let on_press = move |part| {
         can_consensus.then_some(consensus::Action::ConsensusPart {
             page: current_page,
@@ -106,7 +104,7 @@ fn consensus_button(model: &Consensus) -> Element<'_, consensus::Action> {
     let (button_text, message) = if !model.server.handles.is_empty() {
         ("cancel", Some(consensus::Action::CancelConsensus))
     } else if !model.server.connected()
-        || model.file_name().is_empty()
+        || model.file_name().is_none()
         || model.candidates.is_empty()
     {
         ("translate", None)
@@ -169,12 +167,8 @@ fn epub_menu(model: &Consensus) -> Item<'_, consensus::Action, Theme, Renderer> 
 }
 
 fn save_button(model: &Consensus) -> Element<'_, consensus::Action> {
-    let file_name = model.file_name();
-    let not_empty = file_name.is_empty().not();
-    let save_message = not_empty.then_some(consensus::Action::SaveTranslation(file_name));
-
     button(text("save").center())
-        .on_press_maybe(save_message)
+        .on_press_maybe(model.file_name().map(consensus::Action::SaveTranslation))
         .padding(5)
         .into()
 }
@@ -182,7 +176,7 @@ fn save_button(model: &Consensus) -> Element<'_, consensus::Action> {
 fn epub_select(model: &Consensus) -> Element<'_, consensus::Action> {
     row![
         button(text("epub").center()).on_press(consensus::Action::OpenEpub),
-        container(text(model.file_name()))
+        container(text(model.file_name().unwrap_or_default()))
             .width(Length::Fill)
             .padding(5)
             .style(|theme| container::transparent(theme).border(Border {

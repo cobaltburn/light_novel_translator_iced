@@ -1,10 +1,10 @@
 use crate::{
     actions::{
-        complete_dialog, get_pages, pick_save_folder, save_file, select_format_folder, server,
+        complete_dialog, get_pages, page_markdown, pick_save_folder, save_file, save_pages,
+        select_format_folder, server,
     },
-    controller::{part_tag, remove_think_tags},
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
-    message::{display_error, select_epub},
+    message::select_epub,
     model::{Activity, Candidate, Consensus, Page, check_page_at},
     view::DisplayType,
 };
@@ -73,9 +73,8 @@ impl Consensus {
             Action::ConsensusPart { page, part } => self.consensus_part(page, part).ok_or_display(),
             Action::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
-                .map_err(Error::from)
                 .ok_or_display(|path| Task::done(Action::SavePages(path))),
-            Action::SavePages(path) => self.save_pages(path),
+            Action::SavePages(path) => save_pages(&self.pages, &path),
             Action::SavePage { name, page } => self.save_page(name, page),
             Action::UpdateContent {
                 content,
@@ -119,9 +118,9 @@ impl Consensus {
         let model = self.check_ready()?;
 
         let Some(pages) = self.pages.get(..page + 1) else {
-            let file_name = self.file_name();
+            let file_name = self.file_name().unwrap_or_default();
             self.server.abort();
-            return Ok(Task::future(complete_dialog(file_name.clone())).discard());
+            return Ok(Task::future(complete_dialog(file_name)).discard());
         };
 
         let candidates = candidates_map(&self.candidates, pages);
@@ -222,45 +221,11 @@ impl Consensus {
         };
     }
 
-    pub fn save_pages(&mut self, path: PathBuf) -> Task<Action> {
-        let tasks = self.pages.iter().map(|page| {
-            let file_path = path
-                .join(page.path.file_name().unwrap())
-                .with_extension("md");
-
-            let text: String = page
-                .sections
-                .iter()
-                .enumerate()
-                .map(|(i, s)| format!("{}{}\n", part_tag(i + 1), s.content))
-                .collect();
-            let contents = remove_think_tags(&text);
-
-            Task::future(fs::write(file_path, contents)).then(|r| match r {
-                Ok(()) => Task::none(),
-                Err(e) => Task::future(display_error(e)),
-            })
-        });
-
-        Task::batch(tasks).discard()
-    }
-
     pub fn save_page(&mut self, name: String, page: usize) -> Task<Action> {
-        match self.pages.get(page) {
-            Some(page) => {
-                let content: String = page
-                    .sections
-                    .iter()
-                    .enumerate()
-                    .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
-                    .collect();
-
-                let name = format!("{name}.md");
-
-                Task::future(save_file(name, content)).discard()
-            }
-            None => Task::none(),
-        }
+        self.pages.get(page).map_or_default(|page| {
+            Task::future(save_file(format!("{name}.md"), page_markdown(page)))
+                .ok_or_display(Into::into)
+        })
     }
 
     fn clean_text(&mut self, page: usize, part: usize) {

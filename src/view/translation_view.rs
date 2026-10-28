@@ -167,7 +167,7 @@ fn menu_bar(
 fn translate_button(model: &Translation) -> Button<'_, Action> {
     let (button_text, message) = if !model.server.handles.is_empty() {
         ("cancel", Some(Action::CancelTranslate))
-    } else if !model.server.connected() || model.file_name().is_empty() {
+    } else if !model.server.connected() || model.file_name().is_none() {
         ("translate", None)
     } else {
         let msg = Action::Translate(model.current_page);
@@ -234,13 +234,14 @@ fn epub_menu(model: &Translation) -> Item<'_, Action, Theme, Renderer> {
 
 fn file_menu_buttons(state: &Translation) -> Element<'_, Action> {
     let file_name = state.file_name();
-    let not_empty = !file_name.is_empty();
+    let recover =
+        (file_name.is_some() && state.server.handles.is_empty()).then_some(Action::Recover);
     row![
         button(text("save").center())
-            .on_press_maybe(not_empty.then_some(Action::SaveTranslation(file_name)))
+            .on_press_maybe(file_name.map(Action::SaveTranslation))
             .padding(5),
         button(text("recover").center())
-            .on_press_maybe(not_empty.then_some(Action::Recover))
+            .on_press_maybe(recover)
             .padding(5)
     ]
     .align_y(Vertical::Center)
@@ -251,7 +252,7 @@ fn file_menu_buttons(state: &Translation) -> Element<'_, Action> {
 fn epub_select(model: &Translation) -> Row<'_, Action> {
     row![
         button(text("epub").center()).on_press(translation::Action::OpenEpub),
-        container(text(model.file_name()))
+        container(text(model.file_name().unwrap_or_default()))
             .width(Length::Fill)
             .padding(5)
             .style(|theme| transparent(theme).border(Border {

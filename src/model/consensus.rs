@@ -29,12 +29,8 @@ impl Consensus {
         self.pages.get(self.current_page)
     }
 
-    pub fn file_name(&self) -> String {
-        self.file_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
+    pub fn file_name(&self) -> Option<String> {
+        Some(self.file_path.file_name()?.to_string_lossy().to_string())
     }
 
     pub fn candidate_items(&self) -> Vec<Item<'_, consensus::Action, Theme, Renderer>> {

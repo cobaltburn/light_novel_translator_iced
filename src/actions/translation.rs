@@ -1,9 +1,11 @@
 use crate::{
-    actions::{complete_dialog, get_pages, load_recovery, pick_save_folder, save_file, server},
-    controller::{part_tag, remove_think_tags},
+    actions::{
+        complete_dialog, get_pages, load_recovery, page_markdown, pick_save_folder, save_file,
+        save_pages, server,
+    },
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::select_epub,
-    model::{Activity, Page, Translation, absolute_page_path, check_page_at},
+    model::{Activity, Page, Translation, absolute_page_path, check_all_pages, check_page_at},
     view::DisplayType,
 };
 use iced::Task;
@@ -59,7 +61,7 @@ impl Translation {
             Action::CleanText { page, part } => self.clean_text(page, part).into(),
             Action::PageComplete(page) => self.check_complete(page).into(),
             Action::CancelTranslate => self.cancel(),
-            Action::SavePages(path) => self.save_pages(path),
+            Action::SavePages(path) => save_pages(&self.pages, &path),
             Action::SetEpub { name, pages } => self.set_epub(name, pages).into(),
             Action::SavePage { name, page } => self.save_page(name, page),
             Action::UpdateContent {
@@ -76,7 +78,6 @@ impl Translation {
                 .ok_or_display(|(name, pages)| Task::done(Action::SetEpub { name, pages })),
             Action::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
-                .map_err(Error::from)
                 .ok_or_display(|path| Task::done(Action::SavePages(path))),
             Action::RecoverPages(pages) => self.recover_pages(pages).into(),
             Action::Recover => Task::future(load_recovery())
@@ -108,9 +109,7 @@ impl Translation {
             .iter_mut()
             .for_each(|p| p.sections.iter_mut().for_each(|s| s.clean()));
 
-        for page in 0..self.pages.len() {
-            self.check_complete(page);
-        }
+        check_all_pages(&mut self.pages);
     }
 
     pub fn update_content(&mut self, content: String, page: usize, part: usize) {
@@ -123,9 +122,7 @@ impl Translation {
 
     fn save_json(&self, path: PathBuf) -> Task<Action> {
         let contents = serde_json::to_string_pretty(&self.pages);
-        Task::future(async move { fs::write(path, contents?).await })
-            .map_err(Error::from)
-            .ok_or_display(Into::into)
+        Task::future(async move { fs::write(path, contents?).await }).ok_or_display(Into::into)
     }
 
     fn cancel(&mut self) -> Task<Action> {
@@ -148,44 +145,9 @@ impl Translation {
 
     pub fn save_page(&mut self, name: String, page: usize) -> Task<Action> {
         self.pages.get(page).map_or_default(|page| {
-            let text: String = page
-                .sections
-                .iter()
-                .enumerate()
-                .map(|(i, e)| format!("{}{}\n", part_tag(i + 1), e.content))
-                .collect();
-            let contents = remove_think_tags(&text);
-
-            Task::future(save_file(format!("{name}.md"), contents)).discard()
+            Task::future(save_file(format!("{name}.md"), page_markdown(page)))
+                .ok_or_display(Into::into)
         })
-    }
-
-    pub fn save_pages(&self, path: PathBuf) -> Task<Action> {
-        let pages: Vec<_> = self
-            .pages
-            .iter()
-            .map(|page| {
-                let file_path = path
-                    .join(page.path.file_name().unwrap())
-                    .with_extension("md");
-
-                let text: String = page
-                    .sections
-                    .iter()
-                    .enumerate()
-                    .map(|(i, s)| format!("{}{}\n", part_tag(i + 1), s.content))
-                    .collect();
-                (file_path, remove_think_tags(&text))
-            })
-            .collect();
-
-        Task::future(async move {
-            for (path, contents) in pages {
-                fs::write(path, contents).await?
-            }
-            Ok(())
-        })
-        .ok_or_display(Into::into)
     }
 
     pub fn set_epub(&mut self, path: PathBuf, pages: Vec<Page>) {
@@ -208,7 +170,7 @@ impl Translation {
         let model = self.check_ready()?;
 
         let Some(pages) = self.pages.get(..page + 1) else {
-            let file_name = self.file_name();
+            let file_name = self.file_name().unwrap_or_default();
             self.server.abort();
             return Ok(Task::future(complete_dialog(file_name)).discard());
         };
@@ -218,7 +180,7 @@ impl Translation {
 
         let complete_task = self.complete_task(page);
         let backup_task = self.backup_task();
-        let next_task = self.next_task(page);
+        let next_task = self.next_translate_task(page);
 
         Ok(task
             .chain(complete_task)
@@ -278,7 +240,7 @@ impl Translation {
             .bind_handle(Task::done(Action::SaveRecovery(backup)))
     }
 
-    fn next_task(&mut self, page: usize) -> Task<Action> {
+    fn next_translate_task(&mut self, page: usize) -> Task<Action> {
         self.server
             .bind_handle(Task::done(Action::Translate(page + 1)))
     }

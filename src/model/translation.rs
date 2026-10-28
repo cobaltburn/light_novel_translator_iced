@@ -19,8 +19,8 @@ pub struct Translation {
 impl Translation {
     pub fn tab_label(&self) -> TabLabel {
         match self.server.handles.is_empty() {
-            true => TabLabel::Text(self.file_name()),
-            false => TabLabel::IconText('\u{25CF}', self.file_name()),
+            true => TabLabel::Text(self.file_name().unwrap_or_default()),
+            false => TabLabel::IconText('\u{25CF}', self.file_name().unwrap_or_default()),
         }
     }
 
@@ -28,12 +28,8 @@ impl Translation {
         self.pages.get(self.current_page)
     }
 
-    pub fn file_name(&self) -> String {
-        self.file_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string()
+    pub fn file_name(&self) -> Option<String> {
+        Some(self.file_path.file_name()?.to_string_lossy().to_string())
     }
 
     pub fn sidebar_deps(&self) -> SidebarDeps {
@@ -55,7 +51,7 @@ impl Translation {
     }
 
     pub fn can_translate(&self) -> bool {
-        self.server.handles.is_empty() && self.server.connected() && !self.file_name().is_empty()
+        self.server.handles.is_empty() && self.server.connected() && self.file_name().is_some()
     }
 }
 

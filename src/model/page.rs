@@ -21,6 +21,7 @@ use std::{
     ffi::OsStr,
     hash::Hash,
     iter,
+    ops::Range,
     path::{Path, PathBuf},
 };
 
@@ -32,11 +33,12 @@ const MAX_PERCENT: f64 = 110.0;
 const SIZE_TOLERANCE: f64 = 12.5;
 /// In Japanese characters; full partitions are 8192 bytes (~2700 characters).
 const SMALL_SECTION: usize = 1000;
-const BOUNDARY_PARAGRAPHS: usize = 3;
+const BOUNDARY_PARAGRAPHS: usize = 5;
 const BOUNDARY_MIN_WORDS: usize = 5;
 const BOUNDARY_MIN_BIGRAMS: usize = 5;
-const BOUNDARY_TOLERANCE: f64 = 0.6;
+const BOUNDARY_TOLERANCE: f64 = 0.3;
 const BOUNDARY_JAPANESE_TOLERANCE: f64 = 0.5;
+const HEAD_MIN_LINES: usize = 2;
 
 #[non_exhaustive]
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -83,12 +85,12 @@ impl Page {
         self.sections.iter().any(|e| e.content.is_empty())
     }
 
-    pub fn check_page(&mut self, prior_sections: &[Section]) {
+    fn check_page(&mut self, prior: &[(&Section, &LineSets)], heads: &[LineSets]) {
         self.errors = [
             self.check_size(),
             self.check_japanese(),
             self.check_frequency(),
-            self.check_copy(prior_sections),
+            self.check_copy(prior, heads),
             self.check_image_tags(),
             self.check_header_tags(),
             self.check_link_tags(),
@@ -141,30 +143,43 @@ impl Page {
             .collect()
     }
 
-    fn check_copy(&self, prior_sections: &[Section]) -> Vec<PageError> {
-        let full_sections: Vec<_> = prior_sections.iter().chain(&self.sections).collect();
-        let word_sets: Vec<HashSet<&str>> = full_sections
-            .par_iter()
-            .map(|s| s.content.split_whitespace().collect())
+    fn check_copy(&self, prior: &[(&Section, &LineSets)], heads: &[LineSets]) -> Vec<PageError> {
+        debug_assert_eq!(self.sections.len(), heads.len());
+        let full: Vec<_> = prior
+            .iter()
+            .copied()
+            .chain(self.sections.iter().zip(heads))
             .collect();
-        let prior_len = prior_sections.len();
+        let word_sets: Vec<HashSet<&str>> = full
+            .par_iter()
+            .map(|(s, _)| s.content.split_whitespace().collect())
+            .collect();
+        let prior_len = prior.len();
         self.sections
             .par_iter()
             .enumerate()
             .filter(|(_, s)| !s.content.is_empty())
-            .filter_map(|(i, section)| {
+            .filter_map(|(i, _)| {
                 let index = prior_len + i;
                 let words = &word_sets[index];
+                let (_, head) = full[index];
                 let duplicate = word_sets[..index]
                     .iter()
                     .any(|b| !b.is_empty() && set_jaccard(words, b) > JACCARD_TOLERANCE);
                 let overlap = || {
                     index
                         .checked_sub(1)
-                        .map(|previous| full_sections[previous])
-                        .is_some_and(|p| !p.content.is_empty() && boundary_overlap(p, section))
+                        .map(|previous| full[previous].0)
+                        .is_some_and(|p| {
+                            !p.content.is_empty() && sections_overlap(&LineSets::tail(p), head)
+                        })
                 };
-                (duplicate || overlap()).then_some(PageError::copy(i))
+                let repeated_head = || {
+                    full[..index]
+                        .iter()
+                        .any(|(p, h)| !p.content.is_empty() && head_repeated(h, head))
+                };
+                (duplicate || overlap() || repeated_head()).then_some(PageError::copy(i))
             })
             .collect()
     }
@@ -296,8 +311,6 @@ impl Page {
     }
 }
 
-/// Page paths are rooted at the EPUB root, so pages built from the EPUB and
-/// pages loaded from recovery files (which may hold relative paths) match.
 pub fn absolute_page_path(path: PathBuf) -> PathBuf {
     if path.is_relative() {
         Path::new("/").join(path)
@@ -306,33 +319,46 @@ pub fn absolute_page_path(path: PathBuf) -> PathBuf {
     }
 }
 
-/// Re-checks `pages[index]`, then the following page, whose copy check compares
-/// its first section against this page's last section.
 pub fn check_page_at(pages: &mut [Page], index: usize) {
-    check_single_page(pages, index);
-
     let next = index + 1;
-    if pages
+    let check_next = pages
         .get(next)
-        .is_some_and(|p| !p.active() && p.sections.iter().any(|s| !s.content.is_empty()))
-    {
-        check_single_page(pages, next);
+        .is_some_and(|p| !p.active() && p.sections.iter().any(|s| !s.content.is_empty()));
+    check_pages(pages, index..if check_next { next + 1 } else { next });
+}
+
+pub fn check_all_pages(pages: &mut [Page]) {
+    check_pages(pages, 0..pages.len());
+}
+
+fn check_pages(pages: &mut [Page], range: Range<usize>) {
+    // Always the heads of `pages[index - 1]`.
+    let mut previous_heads = range
+        .start
+        .checked_sub(1)
+        .and_then(|previous| pages.get(previous))
+        .map(|p| LineSets::heads(&p.sections))
+        .unwrap_or_default();
+
+    for index in range {
+        let Some((before, after)) = pages.split_at_mut_checked(index) else {
+            return;
+        };
+        let Some(page) = after.first_mut() else {
+            return;
+        };
+        let heads = LineSets::heads(&page.sections);
+        let prior: Vec<_> =
+            prior_page(before).map_or_default(|p| p.sections.iter().zip(&previous_heads).collect());
+        page.check_page(&prior, &heads);
+        previous_heads = heads;
     }
 }
 
-fn check_single_page(pages: &mut [Page], index: usize) {
-    let Some((before, after)) = pages.split_at_mut_checked(index) else {
-        return;
-    };
-    let prior_sections = before
+fn prior_page(before: &[Page]) -> Option<&Page> {
+    before
         .last()
         .filter(|p| p.file_prefix().is_some_and(|f| f != TOC_PAGE_PREFIX))
-        .map(|p| p.sections.as_slice())
-        .unwrap_or_default();
-
-    if let Some(page) = after.first_mut() {
-        page.check_page(prior_sections);
-    };
 }
 
 fn japanese_runs(text: &str) -> impl Iterator<Item = (bool, &str)> {
@@ -362,55 +388,73 @@ fn set_jaccard<T: Eq + Hash>(a: &HashSet<T>, b: &HashSet<T>) -> f64 {
     }
 }
 
-/// True when the English overlaps across the boundary but the Japanese doesn't,
-/// so legitimately repeated lines in the source aren't flagged.
-fn boundary_overlap(prev: &Section, section: &Section) -> bool {
-    ends_overlap(
-        &prev.content,
-        &section.content,
-        BOUNDARY_PARAGRAPHS,
-        BOUNDARY_MIN_WORDS,
-        BOUNDARY_TOLERANCE,
-        word_set,
-    ) && !ends_overlap(
-        &prev.japanese,
-        &section.japanese,
-        BOUNDARY_PARAGRAPHS * 2,
-        BOUNDARY_MIN_BIGRAMS,
-        BOUNDARY_JAPANESE_TOLERANCE,
-        bigram_set,
-    )
+/// The word set of the English and bigram set of the Japanese for the lines at
+/// one end of a section, each compared as a whole by the copy checks.
+struct LineSets {
+    english: HashSet<String>,
+    japanese: HashSet<(char, char)>,
+    /// English lines that went into `english`.
+    lines: usize,
 }
 
-/// Compares the last `n` lines of `prev` against the first `n` lines of `next`,
-/// skipping lines whose set has fewer than `min_size` entries once image markers
-/// are removed. Only scans as far into each text as needed to find `n` lines.
-fn ends_overlap<T: Eq + Hash>(
-    prev: &str,
-    next: &str,
+impl LineSets {
+    fn heads(sections: &[Section]) -> Vec<Self> {
+        sections.par_iter().map(Self::head).collect()
+    }
+
+    fn head(section: &Section) -> Self {
+        Self::new(section.content.lines(), section.japanese.lines())
+    }
+
+    fn tail(section: &Section) -> Self {
+        Self::new(
+            section.content.lines().rev(),
+            section.japanese.lines().rev(),
+        )
+    }
+
+    fn new<'a>(
+        english: impl Iterator<Item = &'a str>,
+        japanese: impl Iterator<Item = &'a str>,
+    ) -> Self {
+        let (lines, english) = line_set(english, BOUNDARY_PARAGRAPHS, BOUNDARY_MIN_WORDS, word_set);
+        let (_, japanese) = line_set(
+            japanese,
+            BOUNDARY_PARAGRAPHS * 2,
+            BOUNDARY_MIN_BIGRAMS,
+            bigram_set,
+        );
+        Self {
+            english,
+            japanese,
+            lines,
+        }
+    }
+}
+
+fn sections_overlap(prev: &LineSets, next: &LineSets) -> bool {
+    set_jaccard(&prev.english, &next.english) > BOUNDARY_TOLERANCE
+        && set_jaccard(&prev.japanese, &next.japanese) <= BOUNDARY_JAPANESE_TOLERANCE
+}
+
+fn head_repeated(earlier: &LineSets, next: &LineSets) -> bool {
+    earlier.lines >= HEAD_MIN_LINES && sections_overlap(earlier, next)
+}
+
+fn line_set<'a, T: Eq + Hash>(
+    lines: impl Iterator<Item = &'a str>,
     n: usize,
     min_size: usize,
-    tolerance: f64,
     to_set: impl Fn(&str) -> HashSet<T>,
-) -> bool {
-    let line_set = |line: &str| to_set(IMAGE_MARKER_RE.replace_all(line, "").trim());
-    let kept = |set: &HashSet<T>| set.len() >= min_size;
-
-    let tail: Vec<_> = prev
-        .lines()
-        .rev()
-        .map(line_set)
-        .filter(kept)
+) -> (usize, HashSet<T>) {
+    lines
+        .map(|line| to_set(IMAGE_MARKER_RE.replace_all(line, "").trim()))
+        .filter(|set| set.len() >= min_size)
         .take(n)
-        .collect();
-    if tail.is_empty() {
-        return false;
-    }
-    next.lines()
-        .map(line_set)
-        .filter(kept)
-        .take(n)
-        .any(|head| tail.iter().any(|t| set_jaccard(&head, t) > tolerance))
+        .fold((0, HashSet::new()), |(count, mut union), set| {
+            union.extend(set);
+            (count + 1, union)
+        })
 }
 
 fn word_set(line: &str) -> HashSet<String> {
@@ -645,8 +689,19 @@ pub enum ErrorType {
 
 #[cfg(test)]
 mod test {
-    use super::{ErrorType, Page, Section, absolute_page_path, boundary_overlap, check_page_at};
-    use std::path::PathBuf;
+    use super::{
+        ErrorType, LineSets, Page, Section, absolute_page_path, check_all_pages, check_page_at,
+        head_repeated, sections_overlap,
+    };
+    use std::{path::PathBuf, slice};
+
+    fn boundary_overlap(prev: &Section, next: &Section) -> bool {
+        sections_overlap(&LineSets::tail(prev), &LineSets::head(next))
+    }
+
+    fn head_overlap(earlier: &Section, next: &Section) -> bool {
+        head_repeated(&LineSets::head(earlier), &LineSets::head(next))
+    }
 
     #[test]
     fn rechecking_page_updates_next_page() {
@@ -777,7 +832,7 @@ mod test {
                 text,
             ),
         ]);
-        page.check_page(&[]);
+        check_all_pages(slice::from_mut(&mut page));
         let copies: Vec<_> = page
             .errors
             .iter()
@@ -824,6 +879,81 @@ mod test {
             "When I say that, Senpai slowly nods, and then falls into thought for a little while.",
         );
         assert!(!boundary_overlap(&prev, &next));
+    }
+
+    #[test]
+    fn detects_short_section_repeated_later() {
+        let short =
+            "Marquis Harden gave a malicious smile.\n\n\"So that was your aim. I am in awe.\"";
+        let repeated = format!(
+            "{short}\n\n\
+             The man who appeared from behind the counter looked down at me appraisingly.\n\n\
+             On his thick wrist gleamed a resplendent golden guild ring, proof of his rank.\n\n\
+             I want to observe the relationship between Count Aizas and Erma-kun carefully.\n\n\
+             Snow had begun falling over the capital while nobody inside noticed anything strange.\n\n\
+             Her voice trembled slightly, yet she refused to lower her gaze from his face."
+        );
+        let mut page = page(vec![
+            section(
+                "ハーデン侯爵は意地の悪い笑みを浮かべた。\n「そういった狙いでございましたか。感服いたしました」",
+                short,
+            ),
+            section(
+                "二次試験の結果が発表され、試験を受けた七四八二人中五五八人が合格した。",
+                "The results of the second exam were announced, and of the 7,482 people who took the exam, 558 passed.",
+            ),
+            section(
+                "受付の奥から現れた男は、こちらを値踏みするように見下ろしてきた。\nアイザス伯とエルマ君の関係をしっかりと見ておきたいのだ。",
+                &repeated,
+            ),
+        ]);
+        check_all_pages(slice::from_mut(&mut page));
+        let copies: Vec<_> = page
+            .errors
+            .iter()
+            .filter(|e| matches!(e.error, ErrorType::Copy))
+            .map(|e| e.index)
+            .collect();
+        assert_eq!(copies, [2]);
+    }
+
+    #[test]
+    fn ignores_heads_repeated_in_japanese() {
+        let earlier = section(
+            "俺がそう言うと先輩はゆっくりと頷いた、そして少し考え込んだ。",
+            "When I say that, Senpai slowly nods, and then falls into thought for a little while.",
+        );
+        let next = section(
+            "俺がそう言うと先輩はゆっくりと頷いた、そして少し考え込んだ。\n二次試験の結果が発表された。",
+            "When I say that, Senpai slowly nods, and then falls into thought for a little while.\n\nThe results of the second exam were announced.",
+        );
+        assert!(!head_overlap(&earlier, &next));
+    }
+
+    #[test]
+    fn ignores_head_with_one_compared_line() {
+        let earlier = section(
+            "ハーデン侯爵は口の端を大きく吊り上げて、意地の悪い笑みを浮かべた。\n「はい」",
+            "Marquis Harden gave a malicious smile.\n\n\"Yes.\"",
+        );
+        let next = section(
+            "ハーデン侯爵は意地悪く笑った。\n二次試験の結果が発表され、試験を受けた七四八二人中五五八人が合格した。",
+            "Marquis Harden gave a malicious smile.\n\nThe results of the second exam were announced, and of the 7,482 people who took the exam, 558 passed.",
+        );
+        assert!(!head_overlap(&earlier, &next));
+    }
+
+    #[test]
+    fn ignores_single_shared_opening_line() {
+        let earlier = section(
+            "ハーデン侯爵は口の端を大きく吊り上げて、意地の悪い笑みを浮かべた。\n「そういった狙いでございましたか。感服いたしました」",
+            "Marquis Harden gave a malicious smile.\n\n\"So that was your aim. I am in awe.\"",
+        );
+        let next = section(
+            "ハーデン侯爵は意地悪く笑った。\n二次試験の結果が発表され、試験を受けた七四八二人中五五八人が合格した。",
+            "Marquis Harden gave a malicious smile.\n\nThe results of the second exam were announced, and of the 7,482 people who took the exam, 558 passed.",
+        );
+        assert!(!head_overlap(&earlier, &next));
     }
 
     #[test]
