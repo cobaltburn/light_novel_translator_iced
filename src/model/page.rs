@@ -204,8 +204,8 @@ impl Page {
             .enumerate()
             .filter(|(_, s)| !s.content.is_empty())
             .filter_map(|(i, Section { japanese, content })| {
-                let unequal = header_tag_count(&japanese) != header_tag_count(&content);
-                unequal.then_some(PageError::header(i))
+                (header_tag_count(&japanese) != header_tag_count(&content))
+                    .then_some(PageError::header(i))
             })
             .collect()
     }
@@ -216,8 +216,8 @@ impl Page {
             .enumerate()
             .filter(|(_, s)| !s.content.is_empty())
             .filter_map(|(i, Section { japanese, content })| {
-                let unequal = link_tag_count(&japanese) != link_tag_count(&content);
-                unequal.then_some(PageError::link(i))
+                (link_tag_count(&japanese) != link_tag_count(&content))
+                    .then_some(PageError::link(i))
             })
             .collect()
     }
@@ -265,7 +265,7 @@ impl Page {
         &self,
         display: DisplayType,
         on_press: impl Fn(usize) -> Option<Link> + 'static,
-    ) -> Vec<text::Span<'_, Link>> {
+    ) -> Vec<Vec<text::Span<'_, Link>>> {
         let has_japanese_error = |i| {
             self.errors
                 .iter()
@@ -275,7 +275,7 @@ impl Page {
         self.sections
             .iter()
             .enumerate()
-            .flat_map(|(i, section)| {
+            .map(|(i, section)| {
                 let content = section.span_content(display);
                 let mut spans = vec![
                     span(format!("\n\nPart: {}\nCount: {}\n\n", i + 1, content.len()))

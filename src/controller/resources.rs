@@ -36,12 +36,12 @@ pub struct ResourcePaths {
 impl ResourcePaths {
     /// Reserves a unique path in `folder` for the resource at `href` and returns it.
     pub fn insert(&mut self, href: Href<'_>, folder: &str) -> String {
-        let source = href.path().decode().into_owned();
-        self.insert_source(source, &href.name().decode(), folder)
+        let source = href.path().decode();
+        self.insert_source(&source, &href.name().decode(), folder)
     }
 
-    fn insert_source(&mut self, source: String, name: &str, folder: &str) -> String {
-        if let Some(path) = self.paths.get(&source) {
+    fn insert_source(&mut self, source: &str, name: &str, folder: &str) -> String {
+        if let Some(path) = self.paths.get(source) {
             return path.clone();
         }
 
@@ -59,7 +59,7 @@ impl ResourcePaths {
             .unwrap_or_default();
 
         self.used.insert(path.clone());
-        self.paths.insert(source, path.clone());
+        self.paths.insert(source.to_string(), path.clone());
         path
     }
 
@@ -123,7 +123,7 @@ mod tests {
         let mut paths = ResourcePaths::default();
         for source in sources {
             let name = source.rsplit('/').next().unwrap();
-            paths.insert_source(source.to_string(), name, "Images");
+            paths.insert_source(source, name, "Images");
         }
         paths
     }

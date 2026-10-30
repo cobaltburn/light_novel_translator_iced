@@ -70,7 +70,7 @@ impl Doc {
         let lines = markdown.lines();
         let markdown = lines.map(|s| format!("{}\n", s.trim())).collect::<String>();
         let parts = partition_text(&markdown);
-        Some(join_partition(parts))
+        Some(join_partition(&parts))
     }
 
     pub fn set_page(&mut self, page: usize) {

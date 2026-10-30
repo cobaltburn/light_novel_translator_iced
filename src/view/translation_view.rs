@@ -11,15 +11,20 @@ use crate::{
         ollama_input, server_setting_input, think_selector,
     },
 };
-use iced::widget::{button, column, container, row, scrollable, text};
 use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::Vertical,
     border::Radius,
-    widget::{Button, Container, Row, container::transparent, lazy, space::vertical, stack},
+    widget::{
+        Button, Column, Container, Row, container::transparent, lazy, rule, space::vertical, stack,
+    },
+};
+use iced::{
+    border,
+    widget::{button, column, container, row, scrollable, text},
 };
 use iced_aw::{ContextMenu, Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, iter};
 
 pub fn translation_view(
     models: &BTreeMap<usize, Translation>,
@@ -84,6 +89,7 @@ fn tab(model: &Translation) -> Element<'_, Action> {
 
     let error_cards = page.map(|p| p.error_cards(on_press));
     let content = page.map_or_default(|p| p.spans(model.display, on_press));
+    let sections = page.map(|p| p.sections.len());
 
     container(column![
         vertical(),
@@ -92,7 +98,9 @@ fn tab(model: &Translation) -> Element<'_, Action> {
             row![
                 side_bar(model),
                 stack![
-                    ContextMenu::new(rich_text_scrollable(content), || view_context_menu()),
+                    ContextMenu::new(rich_text_scrollable(content), move || view_context_menu(
+                        sections
+                    )),
                     error_cards
                 ]
             ]
@@ -110,26 +118,54 @@ fn tab(model: &Translation) -> Element<'_, Action> {
     .into()
 }
 
-fn view_context_menu<'a>() -> Element<'a, Action> {
-    let menu = column![
-        context_menu_button(text("full").color(Color::WHITE))
-            .on_press(Action::SetDisplay(DisplayType::Full))
-            .width(Length::Fill),
-        context_menu_button(text("end").color(Color::WHITE))
-            .on_press(Action::SetDisplay(DisplayType::End))
-            .width(Length::Fill),
-        context_menu_button(text("japanese").color(Color::WHITE))
-            .on_press(Action::SetDisplay(DisplayType::Japanese))
-            .width(Length::Fill)
-    ]
-    .padding(5)
-    .spacing(5);
+fn view_context_menu<'a>(sections: Option<usize>) -> Element<'a, Action> {
+    let display_buttons = [
+        ("full", Action::SetDisplay(DisplayType::Full)),
+        ("end", Action::SetDisplay(DisplayType::End)),
+        ("japanese", Action::SetDisplay(DisplayType::Japanese)),
+    ];
 
-    container(scrollable(menu))
-        .style(container::rounded_box)
-        .max_height(300)
-        .width(200)
-        .into()
+    let sections = sections.map(section_select);
+    let menu: Column<_> = display_buttons
+        .into_iter()
+        .map(|(t, action)| view_context_menu_button(t, action).into())
+        .chain(sections.into_iter().flatten())
+        .collect();
+
+    container(
+        scrollable(menu.spacing(5).padding(Padding::default().vertical(5))).style(
+            |theme, status| {
+                let style = scrollable::default(theme, status);
+                scrollable::Style {
+                    vertical_rail: scrollable::Rail {
+                        border: border::rounded(14),
+                        ..style.vertical_rail
+                    },
+                    ..style
+                }
+            },
+        ),
+    )
+    .style(|theme| container::rounded_box(theme).border(border::rounded(7)))
+    .max_height(400)
+    .width(300)
+    .into()
+}
+
+fn section_select<'a>(sections: usize) -> impl Iterator<Item = Element<'a, Action>> {
+    iter::once(rule::horizontal(1).into()).chain((0..sections).into_iter().map(|i| {
+        view_context_menu_button(format!("section {}", i + 1), Action::ScrollToSection(i)).into()
+    }))
+}
+
+fn view_context_menu_button<'a>(
+    button_text: impl text::IntoFragment<'a>,
+    action: Action,
+) -> Button<'a, Action> {
+    context_menu_button(text(button_text).color(Color::WHITE))
+        .on_press(action)
+        .padding(Padding::new(5.0).left(30))
+        .width(Length::Fill)
 }
 
 fn side_bar(model: &Translation) -> Container<'_, Action> {

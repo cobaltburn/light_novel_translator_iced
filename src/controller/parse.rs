@@ -171,7 +171,7 @@ pub fn markdown_sections(markdown: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn join_partition(parts: Vec<String>) -> String {
+pub fn join_partition(parts: &[String]) -> String {
     parts
         .into_iter()
         .enumerate()

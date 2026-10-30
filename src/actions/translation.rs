@@ -6,7 +6,7 @@ use crate::{
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::select_epub,
     model::{Activity, Page, Translation, absolute_page_path, check_all_pages, check_page_at},
-    view::DisplayType,
+    view::{DisplayType, scroll_to_section},
 };
 use iced::Task;
 use std::{collections::HashMap, mem, path::PathBuf};
@@ -49,6 +49,7 @@ pub enum Action {
     SaveTranslation(String),
     ServerAction(server::Action),
     SetDisplay(DisplayType),
+    ScrollToSection(usize),
     UpdateActivity(usize, Activity),
 }
 
@@ -83,6 +84,7 @@ impl Translation {
             Action::Recover => Task::future(load_recovery())
                 .and_then(|pages| Task::done(Action::RecoverPages(pages))),
             Action::SetDisplay(display) => self.set_display(display).into(),
+            Action::ScrollToSection(section) => scroll_to_section(section),
             Action::UpdateActivity(page, activity) => self.update_activity(page, activity).into(),
         }
     }

@@ -6,7 +6,7 @@ use crate::{
     error::{Error, Result, ResultTaskExt as _, TaskResultExt},
     message::select_epub,
     model::{Activity, Candidate, Consensus, Page, check_page_at},
-    view::DisplayType,
+    view::{DisplayType, scroll_to_section},
 };
 use iced::Task;
 use regex::Regex;
@@ -60,6 +60,7 @@ pub enum Action {
     },
     DropCandidate(usize),
     SetDisplay(DisplayType),
+    ScrollToSection(usize),
     UpdateActivity(usize, Activity),
 }
 
@@ -96,6 +97,7 @@ impl Consensus {
             Action::CleanText { page, part } => self.clean_text(page, part).into(),
             Action::DropCandidate(i) => self.drop_candidate(i).into(),
             Action::SetDisplay(display) => self.set_display(display).into(),
+            Action::ScrollToSection(section) => scroll_to_section(section),
             Action::UpdateActivity(page, activity) => self.update_activity(page, activity).into(),
         }
     }
