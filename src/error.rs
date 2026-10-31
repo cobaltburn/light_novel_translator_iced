@@ -57,7 +57,7 @@ pub enum Error {
     ProviderError(#[from] rig::ProviderError),
 
     #[error(transparent)]
-    MemoryError(#[from] rig::memory::MemoryError),
+    MemoryError(#[from] rig::memory::SessionError),
 
     #[error(transparent)]
     SerdeJsonError(#[from] serde_json::Error),

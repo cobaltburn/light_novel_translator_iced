@@ -72,6 +72,26 @@ pub fn context_window_input(state: &Server) -> Element<'_, Action> {
     .into()
 }
 
+pub fn num_ctx_input(state: &Server) -> Element<'_, Action> {
+    container(
+        row![
+            text("Context size (tokens):"),
+            NumberInput::new(
+                &state.settings.num_ctx,
+                2048..=262144,
+                server::Action::SetNumCtx
+            )
+            .step(4096)
+            .ignore_scroll(true),
+        ]
+        .align_y(Vertical::Center)
+        .spacing(10),
+    )
+    .align_left(Length::Fill)
+    .padding(Padding::default().bottom(5))
+    .into()
+}
+
 pub fn server_setting_input<'a>(
     setting: &'a str,
     value: f64,

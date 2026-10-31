@@ -8,7 +8,7 @@ use crate::{
     view::{DisplayType, menu_button, rich_text_scrollable},
     widget::{
         build_path_buttons, context_menu_button, context_window_input, execution_selector,
-        ollama_input, server_setting_input, think_selector,
+        num_ctx_input, ollama_input, server_setting_input, think_selector,
     },
 };
 use iced::{
@@ -227,6 +227,7 @@ fn server_menu(state: &Server) -> Item<'_, Action, Theme, Renderer> {
             Item::new(think_selector(state).map(Into::into)),
             Item::new(execution_selector(state).map(Into::into)),
             Item::new(context_window_input(state).map(Into::into)),
+            Item::new(num_ctx_input(state).map(Into::into)),
             Item::new(
                 server_setting_input(
                     "Tempature:",

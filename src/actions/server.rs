@@ -12,6 +12,7 @@ pub enum Action {
     SetMethod(Method),
     SetThink(Think),
     SetWindow(usize),
+    SetNumCtx(u32),
     SetTemp(f64),
     SetTopP(f64),
     SetRepeatPenalty(f64),
@@ -28,6 +29,7 @@ impl Server {
             Action::SetMethod(method) => self.set_method(method).into(),
             Action::SetModels(models) => self.set_models(models).into(),
             Action::SetWindow(window) => self.set_window(window).into(),
+            Action::SetNumCtx(num_ctx) => self.set_num_ctx(num_ctx).into(),
             Action::Connect => self.connect(),
             Action::Abort => self.abort().into(),
             Action::SetTemp(temp) => self.set_temp(temp).into(),
@@ -62,6 +64,10 @@ impl Server {
 
     fn set_window(&mut self, window: usize) {
         self.settings.context_window = window;
+    }
+
+    fn set_num_ctx(&mut self, num_ctx: u32) {
+        self.settings.num_ctx = num_ctx;
     }
 
     fn set_temp(&mut self, temp: f64) {

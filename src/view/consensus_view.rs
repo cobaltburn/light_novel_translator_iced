@@ -1,8 +1,11 @@
 use crate::{
     actions::{consensus, server},
-    model::{Consensus, Method, Server},
+    model::{Consensus, Method, Server, Settings},
     view::{DisplayType, menu_button, rich_text_scrollable},
-    widget::{build_path_buttons, context_menu_button, ollama_input, think_selector},
+    widget::{
+        build_path_buttons, context_menu_button, num_ctx_input, ollama_input, server_setting_input,
+        think_selector,
+    },
 };
 use iced::{
     Border, Color, Element, Length, Padding, Renderer, Theme,
@@ -119,12 +122,31 @@ fn consensus_button(model: &Consensus) -> Element<'_, consensus::Action> {
 }
 
 fn server_menu(state: &Server) -> Item<'_, consensus::Action, Theme, Renderer> {
+    let Settings {
+        top_p,
+        repeat_penalty,
+        ..
+    } = state.settings;
     Item::with_menu(
         menu_button("server"),
         Menu::new(vec![
             Item::new(ollama_input().map(Into::into)),
             Item::new(think_selector(state).map(Into::into)),
             Item::new(execution_selector(state).map(Into::into)),
+            Item::new(num_ctx_input(state).map(Into::into)),
+            Item::new(
+                server_setting_input("Top p:", top_p, 0.0..=1.0, server::Action::SetTopP)
+                    .map(Into::into),
+            ),
+            Item::new(
+                server_setting_input(
+                    "Repeat Penalty:",
+                    repeat_penalty,
+                    0.0..=2.0,
+                    server::Action::SetRepeatPenalty,
+                )
+                .map(Into::into),
+            ),
         ])
         .spacing(10)
         .width(400),

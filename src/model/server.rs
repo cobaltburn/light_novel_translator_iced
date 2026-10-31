@@ -1,6 +1,9 @@
 use crate::{
     actions::{consensus, server, translation},
-    controller::{Client, SharedHistory, StreamAction, agent_stream, seed_history, shared_history},
+    controller::{
+        Client, SharedHistory, StreamAction, agent_stream, compact_history, seed_history,
+        shared_history,
+    },
     error::{Error, Result},
     model::{Page, Section},
 };
@@ -13,9 +16,10 @@ use std::{collections::HashMap, ffi::OsStr, io::Cursor, iter};
 
 pub const TEMPERATURE: f64 = 0.8;
 pub const TOP_P: f64 = 0.8;
-pub const REPEAT_PENALTY: f64 = 1.05;
+pub const REPEAT_PENALTY: f64 = 1.0;
 pub const BATCH_SIZE: usize = 6;
 pub const DEFAULT_CONTEXT_WINDOW: usize = 10;
+pub const DEFAULT_NUM_CTX: u32 = 131072;
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -42,7 +46,7 @@ impl Server {
         let (seed, history) = self.seeded_history(newest_first(pages)).unzip();
         let agent = self
             .client
-            .translation_agent(model, &self.settings, history)?;
+            .translation_agent(model, &self.settings, history.clone())?;
 
         let handles = &mut self.handles;
         let seed = seed.map_or_default(|seed| bind(handles, seed));
@@ -50,7 +54,10 @@ impl Server {
             .sections
             .iter()
             .enumerate()
-            .map(|(part, section)| stream_task(&agent, Task::none(), &section.japanese, page, part))
+            .map(|(part, section)| {
+                let compact = history.clone().map_or_default(compact_history);
+                stream_task(&agent, compact, &section.japanese, page, part)
+            })
             .map(|task| bind(handles, task))
             .collect();
 
@@ -103,7 +110,7 @@ impl Server {
     ) -> Result<Task<consensus::Action>> {
         let current = pages.last().expect("dont pass an empty array");
         let candidates = page_candidates(current, &candidates)?;
-        let agent = self.client.consensus_agent(model, self.settings.think)?;
+        let agent = self.client.consensus_agent(model, &self.settings)?;
 
         let handles = &mut self.handles;
         let tasks = current
@@ -130,7 +137,7 @@ impl Server {
         let current = pages.last().expect("dont pass an empty array");
         let section = current.sections.get(part).unwrap();
         let candidates = page_candidates(current, &candidates)?;
-        let agent = self.client.consensus_agent(model, self.settings.think)?;
+        let agent = self.client.consensus_agent(model, &self.settings)?;
         let task = consensus_task(&agent, section, candidates, page, part)?;
 
         Ok(self.bind_handle(task))
@@ -263,6 +270,7 @@ impl Server {
 pub struct Settings {
     pub think: Think,
     pub context_window: usize,
+    pub num_ctx: u32,
     pub temperature: f64,
     pub top_p: f64,
     pub repeat_penalty: f64,
@@ -273,6 +281,7 @@ impl Default for Settings {
         Self {
             think: Default::default(),
             context_window: DEFAULT_CONTEXT_WINDOW,
+            num_ctx: DEFAULT_NUM_CTX,
             temperature: TEMPERATURE,
             top_p: TOP_P,
             repeat_penalty: REPEAT_PENALTY,
@@ -286,6 +295,7 @@ impl Settings {
             "top_p": &self.top_p,
             "repeat_penalty": &self.repeat_penalty,
             "think": &self.think,
+            "num_ctx": &self.num_ctx,
         })
     }
 }
