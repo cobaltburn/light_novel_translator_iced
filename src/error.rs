@@ -1,4 +1,4 @@
-use crate::message::display_error;
+use crate::dialogs::error_dialog;
 use iced::{Task, advanced::graphics::futures::MaybeSend};
 use quick_xml::events::attributes::AttrError;
 use std::path::PathBuf;
@@ -6,6 +6,7 @@ use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
@@ -13,9 +14,6 @@ pub enum Error {
 
     #[error("ServerError: {0}")]
     ServerError(&'static str),
-
-    #[error("ConversionError path: {0:?}, {1:?}")]
-    ConversionError(PathBuf, Box<Error>),
 
     #[error("BuildError: {0}")]
     BuildError(&'static str),
@@ -92,6 +90,12 @@ fn save_failures(failures: &[(PathBuf, std::io::Error)]) -> String {
         .map(|(path, error)| format!("{}: {error}", path.display()))
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+async fn display_error<T: Into<Error>>(error: T) {
+    let error: Error = error.into();
+    log::error!("{:#?}", error);
+    error_dialog(error.to_string()).await;
 }
 
 impl Error {

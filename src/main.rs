@@ -2,14 +2,16 @@ use crate::error::Result;
 use std::{fs::File, sync::Mutex};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
-pub mod actions;
-pub mod app;
-pub mod controller;
-pub mod error;
-pub mod message;
-pub mod model;
-pub mod view;
-pub mod widget;
+mod app;
+mod dialogs;
+mod epub;
+mod error;
+mod llm;
+mod page;
+mod screens;
+mod server;
+mod text;
+mod ui;
 
 const LOG_FILE: &str = "light_novel_translator.log";
 
@@ -29,5 +31,5 @@ fn main() -> Result<()> {
         .init();
     log::info!("logging is enabled");
 
-    app::app()
+    app::run()
 }

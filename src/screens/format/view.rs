@@ -1,0 +1,150 @@
+use crate::screens::format::{Action, Format};
+use iced::widget::{
+    Column, Row, button, column, container, container::transparent, image, row, scrollable,
+    space::vertical, text, text_input,
+};
+use iced::{
+    Border, Color, Element, Length, Padding,
+    alignment::{Horizontal, Vertical},
+};
+
+pub fn format_view(model: &Format) -> Element<'_, Action> {
+    let build = (model.epub.is_some() && !model.pages.is_empty()).then_some(Action::Build);
+
+    container(column![
+        vertical(),
+        column![
+            format_menu_bar(model),
+            row![epub_image(model), epub_metadata(model)].spacing(10),
+            container(button(text("build").center()).on_press_maybe(build))
+                .align_right(Length::Fill)
+                .padding(20)
+        ]
+        .height(Length::FillPortion(15))
+        .padding(10),
+        vertical(),
+    ])
+    .center_x(Length::Fill)
+    .align_top(Length::Fill)
+    .width(Length::Fill)
+    .height(Length::Fill)
+    .padding(10)
+    .into()
+}
+
+fn format_menu_bar(model: &Format) -> Row<'_, Action> {
+    row![epub_button(model), content_button(model),]
+        .width(Length::Fill)
+        .spacing(10)
+        .padding(Padding::default().bottom(15))
+}
+
+fn content_button(Format { source_folder, .. }: &Format) -> Row<'_, Action> {
+    row![
+        button(text("content")).on_press(Action::SelectFolder),
+        container(text(source_folder).center())
+            .width(Length::Fill)
+            .padding(5)
+            .style(|theme| transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 0.5,
+                radius: 5.into(),
+            }))
+    ]
+    .align_y(Vertical::Center)
+    .padding(5)
+    .spacing(10)
+}
+
+fn epub_button(Format { epub_path, .. }: &Format) -> Row<'_, Action> {
+    let name = epub_path
+        .file_name()
+        .map_or_default(|e| e.to_string_lossy());
+    row![
+        button(text("epub").center()).on_press(Action::SelectEpub),
+        container(text(name).center())
+            .width(Length::Fill)
+            .padding(5)
+            .style(|theme| transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 0.5,
+                radius: 5.into(),
+            }))
+    ]
+    .align_y(Vertical::Center)
+    .padding(5)
+    .spacing(10)
+}
+
+fn epub_image(Format { cover, .. }: &Format) -> Element<'_, Action> {
+    container(cover.as_ref().map(image))
+        .padding(10)
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .center(Length::Fill)
+        .style(|theme| {
+            transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 0.2,
+                radius: 5.into(),
+            })
+        })
+        .into()
+}
+
+fn epub_metadata(model @ Format { metadata, .. }: &Format) -> Element<'_, Action> {
+    let label_width = 80;
+    let content = column![
+        row![
+            container(text("Title: "))
+                .align_right(Length::Fill)
+                .width(label_width),
+            text_input("Title", &metadata.title).on_input(Action::SetTitle)
+        ]
+        .align_y(Vertical::Center),
+        row![
+            container(text("Author(s): "))
+                .align_right(Length::Fill)
+                .width(label_width),
+            text_input("Author(s)", &metadata.authors).on_input(Action::SetAuthors)
+        ]
+        .align_y(Vertical::Center),
+        content_files(model)
+    ]
+    .spacing(5);
+    container(content)
+        .padding(Padding::new(1.0).top(10))
+        .height(Length::Fill)
+        .width(Length::Fill)
+        .align_top(Length::Fill)
+        .align_x(Horizontal::Center)
+        .into()
+}
+
+fn content_files(Format { pages, .. }: &Format) -> Element<'_, Action> {
+    let pages: Column<_> = pages
+        .iter()
+        .filter_map(|p| p.path.file_prefix())
+        .map(|p| text(p.to_string_lossy()).into())
+        .collect();
+    container(
+        scrollable(
+            pages
+                .padding(Padding::new(5.0).horizontal(10))
+                .width(Length::Fill)
+                .spacing(10),
+        )
+        .height(Length::Fill),
+    )
+    .height(Length::Fill)
+    .width(Length::Fill)
+    .padding(Padding::new(10.0).left(0).right(5))
+    .style(|theme| {
+        transparent(theme).border(Border {
+            color: Color::WHITE,
+            width: 1.0,
+            radius: 8.into(),
+        })
+    })
+    .into()
+}
