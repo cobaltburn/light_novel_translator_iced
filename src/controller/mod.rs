@@ -7,6 +7,7 @@ mod html_writer;
 mod parse;
 mod prompts;
 mod resources;
+mod shared_history;
 mod xml;
 
 pub use builder::*;
@@ -15,6 +16,7 @@ pub use html_writer::*;
 pub use parse::*;
 pub use prompts::*;
 pub use resources::*;
+pub use shared_history::*;
 pub use xml::*;
 
 pub const TOC_PAGE_PREFIX: &str = "__toc__";

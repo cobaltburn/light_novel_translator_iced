@@ -1,6 +1,7 @@
 mod consensus;
 mod doc;
 mod format;
+mod glossary;
 mod page;
 mod server;
 mod translation;
@@ -9,6 +10,7 @@ mod translator;
 pub use consensus::*;
 pub use doc::*;
 pub use format::*;
+pub use glossary::*;
 pub use page::*;
 pub use server::*;
 pub use translation::*;

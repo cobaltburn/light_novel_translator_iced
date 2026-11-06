@@ -5,12 +5,13 @@ use crate::{
     widget::{SidebarAction, SidebarDeps, SidebarRow},
 };
 use iced_aw::TabLabel;
-use std::path::PathBuf;
+use std::{borrow::Cow, path::PathBuf};
 
 #[derive(Default, Debug)]
 pub struct Translation {
     pub server: Server,
-    pub file_path: PathBuf,
+    pub file_path: Option<PathBuf>,
+    pub glossary: Option<(PathBuf, String)>,
     pub current_page: usize,
     pub pages: Vec<Page>,
     pub display: DisplayType,
@@ -18,9 +19,10 @@ pub struct Translation {
 
 impl Translation {
     pub fn tab_label(&self) -> TabLabel {
+        let epub_name = self.epub_name().unwrap_or_default().into_owned();
         match self.server.handles.is_empty() {
-            true => TabLabel::Text(self.file_name().unwrap_or_default()),
-            false => TabLabel::IconText('\u{25CF}', self.file_name().unwrap_or_default()),
+            true => TabLabel::Text(epub_name),
+            false => TabLabel::IconText('\u{25CF}', epub_name),
         }
     }
 
@@ -28,10 +30,13 @@ impl Translation {
         self.pages.get(self.current_page)
     }
 
-    pub fn file_name(&self) -> Option<String> {
-        Some(self.file_path.file_name()?.to_string_lossy().to_string())
+    pub fn epub_name(&self) -> Option<Cow<'_, str>> {
+        Some(self.file_path.as_ref()?.file_name()?.to_string_lossy())
     }
 
+    pub fn glossary_name(&self) -> Option<Cow<'_, str>> {
+        Some(self.glossary.as_ref()?.0.file_name()?.to_string_lossy())
+    }
     pub fn sidebar_deps(&self) -> SidebarDeps {
         let active = self.server.connected() && self.server.handles.is_empty();
         let rows = self
@@ -51,7 +56,7 @@ impl Translation {
     }
 
     pub fn can_translate(&self) -> bool {
-        self.server.handles.is_empty() && self.server.connected() && self.file_name().is_some()
+        self.server.handles.is_empty() && self.server.connected() && self.file_path.is_some()
     }
 }
 

@@ -1,10 +1,6 @@
 use crate::{actions::doc::Action, model::Doc, view::text_scrollable};
-use iced::widget::{button, column, container, pick_list, row, text};
-use iced::{
-    Element, Length, Padding,
-    alignment::Horizontal,
-    widget::{Container, space::vertical},
-};
+use iced::widget::{Container, button, column, container, pick_list, row, space::vertical, text};
+use iced::{Element, Length, Padding, alignment::Horizontal};
 
 pub fn doc_view(model: &Doc) -> Element<'_, Action> {
     container(column![

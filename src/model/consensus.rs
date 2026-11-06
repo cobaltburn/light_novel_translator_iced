@@ -4,19 +4,15 @@ use crate::{
     view::DisplayType,
     widget::{SidebarAction, SidebarDeps, SidebarRow},
 };
-use iced::widget::button::Status;
-use iced::{
-    Border, Color, Element, Length, Renderer, Theme,
-    alignment::Vertical,
-    widget::{button, container, row, text},
-};
+use iced::widget::{button, button::Status, container, row, text};
+use iced::{Border, Color, Element, Length, Renderer, Theme, alignment::Vertical};
 use iced_aw::menu::Item;
 use std::{iter::once, path::PathBuf};
 
 #[derive(Debug, Default)]
 pub struct Consensus {
     pub server: Server,
-    pub file_path: PathBuf,
+    pub file_path: Option<PathBuf>,
     pub current_page: usize,
     pub candidates: Vec<Candidate>,
     pub pages: Vec<Page>,
@@ -30,7 +26,13 @@ impl Consensus {
     }
 
     pub fn file_name(&self) -> Option<String> {
-        Some(self.file_path.file_name()?.to_string_lossy().to_string())
+        Some(
+            self.file_path
+                .as_ref()?
+                .file_name()?
+                .to_string_lossy()
+                .to_string(),
+        )
     }
 
     pub fn candidate_items(&self) -> Vec<Item<'_, consensus::Action, Theme, Renderer>> {

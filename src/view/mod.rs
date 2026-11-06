@@ -2,37 +2,41 @@ use iced::advanced::widget::{
     Id, Operation, operate,
     operation::{self, Outcome, scrollable::AbsoluteOffset},
 };
-use iced::widget::{button, container, rich_text, scrollable, span, text};
+use iced::widget::{
+    Button, Column, Container, button,
+    button::{Status, primary},
+    container,
+    container::transparent,
+    rich_text, scrollable, span, text,
+    text::{Span, Wrapping},
+};
 use iced::{
     Border, Color, Element, Length, Padding, Rectangle, Task, Vector,
     alignment::{Horizontal, Vertical},
     color,
-    widget::{
-        Button, Column, Container,
-        button::{Status, primary},
-        container::transparent,
-        text::{Span, Wrapping},
-    },
 };
-use std::fmt;
+use std::{fmt, iter, mem};
 
 mod consensus_view;
 mod doc_view;
 mod format_view;
+mod glossary_view;
 mod translation_view;
 
 pub use consensus_view::*;
 pub use doc_view::*;
 pub use format_view::*;
+pub use glossary_view::*;
 pub use translation_view::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum View {
     #[default]
     Translation,
-    Doc,
+    Glossary,
     Consensus,
     Format,
+    Doc,
 }
 
 impl fmt::Display for View {
@@ -42,21 +46,47 @@ impl fmt::Display for View {
             View::Format => "Build",
             View::Translation => "Translation",
             View::Consensus => "Consensus",
+            View::Glossary => "Glossary",
         };
         write!(f, "{}", view)
     }
 }
 
-pub fn text_scrollable<'a, T: fmt::Display, E: 'a>(content: T) -> Container<'a, E> {
-    let scroll = scrollable(
-        text(content.to_string())
+const TEXT_CHUNK: usize = 8 * 1024;
+
+/// Cuts `content` at the last newline before each [`TEXT_CHUNK`] bytes, or at
+/// the limit if there is none. The newline is dropped, since each piece starts
+/// a new line anyway. Appending to `content` only changes the last piece.
+fn text_chunks(mut content: &str) -> impl Iterator<Item = &str> {
+    iter::from_fn(move || {
+        if content.is_empty() {
+            return None;
+        }
+        if content.len() <= TEXT_CHUNK {
+            return Some(mem::take(&mut content));
+        }
+        let limit = content.floor_char_boundary(TEXT_CHUNK);
+        let (chunk, rest) = match content[..limit].rfind('\n') {
+            Some(newline) => (&content[..newline], &content[newline + 1..]),
+            None => content.split_at(limit),
+        };
+        content = rest;
+        Some(chunk)
+    })
+}
+
+pub fn text_scrollable<'a, E: 'a>(content: &'a str) -> Container<'a, E> {
+    let chunks = text_chunks(content).map(|chunk| {
+        text(chunk)
             .width(Length::Fill)
             .align_x(Horizontal::Left)
             .align_y(Vertical::Center)
-            .wrapping(Wrapping::WordOrGlyph),
-    )
-    .anchor_top()
-    .width(Length::Fill);
+            .wrapping(Wrapping::WordOrGlyph)
+            .into()
+    });
+    let scroll = scrollable(Column::with_children(chunks).width(Length::Fill))
+        .anchor_top()
+        .width(Length::Fill);
     container(scroll)
         .style(|theme| {
             transparent(theme).border(Border {
@@ -190,4 +220,51 @@ pub enum DisplayType {
     Full,
     End,
     Japanese,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn chunks(content: &str) -> Vec<&str> {
+        text_chunks(content).collect()
+    }
+
+    #[test]
+    fn text_chunks_keeps_short_content_whole() {
+        assert_eq!(chunks(""), Vec::<&str>::new());
+        assert_eq!(chunks("a\nb\n"), ["a\nb\n"]);
+    }
+
+    #[test]
+    fn text_chunks_cuts_at_the_last_newline_and_drops_it() {
+        let first = "a".repeat(TEXT_CHUNK - 10);
+        let content = format!("{first}\nb\n\n{}", "c".repeat(20));
+
+        assert_eq!(chunks(&content), [format!("{first}\nb\n"), "c".repeat(20)]);
+    }
+
+    #[test]
+    fn text_chunks_cuts_a_line_with_no_newline_on_a_char_boundary() {
+        let content = "語".repeat(TEXT_CHUNK);
+
+        let pieces = chunks(&content);
+
+        assert!(pieces.iter().all(|piece| piece.len() <= TEXT_CHUNK));
+        assert_eq!(pieces.concat(), content);
+    }
+
+    #[test]
+    fn text_chunks_only_changes_the_last_piece_when_content_grows() {
+        let content: String = (0..4000).map(|i| format!("line {i}\n")).collect();
+
+        for end in 1..content.len() {
+            let before = chunks(&content[..end]);
+            let after = chunks(&content[..=end]);
+            let settled = before.len() - 1;
+
+            assert_eq!(before[..settled], after[..settled]);
+        }
+        assert!(chunks(&content).len() > 1);
+    }
 }

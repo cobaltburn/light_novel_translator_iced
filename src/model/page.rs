@@ -31,7 +31,6 @@ const SECTION_CAPACITY: usize = 8 * 1024;
 const MIN_PERCENT: f64 = 65.0;
 const MAX_PERCENT: f64 = 110.0;
 const SIZE_TOLERANCE: f64 = 12.5;
-/// In Japanese characters; full partitions are 8192 bytes (~2700 characters).
 const SMALL_SECTION: usize = 1000;
 const BOUNDARY_PARAGRAPHS: usize = 5;
 const BOUNDARY_MIN_WORDS: usize = 5;

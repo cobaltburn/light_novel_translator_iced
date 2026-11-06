@@ -3,8 +3,9 @@ use crate::{
         complete_dialog, get_pages, page_markdown, pick_save_folder, save_file, save_pages,
         select_format_folder, server,
     },
-    error::{Error, Result, ResultTaskExt as _, TaskResultExt},
-    message::select_epub,
+    controller::StreamAction,
+    error::{Result, ResultTaskExt as _, TaskResultExt},
+    message::{error_dialog, select_epub},
     model::{Activity, Candidate, Consensus, Page, check_page_at},
     view::{DisplayType, scroll_to_section},
 };
@@ -35,7 +36,8 @@ pub enum Action {
         page: usize,
         part: usize,
     },
-    CancelConsensus,
+    Cancel,
+    Failed(String),
     SaveTranslation(String),
     SavePage {
         name: String,
@@ -87,10 +89,14 @@ impl Consensus {
             Action::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .ok_or_display(|(path, pages)| Task::done(Action::SetEpub { path, pages })),
-            Action::CancelConsensus => self.cancel().into(),
+            Action::Cancel => self.cancel().into(),
+            Action::Failed(message) => self.fail(message),
             Action::SetPage(page) => self.set_page(page).into(),
             Action::SelectCandidate(i) => Task::future(select_format_folder(
-                self.file_path.parent().map_or(PathBuf::new(), Into::into),
+                self.file_path
+                    .as_ref()
+                    .and_then(|path| Some(path.parent()?.into()))
+                    .unwrap_or_default(),
             ))
             .and_then(move |(name, pages)| Task::done(Action::SetCandidate { i, name, pages })),
             Action::SetCandidate { i, name, pages } => self.set_candidate(i, name, pages).into(),
@@ -106,18 +112,8 @@ impl Consensus {
         self.display = display;
     }
 
-    fn check_ready(&self) -> Result<String> {
-        if !self.server.connected() {
-            return Err(Error::ServerError("Not connected to a server"));
-        }
-        self.server
-            .current_model
-            .clone()
-            .ok_or(Error::ServerError("No model selected"))
-    }
-
     pub fn consensus(&mut self, page: usize) -> Result<Task<Action>> {
-        let model = self.check_ready()?;
+        let model = self.server.check_ready()?;
 
         let Some(pages) = self.pages.get(..page + 1) else {
             let file_name = self.file_name().unwrap_or_default();
@@ -150,7 +146,7 @@ impl Consensus {
     }
 
     pub fn consensus_page(&mut self, page: usize) -> Result<Task<Action>> {
-        let model = self.check_ready()?;
+        let model = self.server.check_ready()?;
 
         let Some(pages) = self.pages.get(0..page + 1) else {
             return Ok(Task::done(server::Action::Abort.into()));
@@ -169,8 +165,7 @@ impl Consensus {
     }
 
     pub fn consensus_part(&mut self, page: usize, part: usize) -> Result<Task<Action>> {
-        let model = self.check_ready()?;
-
+        let model = self.server.check_ready()?;
         let Some(pages) = self.pages.get(0..page + 1) else {
             return Ok(Task::done(server::Action::Abort.into()));
         };
@@ -205,9 +200,19 @@ impl Consensus {
         self.server.abort();
     }
 
+    /// Stops the run and shows `message`. Streams that fail together each land
+    /// here, so only the first one, which finds the run still active, reports.
+    fn fail(&mut self, message: String) -> Task<Action> {
+        if self.server.handles.is_empty() {
+            return Task::none();
+        }
+        self.cancel();
+        Task::future(error_dialog(message)).discard()
+    }
+
     pub fn set_epub(&mut self, path: PathBuf, pages: Vec<Page>) {
         self.current_page = 0;
-        self.file_path = path;
+        self.file_path = Some(path);
         self.pages = pages;
     }
 
@@ -292,5 +297,45 @@ pub fn candidates_map<'a>(
 impl From<server::Action> for Action {
     fn from(action: server::Action) -> Self {
         Action::ServerAction(action)
+    }
+}
+
+impl StreamAction for Action {
+    fn activity(page: usize, part: usize) -> Self {
+        Action::UpdateActivity(page, Activity::Active(part + 1))
+    }
+
+    fn update(content: String, page: usize, part: usize) -> Self {
+        Action::UpdateContent {
+            content,
+            page,
+            part,
+        }
+    }
+
+    fn fail(message: String) -> Self {
+        Action::Failed(message)
+    }
+
+    fn clean(page: usize, part: usize) -> Self {
+        Action::CleanText { page, part }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_first_of_several_failures_reports() {
+        let mut model = Consensus::default();
+        _ = model.server.bind_handle(Task::<()>::none());
+
+        let first = model.perform(Action::Failed("offline".to_string()));
+        let second = model.perform(Action::Failed("offline".to_string()));
+
+        assert!(model.server.handles.is_empty());
+        assert!(first.units() > 0);
+        assert_eq!(second.units(), 0);
     }
 }

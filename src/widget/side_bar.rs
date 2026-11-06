@@ -17,6 +17,7 @@ pub fn side_bar(state: &Translator) -> Container<'_, Message> {
         side_bar_toggle(state).width(Length::Fill),
         side_bar_button(View::Translation, &state.view),
         side_bar_button(View::Consensus, &state.view),
+        side_bar_button(View::Glossary, &state.view),
         side_bar_button(View::Format, &state.view),
         side_bar_button(View::Doc, &state.view),
     ]))

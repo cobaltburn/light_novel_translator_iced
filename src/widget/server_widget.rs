@@ -1,6 +1,6 @@
 use crate::{
     actions::server::{self, Action},
-    model::{Method, Server, Think},
+    model::{MAX_NUM_CTX, Method, Server, Think},
 };
 use iced::{
     Element, Length, Padding,
@@ -78,8 +78,8 @@ pub fn num_ctx_input(state: &Server) -> Element<'_, Action> {
             text("Context size (tokens):"),
             NumberInput::new(
                 &state.settings.num_ctx,
-                2048..=262144,
-                server::Action::SetNumCtx
+                2048..=MAX_NUM_CTX,
+                Action::SetNumCtx
             )
             .step(4096)
             .ignore_scroll(true),

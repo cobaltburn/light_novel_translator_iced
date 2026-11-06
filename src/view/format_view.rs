@@ -1,11 +1,11 @@
 use crate::{actions::format::Action, model::Format};
-use iced::alignment::Horizontal;
-use iced::widget::{Column, image, text_input};
-use iced::widget::{button, column, container, row, scrollable, space::vertical, text};
+use iced::widget::{
+    Column, Row, button, column, container, container::transparent, image, row, scrollable,
+    space::vertical, text, text_input,
+};
 use iced::{
     Border, Color, Element, Length, Padding,
-    alignment::Vertical,
-    widget::{Row, container::transparent},
+    alignment::{Horizontal, Vertical},
 };
 
 pub fn format_view(model: &Format) -> Element<'_, Action> {

@@ -21,7 +21,7 @@ pub enum Error {
     BuildError(&'static str),
 
     #[error("Error: {0}")]
-    Error(String),
+    Error(&'static str),
 
     #[error(transparent)]
     IOError(#[from] std::io::Error),

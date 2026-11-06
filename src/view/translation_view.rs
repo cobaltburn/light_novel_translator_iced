@@ -11,19 +11,18 @@ use crate::{
         num_ctx_input, ollama_input, server_setting_input, think_selector,
     },
 };
+use iced::widget::{
+    Button, Column, Container, Row, button, column, container, container::transparent, lazy, row,
+    rule, scrollable, space::vertical, stack, text,
+};
 use iced::{
     Border, Color, Element, Function, Length, Padding, Renderer, Theme,
     alignment::Vertical,
-    border::Radius,
-    widget::{
-        Button, Column, Container, Row, container::transparent, lazy, rule, space::vertical, stack,
-    },
+    border::{self, Radius},
 };
-use iced::{
-    border,
-    widget::{button, column, container, row, scrollable, text},
+use iced_aw::{
+    ContextMenu, Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar, tab_bar::Position,
 };
-use iced_aw::{ContextMenu, Menu, MenuBar, TabBar, card::Status, menu::Item, style::tab_bar};
 use std::{collections::BTreeMap, iter};
 
 pub fn translation_view(
@@ -34,9 +33,11 @@ pub fn translation_view(
 
     let mut tabs = TabBar::with_tab_labels(tabs, Message::SelectTab)
         .set_active_tab(&tab_id)
-        .padding(Padding::new(0.0).left(1))
+        .padding(Padding::new(0.0))
+        .set_position(Position::Left)
         .height(Length::Fixed(40.0))
         .text_size(13.0)
+        .icon_size(20.0)
         .style(|theme, status| match status {
             Status::Active | Status::Hovered => tab_bar::Style {
                 text_color: Color::BLACK,
@@ -202,8 +203,8 @@ fn menu_bar(
 
 fn translate_button(model: &Translation) -> Button<'_, Action> {
     let (button_text, message) = if !model.server.handles.is_empty() {
-        ("cancel", Some(Action::CancelTranslate))
-    } else if !model.server.connected() || model.file_name().is_none() {
+        ("cancel", Some(Action::Cancel))
+    } else if !model.server.connected() || model.epub_name().is_none() {
         ("translate", None)
     } else {
         let msg = Action::Translate(model.current_page);
@@ -262,6 +263,7 @@ fn epub_menu(model: &Translation) -> Item<'_, Action, Theme, Renderer> {
         menu_button("epub"),
         Menu::new(vec![
             Item::new(epub_select(model)),
+            Item::new(glossary_select(model)),
             Item::new(file_menu_buttons(model)),
         ])
         .spacing(10)
@@ -270,12 +272,12 @@ fn epub_menu(model: &Translation) -> Item<'_, Action, Theme, Renderer> {
 }
 
 fn file_menu_buttons(state: &Translation) -> Element<'_, Action> {
-    let file_name = state.file_name();
+    let file_name = state.epub_name();
     let recover =
         (file_name.is_some() && state.server.handles.is_empty()).then_some(Action::Recover);
     row![
         button(text("save").center())
-            .on_press_maybe(file_name.map(Action::SaveTranslation))
+            .on_press_maybe(file_name.map(|e| Action::Save(e.into_owned())))
             .padding(5),
         button(text("recover").center())
             .on_press_maybe(recover)
@@ -286,10 +288,10 @@ fn file_menu_buttons(state: &Translation) -> Element<'_, Action> {
     .into()
 }
 
-fn epub_select(model: &Translation) -> Row<'_, Action> {
+fn epub_select(model: &Translation) -> Element<'_, Action> {
     row![
         button(text("epub").center()).on_press(translation::Action::OpenEpub),
-        container(text(model.file_name().unwrap_or_default()))
+        container(text(model.epub_name().unwrap_or_default()))
             .width(Length::Fill)
             .padding(5)
             .style(|theme| transparent(theme).border(Border {
@@ -301,4 +303,25 @@ fn epub_select(model: &Translation) -> Row<'_, Action> {
     .align_y(Vertical::Center)
     .padding(5)
     .spacing(10)
+    .into()
+}
+
+fn glossary_select(model: &Translation) -> Element<'_, Action> {
+    let can_select = model.file_path.is_some() && model.server.handles.is_empty();
+    let action = can_select.then_some(Action::OpenGlossary);
+    row![
+        button(text("glossary").center()).on_press_maybe(action),
+        container(text(model.glossary_name().unwrap_or_default()))
+            .width(Length::Fill)
+            .padding(5)
+            .style(|theme| transparent(theme).border(Border {
+                color: Color::WHITE,
+                width: 0.5,
+                radius: 5.into(),
+            }))
+    ]
+    .align_y(Vertical::Center)
+    .padding(5)
+    .spacing(10)
+    .into()
 }

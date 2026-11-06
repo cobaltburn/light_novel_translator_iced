@@ -20,6 +20,7 @@ use tokio::fs::{self, read_dir, read_to_string};
 pub mod consensus;
 pub mod doc;
 pub mod format;
+pub mod glossary;
 pub mod server;
 pub mod translation;
 
@@ -98,15 +99,15 @@ async fn write_files(files: Vec<(PathBuf, String)>) -> Result<()> {
     }
 }
 
-pub async fn save_file(file_name: String, contents: String) -> Result<()> {
+pub async fn save_file<T: AsRef<[u8]>>(file_name: impl Into<String>, content: T) -> Result<()> {
     let handle = rfd::AsyncFileDialog::new()
-        .set_title("save translation")
+        .set_title("save")
         .set_file_name(file_name)
         .save_file()
         .await;
 
     if let Some(handle) = handle {
-        handle.write(contents.as_bytes()).await?
+        handle.write(content.as_ref()).await?
     }
     Ok(())
 }
@@ -178,8 +179,8 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
     Ok((file_path, pages))
 }
 
-pub async fn complete_dialog(file_name: String) {
-    let file_name = Path::new(&file_name)
+pub async fn complete_dialog(file_name: impl AsRef<str>) {
+    let file_name = Path::new(file_name.as_ref())
         .file_prefix()
         .unwrap_or_default()
         .to_string_lossy();

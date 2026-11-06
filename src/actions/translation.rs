@@ -3,8 +3,9 @@ use crate::{
         complete_dialog, get_pages, load_recovery, page_markdown, pick_save_folder, save_file,
         save_pages, server,
     },
-    error::{Error, Result, ResultTaskExt as _, TaskResultExt},
-    message::select_epub,
+    controller::StreamAction,
+    error::{Result, ResultTaskExt as _, TaskResultExt},
+    message::{error_dialog, select_epub, select_glossary},
     model::{Activity, Page, Translation, absolute_page_path, check_all_pages, check_page_at},
     view::{DisplayType, scroll_to_section},
 };
@@ -28,8 +29,10 @@ pub enum Action {
         page: usize,
     },
     SaveRecovery(PathBuf),
-    Recover,
     RecoverPages(Vec<Page>),
+    Recover,
+    OpenGlossary,
+    SetGlossary(PathBuf, Vec<u8>),
     OpenEpub,
     SetEpub {
         name: PathBuf,
@@ -45,8 +48,9 @@ pub enum Action {
         page: usize,
         part: usize,
     },
-    CancelTranslate,
-    SaveTranslation(String),
+    Cancel,
+    Failed(String),
+    Save(String),
     ServerAction(server::Action),
     SetDisplay(DisplayType),
     ScrollToSection(usize),
@@ -61,7 +65,8 @@ impl Translation {
             Action::SetPage(page) => self.set_current_page(page).into(),
             Action::CleanText { page, part } => self.clean_text(page, part).into(),
             Action::PageComplete(page) => self.check_complete(page).into(),
-            Action::CancelTranslate => self.cancel(),
+            Action::Cancel => self.cancel(),
+            Action::Failed(message) => self.fail(message),
             Action::SavePages(path) => save_pages(&self.pages, &path),
             Action::SetEpub { name, pages } => self.set_epub(name, pages).into(),
             Action::SavePage { name, page } => self.save_page(name, page),
@@ -77,7 +82,7 @@ impl Translation {
             Action::OpenEpub => Task::future(select_epub())
                 .and_then(|(name, buffer)| Task::future(get_pages(name, buffer)))
                 .ok_or_display(|(name, pages)| Task::done(Action::SetEpub { name, pages })),
-            Action::SaveTranslation(file_name) => Task::future(pick_save_folder(file_name))
+            Action::Save(file_name) => Task::future(pick_save_folder(file_name))
                 .and_then(|path| Task::future(async { fs::create_dir(&path).await.map(|_| path) }))
                 .ok_or_display(|path| Task::done(Action::SavePages(path))),
             Action::RecoverPages(pages) => self.recover_pages(pages).into(),
@@ -86,6 +91,9 @@ impl Translation {
             Action::SetDisplay(display) => self.set_display(display).into(),
             Action::ScrollToSection(section) => scroll_to_section(section),
             Action::UpdateActivity(page, activity) => self.update_activity(page, activity).into(),
+            Action::OpenGlossary => Task::future(select_glossary())
+                .and_then(|(path, content)| Task::done(Action::SetGlossary(path, content))),
+            Action::SetGlossary(path, content) => self.set_glossary(path, content).ok_or_display(),
         }
     }
 
@@ -137,6 +145,16 @@ impl Translation {
         page.map_or_default(|page| Task::done(Action::PageComplete(page)))
     }
 
+    /// Stops the run and shows `message`. Streams that fail together each land
+    /// here, so only the first one, which finds the run still active, reports.
+    fn fail(&mut self, message: String) -> Task<Action> {
+        if self.server.handles.is_empty() {
+            return Task::none();
+        }
+        self.cancel()
+            .chain(Task::future(error_dialog(message)).discard())
+    }
+
     fn set_current_page(&mut self, page: usize) {
         self.current_page = page
     }
@@ -154,30 +172,27 @@ impl Translation {
 
     pub fn set_epub(&mut self, path: PathBuf, pages: Vec<Page>) {
         self.current_page = 0;
-        self.file_path = path;
+        self.file_path = Some(path);
         self.pages = pages;
+        self.glossary = None;
     }
 
-    fn check_ready(&self) -> Result<String> {
-        if !self.server.connected() {
-            return Err(Error::ServerError("Not connected to a server"));
-        }
-        self.server
-            .current_model
-            .clone()
-            .ok_or(Error::ServerError("No model selected"))
+    fn set_glossary(&mut self, path: PathBuf, content: Vec<u8>) -> Result<()> {
+        self.glossary = Some((path, String::from_utf8(content)?));
+        Ok(())
     }
 
     pub fn translate(&mut self, page: usize) -> Result<Task<Action>> {
-        let model = self.check_ready()?;
+        let model = self.server.check_ready()?;
 
         let Some(pages) = self.pages.get(..page + 1) else {
-            let file_name = self.file_name().unwrap_or_default();
+            let file_name = self.epub_name().unwrap_or_default().into_owned();
             self.server.abort();
             return Ok(Task::future(complete_dialog(file_name)).discard());
         };
 
-        let task = self.server.translate(pages, &model, page)?;
+        let glossary = self.glossary.as_ref().map(|e| e.1.as_str());
+        let task = self.server.translate(pages, &model, page, glossary)?;
         self.pages[page].clear();
 
         let complete_task = self.complete_task(page);
@@ -191,13 +206,14 @@ impl Translation {
     }
 
     pub fn translate_page(&mut self, page: usize) -> Result<Task<Action>> {
-        let model = self.check_ready()?;
+        let model = self.server.check_ready()?;
 
         let Some(pages) = self.pages.get(0..page + 1) else {
             return Ok(Task::done(server::Action::Abort.into()));
         };
 
-        let task = self.server.translate(pages, &model, page)?;
+        let glossary = self.glossary.as_ref().map(|e| e.1.as_str());
+        let task = self.server.translate(pages, &model, page, glossary)?;
         self.pages[page].clear();
 
         let complete_task = self.complete_task(page);
@@ -210,13 +226,16 @@ impl Translation {
     }
 
     pub fn translate_part(&mut self, page: usize, part: usize) -> Result<Task<Action>> {
-        let model = self.check_ready()?;
+        let model = self.server.check_ready()?;
 
         let Some(pages) = self.pages.get(..page + 1) else {
             return Ok(Task::done(server::Action::Abort.into()));
         };
 
-        let task = self.server.translate_part(pages, &model, page, part)?;
+        let glossary = self.glossary.as_ref().map(|e| e.1.as_str());
+        let task = self
+            .server
+            .translate_part(pages, &model, page, part, glossary)?;
         let current = &mut self.pages[page];
         current.sections[part].content.clear();
         current.errors.clear();
@@ -236,10 +255,13 @@ impl Translation {
     }
 
     fn backup_task(&mut self) -> Task<Action> {
-        let backup = self.file_path.with_extension("json");
+        let Some(path) = self.file_path.as_ref() else {
+            return Task::none();
+        };
 
-        self.server
-            .bind_handle(Task::done(Action::SaveRecovery(backup)))
+        self.server.bind_handle(Task::done(Action::SaveRecovery(
+            path.with_extension("json"),
+        )))
     }
 
     fn next_translate_task(&mut self, page: usize) -> Task<Action> {
@@ -264,5 +286,42 @@ impl Translation {
 impl From<server::Action> for Action {
     fn from(action: server::Action) -> Self {
         Action::ServerAction(action)
+    }
+}
+
+impl StreamAction for Action {
+    fn activity(page: usize, part: usize) -> Self {
+        Action::UpdateActivity(page, Activity::Active(part + 1))
+    }
+    fn update(content: String, page: usize, part: usize) -> Self {
+        Action::UpdateContent {
+            content,
+            page,
+            part,
+        }
+    }
+    fn fail(message: String) -> Self {
+        Action::Failed(message)
+    }
+    fn clean(page: usize, part: usize) -> Self {
+        Action::CleanText { page, part }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_first_of_several_failures_reports() {
+        let mut model = Translation::default();
+        _ = model.server.bind_handle(Task::<()>::none());
+
+        let first = model.perform(Action::Failed("offline".to_string()));
+        let second = model.perform(Action::Failed("offline".to_string()));
+
+        assert!(model.server.handles.is_empty());
+        assert!(first.units() > 0);
+        assert_eq!(second.units(), 0);
     }
 }

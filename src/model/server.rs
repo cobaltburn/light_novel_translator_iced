@@ -1,25 +1,44 @@
 use crate::{
-    actions::{consensus, server, translation},
+    actions::{consensus, glossary, server::Action, translation},
     controller::{
-        Client, SharedHistory, StreamAction, agent_stream, compact_history, seed_history,
-        shared_history,
+        Client, SharedHistory, StreamAction, compact_history, seed_history, shared_history,
     },
     error::{Error, Result},
     model::{Page, Section},
 };
 use iced::{Element, Task, task::Handle, widget::pick_list};
 use quick_xml::{Writer, events::BytesText};
-use rig::{Agent, message::Message};
+use rig::{
+    Agent, ErrorKind,
+    agent::MultiTurnStreamItem,
+    completion::FinishReason,
+    message::Message,
+    run::{CompletionCall, PromptError},
+    streaming::{Item, StreamEvent},
+};
 use serde::{Serialize, Serializer};
 use serde_json::Value;
-use std::{collections::HashMap, ffi::OsStr, io::Cursor, iter};
+use std::{collections::HashMap, ffi::OsStr, future, io::Cursor, iter};
 
 pub const TEMPERATURE: f64 = 0.8;
 pub const TOP_P: f64 = 0.8;
 pub const REPEAT_PENALTY: f64 = 1.0;
 pub const BATCH_SIZE: usize = 6;
 pub const DEFAULT_CONTEXT_WINDOW: usize = 10;
-pub const DEFAULT_NUM_CTX: u32 = 131072;
+pub const MAX_NUM_CTX: u32 = 1048576;
+pub const DEFAULT_NUM_CTX: u32 = MAX_NUM_CTX / 2;
+
+const GLOSSARY_CUT_OFF: &str = "The model hit its limit partway through a glossary pass, so the \
+     run stopped and kept the last complete pass. Try raising num_ctx.";
+
+/// What a streaming reply produces. rig only errors on a truncated reply with
+/// no text in it, so anything that needs the whole reply has to check.
+enum Reply {
+    /// A non-empty piece of the reply's text.
+    Text(String),
+    /// The reply hit a limit, so the text before this is not all of it.
+    Truncated,
+}
 
 #[derive(Default, Debug)]
 pub struct Server {
@@ -32,21 +51,18 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn connected(&self) -> bool {
-        self.client.connected()
-    }
-
     pub fn translate(
         &mut self,
         pages: &[Page],
         model: &str,
         page: usize,
+        glossary: Option<&str>,
     ) -> Result<Task<translation::Action>> {
         let (current, pages) = pages.split_last().expect("dont pass an empty array");
         let (seed, history) = self.seeded_history(newest_first(pages)).unzip();
-        let agent = self
-            .client
-            .translation_agent(model, &self.settings, history.clone())?;
+        let agent =
+            self.client
+                .translation_agent(model, &self.settings, history.clone(), glossary)?;
 
         let handles = &mut self.handles;
         let seed = seed.map_or_default(|seed| bind(handles, seed));
@@ -70,6 +86,7 @@ impl Server {
         model: &str,
         page: usize,
         part: usize,
+        glossary: Option<&str>,
     ) -> Result<Task<translation::Action>> {
         let (Page { sections, .. }, pages) = pages.split_last().unwrap();
         let (section, current_sections) = sections
@@ -80,7 +97,7 @@ impl Server {
         let (seed, history) = self.seeded_history(recent).unzip();
         let agent = self
             .client
-            .translation_agent(model, &self.settings, history)?;
+            .translation_agent(model, &self.settings, history, glossary)?;
         let seed = seed.unwrap_or_default();
         let task = stream_task(&agent, seed, &section.japanese, page, part);
 
@@ -142,6 +159,21 @@ impl Server {
 
         Ok(self.bind_handle(task))
     }
+
+    pub fn glossary(
+        &mut self,
+        model: &str,
+        prompt: impl Into<Message>,
+    ) -> Result<Task<glossary::Action>> {
+        use glossary::Action;
+        let agent = self.client.glossary_agent(model, &self.settings)?;
+        let task = reply_stream(agent, prompt).then(|reply| match reply {
+            Ok(Reply::Text(text)) => Task::done(Action::UpdateContent(text)),
+            Ok(Reply::Truncated) => fail_run(Error::Error(GLOSSARY_CUT_OFF), Action::Failed),
+            Err(error) => fail_run(error, Action::Failed),
+        });
+        Ok(self.bind_handle(task))
+    }
 }
 
 fn page_candidates<'a, 'b>(
@@ -151,7 +183,7 @@ fn page_candidates<'a, 'b>(
     candidates
         .get(page.file_prefix().unwrap_or_default())
         .map(Vec::as_slice)
-        .ok_or(Error::Error(String::from("missing candidate files")))
+        .ok_or(Error::Error("missing candidate files"))
 }
 
 fn consensus_task(
@@ -178,6 +210,58 @@ fn stream_task<A: StreamAction>(
     Task::done(A::activity(page, part))
         .chain(seed)
         .chain(agent_stream(agent.clone(), prompt, page, part))
+}
+
+fn agent_stream<A: StreamAction>(
+    agent: Agent,
+    prompt: impl Into<Message>,
+    page: usize,
+    part: usize,
+) -> Task<A> {
+    reply_stream(agent, prompt)
+        .then(move |reply| match reply {
+            Ok(Reply::Text(text)) => Task::done(A::update(text, page, part)),
+            Ok(Reply::Truncated) => Task::none(),
+            Err(error) if is_response_report(&error) => error.display_error(),
+            Err(error) => Task::done(A::clean(page, part)).chain(fail_run(error, A::fail)),
+        })
+        .chain(Task::done(A::clean(page, part)))
+}
+
+/// Prompts `agent` and yields its reply as it arrives.
+fn reply_stream(agent: Agent, prompt: impl Into<Message>) -> Task<Result<Reply>> {
+    let prompt = prompt.into();
+    Task::future(async move { agent.prompt(prompt).stream() })
+        .then(Task::stream)
+        .map_err(Error::from)
+        .and_then(|item| match item {
+            MultiTurnStreamItem::StreamAssistantItem(Item::Event(StreamEvent::Text {
+                text,
+                ..
+            })) if !text.is_empty() => Task::done(Ok(Reply::Text(text))),
+            MultiTurnStreamItem::CompletionCall(call) if is_truncated(&call) => {
+                Task::done(Ok(Reply::Truncated))
+            }
+            _ => Task::none(),
+        })
+}
+
+fn is_truncated(call: &CompletionCall) -> bool {
+    call.finish_reason
+        .as_ref()
+        .is_some_and(FinishReason::truncated_output)
+}
+
+/// Reports a fatal error, then waits to be aborted. Whatever is chained after
+/// the failing stream must not run, and the handler of `failed` aborts the run
+/// and shows the dialog, since a dialog bound to the run would die with it.
+fn fail_run<T: Send + 'static>(error: Error, failed: impl FnOnce(String) -> T) -> Task<T> {
+    log::error!("{error:#?}");
+    Task::done(failed(error.to_string())).chain(Task::future(future::pending()))
+}
+
+fn is_response_report(error: &Error) -> bool {
+    matches!(error, Error::PromptError(PromptError::Report(report)) if report.kind == ErrorKind::Response)
 }
 
 fn bind<T: 'static>(handles: &mut Vec<Handle>, task: Task<T>) -> Task<T> {
@@ -240,11 +324,15 @@ pub fn consensus_prompt(section: &str, candidates: &[&String]) -> Result<String>
 }
 
 impl Server {
-    pub fn model_pick_list(&self) -> Element<'_, server::Action> {
+    pub fn connected(&self) -> bool {
+        self.client.connected()
+    }
+
+    pub fn model_pick_list(&self) -> Element<'_, Action> {
         pick_list(
             self.models.as_slice(),
             self.current_model.as_ref(),
-            server::Action::SelectModel,
+            Action::SelectModel,
         )
         .width(250)
         .into()
@@ -263,6 +351,15 @@ impl Server {
             method: self.method,
             handles: Vec::new(),
         }
+    }
+
+    pub fn check_ready(&self) -> Result<String> {
+        if !self.connected() {
+            return Err(Error::ServerError("Not connected to a server"));
+        }
+        self.current_model
+            .clone()
+            .ok_or(Error::ServerError("No model selected"))
     }
 }
 
@@ -342,5 +439,26 @@ impl Method {
             }
             Method::History | Method::Chain => tasks.into_iter().fold(Task::none(), Task::chain),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rig::completion::Usage;
+
+    fn finished(reason: Option<FinishReason>) -> CompletionCall {
+        CompletionCall::new(0, Usage::default(), Value::Null).with_finish_reason(reason)
+    }
+
+    #[test]
+    fn a_reply_cut_off_by_the_context_limit_is_truncated() {
+        assert!(is_truncated(&finished(Some(FinishReason::Length))));
+    }
+
+    #[test]
+    fn a_reply_that_ended_or_gave_no_reason_is_not_truncated() {
+        assert!(!is_truncated(&finished(Some(FinishReason::Stop))));
+        assert!(!is_truncated(&finished(None)));
     }
 }

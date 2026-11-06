@@ -1,5 +1,5 @@
 use crate::{
-    actions::{consensus, doc, format, translation},
+    actions::{consensus, doc, format, glossary, translation},
     error::Error,
     model::Translator,
     view::View,
@@ -14,6 +14,7 @@ pub enum Message {
     TransAction(usize, translation::Action),
     FormatAction(format::Action),
     ConsensusAction(consensus::Action),
+    GlossaryAction(glossary::Action),
     SetView(View),
     ToggleSideBar,
     SelectTab(usize),
@@ -27,6 +28,7 @@ impl Translator {
         match message {
             Message::DocAction(action) => self.doc.perform(action).map(Into::into),
             Message::FormatAction(action) => self.format.perform(action).map(Into::into),
+            Message::GlossaryAction(action) => self.glossary.perform(action).map(Into::into),
             Message::ConsensusAction(action) => self.consensus.perform(action).map(Into::into),
             Message::TransAction(tab, action) => self.translation_action(tab, action),
             Message::SetView(view) => self.set_view(view).into(),
@@ -56,22 +58,41 @@ impl From<consensus::Action> for Message {
     }
 }
 
+impl From<glossary::Action> for Message {
+    fn from(action: glossary::Action) -> Self {
+        Message::GlossaryAction(action)
+    }
+}
+
 pub async fn select_epub() -> Option<(PathBuf, Vec<u8>)> {
     let handle = rfd::AsyncFileDialog::new()
         .set_title("select epub")
         .add_filter("epub", &["epub"])
         .pick_file()
         .await?;
-    let buf = handle.read().await;
-    Some((handle.path().to_path_buf(), buf))
+    let content = handle.read().await;
+    Some((handle.path().to_path_buf(), content))
+}
+
+pub async fn select_glossary() -> Option<(PathBuf, Vec<u8>)> {
+    let handle = rfd::AsyncFileDialog::new()
+        .set_title("select glossary")
+        .pick_file()
+        .await?;
+    let content = handle.read().await;
+    Some((handle.path().to_path_buf(), content))
 }
 
 pub async fn display_error<T: Into<Error>>(error: T) {
     let error: Error = error.into();
     log::error!("{:#?}", error);
+    error_dialog(error.to_string()).await;
+}
+
+pub async fn error_dialog(description: String) {
     _ = rfd::AsyncMessageDialog::new()
         .set_level(rfd::MessageLevel::Error)
-        .set_description(error.to_string())
+        .set_description(description)
         .set_buttons(rfd::MessageButtons::Ok)
         .set_title("error message")
         .show()

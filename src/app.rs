@@ -2,7 +2,7 @@ use crate::{
     error::Result,
     message::Message,
     model::Translator,
-    view::{View, consensus_view, doc_view, format_view, translation_view},
+    view::{View, consensus_view, doc_view, format_view, glossary_view, translation_view},
     widget::side_bar_container,
 };
 use iced::{
@@ -51,6 +51,7 @@ impl Translator {
             View::Translation => translation_view(&self.translations, self.active_tab),
             View::Format => format_view(&self.format).map(Into::into),
             View::Consensus => consensus_view(&self.consensus).map(Into::into),
+            View::Glossary => glossary_view(&self.glossary).map(Into::into),
         }
     }
 }

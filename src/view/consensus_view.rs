@@ -7,14 +7,11 @@ use crate::{
         think_selector,
     },
 };
-use iced::{
-    Border, Color, Element, Length, Padding, Renderer, Theme,
-    alignment::Vertical,
-    widget::{
-        Container, button, column, container, lazy, radio, row, scrollable, space::vertical, stack,
-        text,
-    },
+use iced::widget::{
+    Container, button, column, container, lazy, radio, row, scrollable, space::vertical, stack,
+    text,
 };
+use iced::{Border, Color, Element, Length, Padding, Renderer, Theme, alignment::Vertical};
 use iced_aw::{ContextMenu, Menu, MenuBar, menu::Item};
 
 pub fn consensus_view(model: &Consensus) -> Element<'_, consensus::Action> {
@@ -105,7 +102,7 @@ fn menu_bar(model @ Consensus { server, .. }: &Consensus) -> Element<'_, consens
 
 fn consensus_button(model: &Consensus) -> Element<'_, consensus::Action> {
     let (button_text, message) = if !model.server.handles.is_empty() {
-        ("cancel", Some(consensus::Action::CancelConsensus))
+        ("cancel", Some(consensus::Action::Cancel))
     } else if !model.server.connected()
         || model.file_name().is_none()
         || model.candidates.is_empty()
