@@ -2,9 +2,7 @@ use crate::{
     llm::Settings,
     page::DisplayType,
     screens::consensus::{Action, Candidate, Consensus},
-    server::{
-        self, Method, Server, num_ctx_input, ollama_input, server_setting_input, think_selector,
-    },
+    server::{self, Method, Server, ollama_input, server_setting_input, think_selector},
     ui::{SidebarAction, context_menu_button, menu_button, page_side_bar, rich_text_scrollable},
 };
 use iced::widget::{
@@ -119,7 +117,6 @@ fn server_menu(state: &Server) -> Item<'_, Action, Theme, Renderer> {
             Item::new(ollama_input().map(Into::into)),
             Item::new(think_selector(state).map(Into::into)),
             Item::new(execution_selector(state).map(Into::into)),
-            Item::new(num_ctx_input(state).map(Into::into)),
             Item::new(
                 server_setting_input("Top p:", top_p, 0.0..=1.0, server::Action::SetTopP)
                     .map(Into::into),

@@ -8,7 +8,11 @@ use crate::{
 };
 use reqwest_middleware::ClientBuilder;
 use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
-use rig::{Agent, AgentBuilder, providers::ollama, rig_reqwest::ReqwestMiddlewareClient};
+use rig::{
+    Agent, AgentBuilder,
+    providers::ollama::{Ollama, OllamaConfig},
+    rig_reqwest::ReqwestMiddlewareClient,
+};
 use std::time::Duration;
 
 const RETRY_DURATION: Duration = Duration::from_secs(240);
@@ -20,7 +24,7 @@ const MAX_RETRY_INTERVAL: Duration = Duration::from_secs(30);
 pub enum Client {
     #[default]
     Disconnected,
-    Ollama(ollama::Ollama),
+    Ollama(Ollama),
 }
 
 impl Client {
@@ -33,7 +37,7 @@ impl Client {
             .build()
             .into();
 
-        Client::Ollama(ollama::OllamaConfig::new().connect(http))
+        Client::Ollama(OllamaConfig::new().connect(http))
     }
 
     pub async fn get_models(&self) -> Result<Vec<String>> {

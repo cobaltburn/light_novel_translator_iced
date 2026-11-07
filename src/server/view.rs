@@ -1,5 +1,5 @@
 use crate::{
-    llm::{MAX_NUM_CTX, Think},
+    llm::Think,
     server::{self, Action, Method, Server},
 };
 use iced::{
@@ -75,26 +75,6 @@ pub fn context_window_input(state: &Server) -> Element<'_, Action> {
                 2..=20,
                 server::Action::SetWindow
             )
-        ]
-        .align_y(Vertical::Center)
-        .spacing(10),
-    )
-    .align_left(Length::Fill)
-    .padding(Padding::default().bottom(5))
-    .into()
-}
-
-pub fn num_ctx_input(state: &Server) -> Element<'_, Action> {
-    container(
-        row![
-            text("Context size (tokens):"),
-            NumberInput::new(
-                &state.settings.num_ctx,
-                2048..=MAX_NUM_CTX,
-                Action::SetNumCtx
-            )
-            .step(4096)
-            .ignore_scroll(true),
         ]
         .align_y(Vertical::Center)
         .spacing(10),

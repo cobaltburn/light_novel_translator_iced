@@ -1,12 +1,12 @@
-use crate::{page::Page, server::Server};
+use crate::server::Server;
 use std::{collections::VecDeque, path::PathBuf};
 
 #[derive(Default, Debug)]
 pub struct Glossary {
     pub server: Server,
     pub file_path: Option<PathBuf>,
-    pub pages: Vec<Page>,
-    /// Sections the current run has not sent yet.
+    pub chapters: Vec<String>,
+    /// Chapters the current run has not sent yet.
     pub pending: VecDeque<String>,
     /// The glossary from the last pass that finished.
     pub completed: String,

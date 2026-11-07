@@ -1,24 +1,26 @@
 use crate::{
     dialogs::{error_dialog, save_file, select_epub},
-    epub::get_pages,
+    epub::get_chapters,
     error::{Error, Result, ResultTaskExt, TaskResultExt},
-    llm::{GLOSSARY_PROMPT, Reply, fail_run, glossary_prompt, reply_stream},
-    page::Page,
+    llm::{Reply, fail_run, glossary_prompt, reply_stream},
     screens::glossary::Glossary,
     server,
     text::remove_think_tags,
 };
 use iced::Task;
-use std::{collections::VecDeque, mem, path::PathBuf};
+use std::{mem, path::PathBuf};
 
 const GLOSSARY_CUT_OFF: &str = "The model hit its limit partway through a glossary pass, so the \
-     run stopped and kept the last complete pass. Try raising num_ctx.";
+     run stopped and kept the last complete pass. Try a model with a larger context window.";
 
 #[non_exhaustive]
 #[derive(Debug, Clone)]
 pub enum Action {
     Server(server::Action),
-    SetEpub { path: PathBuf, pages: Vec<Page> },
+    SetEpub {
+        path: PathBuf,
+        chapters: Vec<String>,
+    },
     OpenEpub,
     Glossary,
     NextPart,
@@ -34,9 +36,9 @@ impl Glossary {
         match action {
             Action::Server(action) => self.server.perform(action).map(Into::into),
             Action::OpenEpub => Task::future(select_epub())
-                .and_then(|(path, buf)| Task::future(get_pages(path, buf)))
-                .ok_or_display(|(path, pages)| Task::done(Action::SetEpub { path, pages })),
-            Action::SetEpub { path, pages } => self.set_epub(path, pages).into(),
+                .and_then(|(path, buf)| Task::future(get_chapters(path, buf)))
+                .ok_or_display(|(path, chapters)| Task::done(Action::SetEpub { path, chapters })),
+            Action::SetEpub { path, chapters } => self.set_epub(path, chapters).into(),
             Action::UpdateContent(content) => self.update_content(content).into(),
             Action::Glossary => self.glossary().ok_or_display(),
             Action::NextPart => self.advance().ok_or_display(),
@@ -46,11 +48,11 @@ impl Glossary {
         }
     }
 
-    pub fn set_epub(&mut self, path: PathBuf, pages: Vec<Page>) {
+    pub fn set_epub(&mut self, path: PathBuf, chapters: Vec<String>) {
         self.stop();
         self.content.clear();
         self.file_path = Some(path);
-        self.pages = pages;
+        self.chapters = chapters;
     }
 
     pub fn update_content(&mut self, content: String) {
@@ -59,8 +61,7 @@ impl Glossary {
 
     pub fn glossary(&mut self) -> Result<Task<Action>> {
         self.server.check_ready()?;
-        let sections = self.pages.iter().flat_map(|page| &page.sections);
-        self.pending = sections.map(|s| s.japanese.clone()).collect();
+        self.pending = self.chapters.iter().cloned().collect();
         if self.pending.is_empty() {
             return Err(Error::Error("No text to read in this epub"));
         }
@@ -74,37 +75,31 @@ impl Glossary {
     }
 
     /// Keeps the pass that just ended, then sends the next part of the book
-    /// along with it. Parts are sized from the glossary so far, so a part is
-    /// only cut once the previous pass has finished.
+    /// along with it.
     fn next_part(&mut self) -> Result<Task<Action>> {
         let output = remove_think_tags(&self.content);
         if !output.trim().is_empty() {
             self.completed = output;
         }
-        if self.pending.is_empty() {
+        let Some(text) = self.pending.pop_front() else {
             self.stop();
             return Ok(Task::none());
-        }
+        };
 
-        let model = self.server.check_ready()?;
-        let budget = part_budget(self.server.settings.num_ctx, &self.completed);
-        let part = take_part(&mut self.pending, budget).ok_or(Error::Error(
-            "num_ctx is too small for the glossary and the next part of the book",
-        ))?;
-        let task = self.pass_task(&model, glossary_prompt(&self.completed, &part))?;
+        let task = self.pass_task(glossary_prompt(&self.completed, &text))?;
         self.content.clear();
 
-        // Bound, so cancelling never starts another pass.
         let next = self.server.bind_handle(Task::done(Action::NextPart));
         Ok(task.chain(next))
     }
 
     /// Streams one pass of the glossary into the content.
-    fn pass_task(&mut self, model: &str, prompt: String) -> Result<Task<Action>> {
+    fn pass_task(&mut self, prompt: String) -> Result<Task<Action>> {
+        let model = self.server.check_ready()?;
         let agent = self
             .server
             .client
-            .glossary_agent(model, &self.server.settings)?;
+            .glossary_agent(&model, &self.server.settings)?;
         let task = reply_stream(agent, prompt).then(|reply| match reply {
             Ok(Reply::Text(text)) => Task::done(Action::UpdateContent(text)),
             Ok(Reply::Truncated) => fail_run(Error::Error(GLOSSARY_CUT_OFF), Action::Failed),
@@ -138,29 +133,6 @@ impl Glossary {
     }
 }
 
-/// Characters of book text that fit in one pass. Counts one token per
-/// character, which is on the safe side for Japanese. `num_ctx` also has to
-/// hold the reply, so `existing` counts twice, once in and once back out, and
-/// a quarter is kept for what the pass adds and for reasoning.
-fn part_budget(num_ctx: u32, existing: &str) -> usize {
-    let reserved = GLOSSARY_PROMPT.chars().count() + existing.chars().count() * 2;
-    (num_ctx as usize * 3 / 4).saturating_sub(reserved)
-}
-
-/// Removes as many leading sections as fit in `budget` characters and joins
-/// them. Returns `None`, leaving `sections` alone, if the first does not fit.
-fn take_part(sections: &mut VecDeque<String>, budget: usize) -> Option<String> {
-    let mut used = 0;
-    let count = sections
-        .iter()
-        .take_while(|section| {
-            used += section.chars().count();
-            used <= budget
-        })
-        .count();
-    (count > 0).then(|| sections.drain(..count).collect::<Vec<_>>().join("\n\n"))
-}
-
 impl From<server::Action> for Action {
     fn from(action: server::Action) -> Self {
         Action::Server(action)
@@ -170,34 +142,10 @@ impl From<server::Action> for Action {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
-    fn sections(texts: &[&str]) -> VecDeque<String> {
+    fn chapters(texts: &[&str]) -> VecDeque<String> {
         texts.iter().map(ToString::to_string).collect()
-    }
-
-    #[test]
-    fn take_part_stops_at_the_budget_and_keeps_the_rest() {
-        let mut pending = sections(&["一二三", "四五", "六七八"]);
-
-        assert_eq!(take_part(&mut pending, 5).unwrap(), "一二三\n\n四五");
-        assert_eq!(pending, sections(&["六七八"]));
-    }
-
-    #[test]
-    fn take_part_refuses_a_section_it_cannot_fit() {
-        let mut pending = sections(&["一二三"]);
-
-        assert_eq!(take_part(&mut pending, 2), None);
-        assert_eq!(pending, sections(&["一二三"]));
-    }
-
-    #[test]
-    fn part_budget_shrinks_as_the_glossary_grows() {
-        let empty = part_budget(100_000, "");
-        let grown = part_budget(100_000, "用語集");
-
-        assert_eq!(grown, empty - 6);
-        assert_eq!(part_budget(100, ""), 0);
     }
 
     #[test]
@@ -205,7 +153,7 @@ mod tests {
         let mut model = Glossary {
             completed: "complete".to_string(),
             content: "cut sh".to_string(),
-            pending: sections(&["一"]),
+            pending: chapters(&["一"]),
             ..Default::default()
         };
 
@@ -232,7 +180,7 @@ mod tests {
         let mut model = Glossary {
             completed: "complete".to_string(),
             content: "cut sh".to_string(),
-            pending: sections(&["一"]),
+            pending: chapters(&["一"]),
             ..Default::default()
         };
         _ = model.server.bind_handle(Task::<()>::none());
@@ -249,7 +197,7 @@ mod tests {
         let mut model = Glossary {
             completed: "old book".to_string(),
             content: "old book, part 2".to_string(),
-            pending: sections(&["一"]),
+            pending: chapters(&["一"]),
             ..Default::default()
         };
 
@@ -268,7 +216,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(model.next_part().is_ok());
+        _ = model.next_part().unwrap();
 
         assert_eq!(model.content, "final");
     }
@@ -281,7 +229,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(model.next_part().is_ok());
+        _ = model.next_part().unwrap();
 
         assert_eq!(model.content, "earlier");
     }

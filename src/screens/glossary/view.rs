@@ -1,6 +1,6 @@
 use crate::{
     screens::glossary::{Action, Glossary},
-    server::{self, Server, num_ctx_input, ollama_input, server_setting_input, think_selector},
+    server::{self, Server, ollama_input, server_setting_input, think_selector},
     ui::{Spinner, menu_button, text_scrollable},
 };
 use iced::widget::{
@@ -61,7 +61,6 @@ fn server_menu(state @ Server { settings, .. }: &Server) -> Item<'_, Action, The
     let elements = [
         ollama_input(),
         think_selector(state),
-        num_ctx_input(state),
         server_setting_input(
             "Tempature:",
             settings.temperature,

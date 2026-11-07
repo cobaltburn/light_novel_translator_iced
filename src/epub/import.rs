@@ -1,5 +1,5 @@
 use crate::{
-    epub::html::{html_to_marked_markdown, toc_to_markdown},
+    epub::html::{html_to_markdown, html_to_marked_markdown, toc_to_markdown},
     error::Result,
     page::{Page, TOC_PAGE_PREFIX},
     text::{has_translatable_text, markdown_sections},
@@ -42,4 +42,17 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
         .collect();
 
     Ok((file_path, pages))
+}
+
+pub async fn get_chapters(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<String>)> {
+    let epub = Epub::read(Cursor::new(buffer))?;
+    let chapters = epub
+        .spine()
+        .iter()
+        .filter_map(|e| e.manifest_entry())
+        .map(|entry| html_to_markdown(&entry.read_str()?))
+        .filter(|m| m.as_ref().map_or(true, |t| has_translatable_text(t)))
+        .collect::<Result<_>>()?;
+
+    Ok((file_path, chapters))
 }

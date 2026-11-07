@@ -1,5 +1,3 @@
-//! Looks for signs that a section was translated badly.
-
 mod copy;
 mod frequency;
 

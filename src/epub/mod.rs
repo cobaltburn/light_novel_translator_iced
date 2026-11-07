@@ -1,5 +1,3 @@
-//! Reading source epubs and building translated ones.
-
 mod anchors;
 mod builder;
 mod chapter;
@@ -9,5 +7,5 @@ mod placement;
 mod resources;
 mod stylesheet;
 
-pub use builder::{DocBuilder, EpubMetadata, FormatPage};
-pub use import::get_pages;
+pub use builder::*;
+pub use import::*;

@@ -17,12 +17,8 @@ pub trait StreamAction: 'static + Send + Clone {
     fn clean(page: usize, part: usize) -> Self;
 }
 
-/// What a streaming reply produces. rig only errors on a truncated reply with
-/// no text in it, so anything that needs the whole reply has to check.
 pub enum Reply {
-    /// A non-empty piece of the reply's text.
     Text(String),
-    /// The reply hit a limit, so the text before this is not all of it.
     Truncated,
 }
 

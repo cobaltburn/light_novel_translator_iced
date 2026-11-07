@@ -5,14 +5,11 @@ pub const TEMPERATURE: f64 = 0.8;
 pub const TOP_P: f64 = 0.8;
 pub const REPEAT_PENALTY: f64 = 1.0;
 pub const DEFAULT_CONTEXT_WINDOW: usize = 10;
-pub const MAX_NUM_CTX: u32 = 1048576;
-pub const DEFAULT_NUM_CTX: u32 = MAX_NUM_CTX / 2;
 
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub think: Think,
     pub context_window: usize,
-    pub num_ctx: u32,
     pub temperature: f64,
     pub top_p: f64,
     pub repeat_penalty: f64,
@@ -23,7 +20,6 @@ impl Default for Settings {
         Self {
             think: Default::default(),
             context_window: DEFAULT_CONTEXT_WINDOW,
-            num_ctx: DEFAULT_NUM_CTX,
             temperature: TEMPERATURE,
             top_p: TOP_P,
             repeat_penalty: REPEAT_PENALTY,
@@ -37,7 +33,6 @@ impl Settings {
             "top_p": &self.top_p,
             "repeat_penalty": &self.repeat_penalty,
             "think": &self.think,
-            "num_ctx": &self.num_ctx,
         })
     }
 }

@@ -1,4 +1,8 @@
 use regex::Regex;
+use std::sync::LazyLock;
+
+static THINK_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<think>.*?</think>\s*").unwrap());
 
 pub fn clean_invisible_chars(text: &str) -> String {
     text.chars()
@@ -26,6 +30,5 @@ pub fn clean_invisible_chars(text: &str) -> String {
 }
 
 pub fn remove_think_tags(text: &str) -> String {
-    let rg = Regex::new(r"(?s)<think>.*?</think>\s*").unwrap();
-    rg.replace_all(text, "").to_string()
+    THINK_RE.replace_all(text, "").to_string()
 }
