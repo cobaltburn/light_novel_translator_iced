@@ -98,11 +98,11 @@ pub fn translation_glossary(glossary: &str) -> String {
 }
 
 /// One pass of glossary generation, in the layout `GLOSSARY_PROMPT` describes.
-pub fn glossary_prompt(existing: &str, book_text: &str) -> String {
-    if existing.is_empty() {
-        format!("BOOK TEXT:\n{book_text}")
-    } else {
+pub fn glossary_prompt(existing: Option<&str>, book_text: &str) -> String {
+    if let Some(existing) = existing {
         format!("EXISTING GLOSSARY:\n{existing}\n\nBOOK TEXT:\n{book_text}")
+    } else {
+        format!("BOOK TEXT:\n{book_text}")
     }
 }
 
@@ -295,9 +295,9 @@ mod tests {
 
     #[test]
     fn glossary_prompt_labels_each_input() {
-        assert_eq!(glossary_prompt("", "本文"), "BOOK TEXT:\n本文");
+        assert_eq!(glossary_prompt(None, "本文"), "BOOK TEXT:\n本文");
         assert_eq!(
-            glossary_prompt("# Characters", "本文"),
+            glossary_prompt(Some("# Characters"), "本文"),
             "EXISTING GLOSSARY:\n# Characters\n\nBOOK TEXT:\n本文"
         );
     }

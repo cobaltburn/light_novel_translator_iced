@@ -3,7 +3,9 @@ use crate::{
     page::DisplayType,
     screens::consensus::{Action, Candidate, Consensus},
     server::{self, Method, Server, ollama_input, server_setting_input, think_selector},
-    ui::{SidebarAction, context_menu_button, menu_button, page_side_bar, rich_text_scrollable},
+    widget::{
+        SidebarAction, context_menu_button, menu_button, page_side_bar, rich_text_scrollable,
+    },
 };
 use iced::widget::{
     Container, button, button::Status, column, container, radio, row, space::vertical, stack, text,

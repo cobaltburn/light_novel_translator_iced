@@ -1,6 +1,6 @@
 use crate::{
     page::{Activity, Page},
-    ui::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
+    widget::{active_mark, check_mark, context_menu_button, cross_mark, text_button},
 };
 use iced::{
     Border, Color, Element, Length, Padding,

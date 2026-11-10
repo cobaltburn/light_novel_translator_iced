@@ -4,15 +4,19 @@
 use crate::{
     error::{Error, Result},
     llm::{
-        SharedHistory, StreamAction, compact_history, consensus_prompt, seed_history,
-        shared_history, stream_task,
+        Reply, SharedHistory, StreamAction, compact_history, consensus_prompt, fail_run,
+        reply_stream, seed_history, shared_history, stream_task,
     },
     page::{Page, Section},
+    screens::glossary,
     server::{Method, Server, state::bind},
 };
 use iced::Task;
 use rig::{Agent, message::Message};
 use std::{collections::HashMap, ffi::OsStr};
+
+const GLOSSARY_CUT_OFF: &str = "The model hit its limit partway through a glossary pass, so the \
+     run stopped and kept the last complete pass. Try a model with a larger context window.";
 
 impl Server {
     pub fn translate<A: StreamAction>(
@@ -121,6 +125,20 @@ impl Server {
         let agent = self.client.consensus_agent(model, &self.settings)?;
         let task = consensus_task(&agent, section, candidates, page, part)?;
 
+        Ok(self.bind_handle(task))
+    }
+
+    /// Streams one pass of the glossary into the content.
+    pub fn glossary(&mut self, chapter: usize, prompt: String) -> Result<Task<glossary::Action>> {
+        let model = self.check_ready()?;
+        let agent = self.client.glossary_agent(&model, &self.settings)?;
+        let task = reply_stream(agent, prompt).then(move |reply| match reply {
+            Ok(Reply::Text(text)) => Task::done(glossary::Action::UpdateContent(chapter, text)),
+            Ok(Reply::Truncated) => {
+                fail_run(Error::Error(GLOSSARY_CUT_OFF), glossary::Action::Failed)
+            }
+            Err(error) => fail_run(error, glossary::Action::Failed),
+        });
         Ok(self.bind_handle(task))
     }
 }

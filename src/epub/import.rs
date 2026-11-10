@@ -1,4 +1,5 @@
 use crate::{
+    chapter::Chapter,
     epub::html::{html_to_markdown, html_to_marked_markdown, toc_to_markdown},
     error::Result,
     page::{Page, TOC_PAGE_PREFIX},
@@ -9,10 +10,8 @@ use std::{io::Cursor, iter, path::PathBuf};
 
 pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<Page>)> {
     let epub = Epub::read(Cursor::new(buffer))?;
-    let toc = toc_to_markdown(epub.toc()).ok().and_then(|markdown| {
-        let path = PathBuf::from(TOC_PAGE_PREFIX).with_extension("xhtml");
-        (!markdown.is_empty()).then_some(Page::new(path, vec![markdown]))
-    });
+    let path = PathBuf::from(TOC_PAGE_PREFIX).with_extension("xhtml");
+    let toc = Page::new(path, vec![toc_to_markdown(epub.toc())?]);
 
     let pages: Result<Vec<_>> = epub
         .spine()
@@ -36,7 +35,6 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
         .collect();
 
     let pages: Vec<_> = iter::once(toc)
-        .flatten()
         .chain(pages?)
         .filter(|p| !p.sections.is_empty())
         .collect();
@@ -44,15 +42,23 @@ pub async fn get_pages(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, 
     Ok((file_path, pages))
 }
 
-pub async fn get_chapters(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<String>)> {
+pub async fn get_chapters(file_path: PathBuf, buffer: Vec<u8>) -> Result<(PathBuf, Vec<Chapter>)> {
     let epub = Epub::read(Cursor::new(buffer))?;
-    let chapters = epub
+
+    let path = PathBuf::from(TOC_PAGE_PREFIX).with_extension("xhtml");
+    let toc = Chapter::new(path, toc_to_markdown(epub.toc())?);
+
+    let chapters: Vec<_> = epub
         .spine()
         .iter()
         .filter_map(|e| e.manifest_entry())
-        .map(|entry| html_to_markdown(&entry.read_str()?))
-        .filter(|m| m.as_ref().map_or(true, |t| has_translatable_text(t)))
+        .map(|entry| {
+            let html = entry.read_str()?;
+            let path = entry.href().decode().as_ref().into();
+            Ok(Chapter::new(path, html_to_markdown(&html)?))
+        })
+        .filter(|m| m.as_ref().map_or(true, |t| has_translatable_text(&t.text)))
         .collect::<Result<_>>()?;
 
-    Ok((file_path, chapters))
+    Ok((file_path, iter::once(toc).chain(chapters).collect()))
 }

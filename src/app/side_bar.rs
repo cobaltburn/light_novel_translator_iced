@@ -1,6 +1,6 @@
 use crate::{
     app::{Message, Translator, View},
-    ui::{ICONS, text_button},
+    widget::{ICONS, text_button},
 };
 use iced::widget::{Button, Container};
 use iced::{

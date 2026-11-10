@@ -12,7 +12,7 @@ use crate::{
     },
     screens::translation::Translation,
     server,
-    ui::scroll_to_section,
+    widget::scroll_to_section,
 };
 use iced::Task;
 use std::{collections::HashMap, mem, path::PathBuf};

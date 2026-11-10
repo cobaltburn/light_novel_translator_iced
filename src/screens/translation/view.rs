@@ -6,7 +6,7 @@ use crate::{
         self, Server, context_window_input, execution_selector, ollama_input, server_setting_input,
         think_selector,
     },
-    ui::{SidebarAction, context_menu_button, menu_button, page_side_bar, rich_text_scrollable},
+    widget::{SidebarAction, context_menu_button, menu_button, page_side_bar, rich_text_scrollable},
 };
 use iced::widget::{
     Button, Column, Container, Row, button, column, container, container::transparent, row, rule,

@@ -1,16 +1,14 @@
-use crate::server::Server;
+use crate::{chapter::Chapter, server::Server};
 use std::{collections::VecDeque, path::PathBuf};
 
 #[derive(Default, Debug)]
 pub struct Glossary {
     pub server: Server,
     pub file_path: Option<PathBuf>,
-    pub chapters: Vec<String>,
+    pub current_page: usize,
+    pub chapters: Vec<Chapter>,
     /// Chapters the current run has not sent yet.
-    pub pending: VecDeque<String>,
-    /// The glossary from the last pass that finished.
-    pub completed: String,
-    pub content: String,
+    pub pending: VecDeque<usize>,
 }
 
 impl Glossary {
@@ -31,5 +29,11 @@ impl Glossary {
                 .to_string_lossy()
                 .to_string(),
         )
+    }
+
+    pub fn current_content(&self) -> Option<&str> {
+        self.chapters
+            .get(self.current_page)
+            .map(|c| c.content.as_str())
     }
 }

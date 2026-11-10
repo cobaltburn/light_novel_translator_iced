@@ -1,6 +1,6 @@
 use crate::{
     screens::doc::{Action, Doc},
-    ui::text_scrollable,
+    widget::text_scrollable,
 };
 use iced::widget::{Container, button, column, container, pick_list, row, space::vertical, text};
 use iced::{Element, Length, Padding, alignment::Horizontal};

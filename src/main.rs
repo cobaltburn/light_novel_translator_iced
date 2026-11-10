@@ -3,6 +3,7 @@ use std::{fs::File, sync::Mutex};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod app;
+mod chapter;
 mod dialogs;
 mod epub;
 mod error;
@@ -11,7 +12,7 @@ mod page;
 mod screens;
 mod server;
 mod text;
-mod ui;
+mod widget;
 
 const LOG_FILE: &str = "light_novel_translator.log";
 

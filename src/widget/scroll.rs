@@ -51,20 +51,21 @@ pub fn text_scrollable<'a, E: 'a>(content: &'a str) -> Container<'a, E> {
             .wrapping(Wrapping::WordOrGlyph)
             .into()
     });
-    let scroll = scrollable(Column::with_children(chunks).width(Length::Fill))
-        .anchor_top()
-        .width(Length::Fill);
-    container(scroll)
-        .style(|theme| {
-            transparent(theme).border(Border {
-                color: Color::WHITE,
-                width: 1.0,
-                radius: 8.into(),
-            })
+    container(
+        scrollable(Column::with_children(chunks).width(Length::Fill))
+            .anchor_top()
+            .width(Length::Fill),
+    )
+    .style(|theme| {
+        transparent(theme).border(Border {
+            color: Color::WHITE,
+            width: 1.0,
+            radius: 8.into(),
         })
-        .height(Length::Fill)
-        .width(Length::Fill)
-        .padding(Padding::new(10.0).right(5))
+    })
+    .height(Length::Fill)
+    .width(Length::Fill)
+    .padding(Padding::new(10.0).right(5))
 }
 
 fn section_id(i: usize) -> Id {
